@@ -1,13 +1,15 @@
 import { ArrowRight, BellRing, Camera, ShieldCheck, Stethoscope } from "lucide-react";
 import Link from "next/link";
 
+import { BrandLogo } from "@/components/layout/brand-logo";
+
 export default function Home() {
   return (
     <div className="min-h-screen bg-[linear-gradient(140deg,#e0f2fe_0%,#ecfeff_38%,#f8fafc_70%,#ffffff_100%)]">
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-12 px-4 py-12 md:px-8 md:py-20">
         <section className="grid gap-8 rounded-3xl border bg-white/90 p-8 shadow-sm md:grid-cols-[1.1fr_0.9fr] md:p-12">
           <div className="space-y-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-700">CareGuideAI</p>
+            <BrandLogo href="/" imageClassName="h-14" priority />
             <h1 className="text-4xl font-bold leading-tight text-slate-900 md:text-5xl">
               ผู้ช่วยอัจฉริยะ
               <br />

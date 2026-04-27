@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { LogoutButton } from "@/components/auth/logout-button";
+import { BrandLogo } from "@/components/layout/brand-logo";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import type { Role } from "@/types/domain";
@@ -24,8 +25,8 @@ export const AppShell = ({ role, fullName, children }: AppShellProps) => (
   <div className="min-h-screen bg-[radial-gradient(circle_at_top,#ecfeff_0%,#f0fdfa_35%,#f8fafc_65%,#ffffff_100%)]">
     <header className="border-b bg-background/80 backdrop-blur">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
-        <div className="space-y-1">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">CareGuideAI</p>
+        <div className="space-y-2">
+          <BrandLogo href="/" imageClassName="h-11" />
           <h1 className="text-lg font-semibold">{fullName}</h1>
         </div>
         <div className="flex items-center gap-3">

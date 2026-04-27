@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { LoginForm } from "@/components/auth/login-form";
+import { BrandLogo } from "@/components/layout/brand-logo";
 
 interface LoginPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -18,7 +19,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       <main className="mx-auto flex min-h-screen w-full max-w-4xl items-center px-4 py-10 md:px-8">
         <div className="grid w-full gap-8 md:grid-cols-2">
           <section className="space-y-4">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-700">CareGuideAI</p>
+            <BrandLogo href="/" imageClassName="h-14" priority />
             <h1 className="text-4xl font-bold leading-tight text-slate-900">
               เข้าสู่ระบบ
               <br />

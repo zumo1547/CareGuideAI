@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Sarabun } from "next/font/google";
+
 import "./globals.css";
 
 const sarabun = Sarabun({
@@ -18,6 +19,11 @@ export const metadata: Metadata = {
   title: "CareGuideAI",
   description:
     "CareGuideAI - ระบบช่วยผู้พิการสแกนยา ติดตามเวลาใช้ยา และประสานงานคุณหมอแบบครบวงจร",
+  icons: {
+    icon: "/Logoweb/LogoWeb.png",
+    shortcut: "/Logoweb/LogoWeb.png",
+    apple: "/Logoweb/LogoWeb.png",
+  },
 };
 
 export default function RootLayout({
