@@ -19,11 +19,6 @@ export const metadata: Metadata = {
   title: "CareGuideAI",
   description:
     "CareGuideAI - ระบบช่วยผู้พิการสแกนยา ติดตามเวลาใช้ยา และประสานงานคุณหมอแบบครบวงจร",
-  icons: {
-    icon: "/Logoweb/LogoWeb.png",
-    shortcut: "/Logoweb/LogoWeb.png",
-    apple: "/Logoweb/LogoWeb.png",
-  },
 };
 
 export default function RootLayout({
