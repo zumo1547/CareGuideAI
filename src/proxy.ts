@@ -1,0 +1,50 @@
+import { NextResponse, type NextRequest } from "next/server";
+
+import { ROLE_GUARDED_ROUTES, ROLE_HOME } from "@/lib/constants";
+import { canAccessAnyRole, isRole } from "@/lib/rbac";
+import { createSupabaseMiddlewareClient } from "@/lib/supabase/middleware";
+
+const findRequiredRoles = (pathname: string) => {
+  const entries = Object.entries(ROLE_GUARDED_ROUTES);
+  for (const [path, roles] of entries) {
+    if (pathname.startsWith(path)) {
+      return roles;
+    }
+  }
+  return null;
+};
+
+export async function proxy(request: NextRequest) {
+  const response = NextResponse.next();
+  const supabase = createSupabaseMiddlewareClient(request, response);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", request.nextUrl.pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile || !isRole(profile.role)) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  const requiredRoles = findRequiredRoles(request.nextUrl.pathname);
+  if (requiredRoles && !canAccessAnyRole(profile.role, requiredRoles)) {
+    return NextResponse.redirect(new URL(ROLE_HOME[profile.role], request.url));
+  }
+
+  return response;
+}
+
+export const config = {
+  matcher: ["/app/:path*"],
+};

@@ -1,36 +1,120 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CareGuideAI
 
-## Getting Started
+CareGuideAI คือเว็บแอปช่วยผู้พิการจัดการยาแบบครบวงจร:
+- สแกนยาแบบ Hybrid (Barcode/QR + OCR fallback)
+- เสียงนำทางไทยระหว่างสแกนยา
+- ตารางกินยาแบบ preset + custom ต่อรายการยา
+- แจ้งเตือนผ่าน Mock SMS + Voice (Web TTS)
+- ติดต่อคุณหมอผ่านข้อความและนัดหมาย
+- RBAC 3 บทบาท: `patient`, `doctor`, `admin`
+- หมอเป็นระบบ `admin invite only`
 
-First, run the development server:
+## Tech Stack
+
+- Next.js (App Router) + React + TypeScript
+- Supabase (Postgres + Auth + RLS)
+- Tailwind CSS + shadcn/ui
+- OpenFDA search integration (ยา)
+- Vercel Cron (`/api/reminders/dispatch`)
+- Vitest + Playwright
+
+## Project Structure
+
+- `src/app` : หน้าเว็บและ API routes
+- `src/components` : UI components
+- `src/lib` : business logic (auth/rbac/reminders/scan/openfda)
+- `supabase/migrations` : SQL schema + RLS
+- `e2e` : Playwright tests
+
+## Environment
+
+คัดลอกไฟล์ตัวอย่างก่อน:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+ตั้งค่าตัวแปรอย่างน้อย:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_APP_URL` (เช่น `http://localhost:3000`)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Supabase Setup
 
-## Learn More
+1. สร้าง Supabase project
+2. เปิด SQL Editor แล้วรันไฟล์:
+- `supabase/migrations/0001_careguideai.sql`
+3. ตั้ง user แรกเป็น admin ด้วย SQL:
 
-To learn more about Next.js, take a look at the following resources:
+```sql
+update public.profiles
+set role = 'admin'
+where id = '<YOUR_USER_UUID>';
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Run Locally
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm install
+npm run dev
+```
 
-## Deploy on Vercel
+เปิด [http://localhost:3000](http://localhost:3000)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Scripts
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `npm run dev` - start dev server
+- `npm run build` - production build
+- `npm run lint` - lint
+- `npm run typecheck` - TypeScript check
+- `npm run test` - unit/integration tests (Vitest)
+- `npm run test:e2e` - e2e tests (Playwright)
+
+## API Contracts (Implemented)
+
+- `POST /api/scan/barcode`
+- `POST /api/scan/ocr`
+- `GET /api/medicines/search?q=...`
+- `POST /api/medication-plans`
+- `POST|GET /api/reminders/dispatch`
+- `POST /api/doctor/messages`
+- `POST /api/appointments`
+
+เพิ่มเติม:
+- `POST /api/auth/register`
+- `POST /api/admin/invite-doctor`
+- `POST /api/admin/assign-role`
+- `POST /api/admin/assign-patient-doctor`
+- `GET /api/reminders/pending`
+- `POST /api/reminders/ack`
+- `POST /api/adherence/log`
+
+## Vercel Deployment
+
+โปรเจกต์มี `vercel.json` ตั้ง cron ไว้แล้ว:
+- ทุก 5 นาที เรียก `/api/reminders/dispatch`
+
+ขั้นตอน:
+1. เชื่อม GitHub repo กับ Vercel
+2. ตั้ง Environment Variables ให้ครบ (เหมือน `.env.local`)
+3. Deploy branch `main`
+
+## GitHub Commands
+
+ถ้ายังไม่ตั้ง remote:
+
+```bash
+git init
+git add .
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/zumo1547/CareGuideAI.git
+git push -u origin main
+```
+
+## Notes
+
+- SMS ใน MVP ใช้ `MockSmsProvider` และเตรียม interface สำหรับต่อ Twilio ในรอบถัดไป
+- Voice notification ฝั่งผู้ใช้ทำผ่าน Web Speech API (ภาษาไทย)
