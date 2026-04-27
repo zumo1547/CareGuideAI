@@ -18,8 +18,8 @@ export default async function RegisterPage({ searchParams }: RegisterPageProps) 
     <div className="min-h-screen bg-[linear-gradient(180deg,#ecfeff_0%,#f8fafc_45%,#ffffff_100%)]">
       <main className="mx-auto flex min-h-screen w-full max-w-4xl items-center px-4 py-10 md:px-8">
         <div className="grid w-full gap-8 md:grid-cols-2">
-          <section className="space-y-4">
-            <BrandLogo href="/" imageClassName="h-14" priority />
+          <section className="space-y-4 reveal-up">
+            <BrandLogo href="/" imageClassName="h-14" />
             <h1 className="text-4xl font-bold leading-tight text-slate-900">
               สมัครใช้งาน
               <br />
@@ -32,7 +32,7 @@ export default async function RegisterPage({ searchParams }: RegisterPageProps) 
               มีบัญชีแล้ว? <Link href="/login">เข้าสู่ระบบ</Link>
             </p>
           </section>
-          <section>
+          <section className="reveal-up reveal-delay-1">
             <RegisterForm inviteTokenFromUrl={inviteToken} />
           </section>
         </div>

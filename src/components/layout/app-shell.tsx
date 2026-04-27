@@ -23,7 +23,7 @@ interface AppShellProps {
 
 export const AppShell = ({ role, fullName, children }: AppShellProps) => (
   <div className="min-h-screen bg-[radial-gradient(circle_at_top,#ecfeff_0%,#f0fdfa_35%,#f8fafc_65%,#ffffff_100%)]">
-    <header className="border-b bg-background/80 backdrop-blur">
+    <header className="border-b bg-background/80 backdrop-blur reveal-up">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
         <div className="space-y-2">
           <BrandLogo href="/" imageClassName="h-11" />
@@ -63,6 +63,8 @@ export const AppShell = ({ role, fullName, children }: AppShellProps) => (
         ) : null}
       </nav>
     </header>
-    <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6">{children}</main>
+    <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6 reveal-up reveal-delay-1">
+      {children}
+    </main>
   </div>
 );

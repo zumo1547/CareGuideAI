@@ -9,6 +9,7 @@ interface BrandLogoProps {
   imageClassName?: string;
   className?: string;
   priority?: boolean;
+  sizes?: string;
 }
 
 export const BrandLogo = ({
@@ -17,15 +18,17 @@ export const BrandLogo = ({
   imageClassName,
   className,
   priority = false,
+  sizes = "(max-width: 768px) 120px, 160px",
 }: BrandLogoProps) => {
   const content = (
     <div className={cn("inline-flex items-center gap-3", className)}>
       <Image
-        src="/Logoweb/LogoWeb.png"
+        src="/Logoweb/LogoWeb-web.png"
         alt="CareGuideAI Logo"
         width={168}
         height={168}
         priority={priority}
+        sizes={sizes}
         className={cn("h-12 w-auto object-contain", imageClassName)}
       />
       {showText ? (
