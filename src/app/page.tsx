@@ -8,7 +8,7 @@ export default function Home() {
     <div className="min-h-screen bg-[linear-gradient(140deg,#e0f2fe_0%,#ecfeff_38%,#f8fafc_70%,#ffffff_100%)]">
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-12 px-4 py-12 md:px-8 md:py-20">
         <section className="reveal-up grid gap-8 rounded-3xl border bg-white/90 p-8 shadow-sm md:grid-cols-[1.1fr_0.9fr] md:p-12">
-          <div className="space-y-5 reveal-up reveal-delay-1">
+          <div className="space-y-5">
             <BrandLogo href="/" imageClassName="h-14" priority />
             <h1 className="text-4xl font-bold leading-tight text-slate-900 md:text-5xl">
               ผู้ช่วยอัจฉริยะ
@@ -35,7 +35,7 @@ export default function Home() {
               </Link>
             </div>
           </div>
-          <div className="grid gap-4 rounded-2xl bg-slate-950 p-6 text-slate-100 reveal-up reveal-delay-2">
+          <div className="grid gap-4 rounded-2xl bg-slate-950 p-6 text-slate-100">
             <div className="rounded-xl border border-white/15 bg-white/5 p-4">
               <p className="text-xs uppercase tracking-wider text-slate-300">สถานะล่าสุด</p>
               <p className="mt-2 text-xl font-semibold">กำลังสแกนยา: Paracetamol 500 mg</p>
@@ -49,7 +49,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 reveal-up reveal-delay-3">
+        <section className="reveal-up reveal-delay-1 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {[
             {
               title: "สแกนยาแบบนำทาง",
