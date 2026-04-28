@@ -1,6 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { ROLE_GUARDED_ROUTES, ROLE_HOME } from "@/lib/constants";
+import {
+  isSchemaCacheMissingError,
+  readOnboardingProfileFromMetadata,
+} from "@/lib/onboarding-storage";
 import { canAccessAnyRole, isRole } from "@/lib/rbac";
 import { createSupabaseMiddlewareClient } from "@/lib/supabase/middleware";
 
@@ -44,7 +48,11 @@ export async function proxy(request: NextRequest) {
     .eq("user_id", user.id)
     .maybeSingle();
 
-  const hasCompletedOnboarding = !onboardingError && Boolean(onboardingProfile);
+  let hasCompletedOnboarding = !onboardingError && Boolean(onboardingProfile);
+  if (onboardingError && isSchemaCacheMissingError(onboardingError)) {
+    hasCompletedOnboarding = Boolean(readOnboardingProfileFromMetadata(user));
+  }
+
   if (!hasCompletedOnboarding && !isOnboardingRoute) {
     return NextResponse.redirect(new URL("/app/onboarding", request.url));
   }

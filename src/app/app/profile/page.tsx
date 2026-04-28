@@ -1,23 +1,35 @@
 import { OnboardingForm } from "@/components/profile/onboarding-form";
 import { requireSession } from "@/lib/auth/session";
 import type { OnboardingProfile } from "@/lib/onboarding";
+import {
+  isSchemaCacheMissingError,
+  ONBOARDING_PROFILE_SELECT_COLUMNS,
+  readOnboardingProfileFromMetadata,
+} from "@/lib/onboarding-storage";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function ProfilePage() {
   const session = await requireSession();
   const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("user_onboarding_profiles")
-    .select(
-      "user_id, disability_type, disability_other, disability_severity, chronic_conditions, regular_medications, drug_allergies, baseline_blood_pressure, baseline_blood_sugar, weight_kg, height_cm, bmi, need_tts, need_large_text, need_large_buttons, need_navigation_guidance, completed_at, created_at, updated_at",
-    )
+    .select(ONBOARDING_PROFILE_SELECT_COLUMNS)
     .eq("user_id", session.userId)
     .maybeSingle();
 
+  const metadataProfile = user ? readOnboardingProfileFromMetadata(user) : null;
+  const activeProfile = (
+    data ??
+    (error && isSchemaCacheMissingError(error) ? metadataProfile : null)
+  ) as OnboardingProfile | null;
+
   return (
     <div className="mx-auto max-w-4xl space-y-4">
-      <OnboardingForm initialProfile={data as OnboardingProfile | null} mode="profile" />
+      <OnboardingForm initialProfile={activeProfile} mode="profile" />
     </div>
   );
 }
