@@ -6,6 +6,10 @@ import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers
 import { normalizeScheduleInput } from "@/lib/medications/schedule";
 import { searchOpenFdaMedicines } from "@/lib/openfda";
 import { hasTwilioConfig } from "@/lib/reminders/twilio-sms-provider";
+import {
+  parseMedicationDetailsFromText,
+  validateParsedMedicationDetails,
+} from "@/lib/scan/ocr";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -14,6 +18,7 @@ const schema = z.object({
   selectedSourceId: z.string().optional(),
   dosage: z.string().min(1),
   notes: z.string().optional(),
+  ocrRawText: z.string().optional(),
   schedule: z.object({
     presets: z.array(z.enum(["morning", "noon", "evening"])).default([]),
     customTimes: z.array(z.string()).default([]),
@@ -40,6 +45,16 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createSupabaseServerClient();
+
+  if (payload.ocrRawText?.trim()) {
+    const parsedOcr = parseMedicationDetailsFromText(payload.ocrRawText);
+    const ocrValidation = validateParsedMedicationDetails(parsedOcr);
+    if (!ocrValidation.canConfirm) {
+      return badRequest(`OCR quality too low: ${ocrValidation.messageTh}`, {
+        ocrValidation,
+      });
+    }
+  }
 
   if (auth.role === "doctor" && patientId !== auth.userId) {
     const { data: link } = await supabase

@@ -15,6 +15,21 @@ export interface ParsedMedicationDetails {
   rawText: string;
 }
 
+export type OcrValidationIssue =
+  | "missing_name_en"
+  | "missing_name_th"
+  | "suspicious_name_en"
+  | "suspicious_name_th"
+  | "dosage_unclear"
+  | "low_confidence";
+
+export interface OcrValidationResult {
+  canConfirm: boolean;
+  score: number;
+  issues: OcrValidationIssue[];
+  messageTh: string;
+}
+
 const INSTRUCTION_SKIP_PATTERNS = [
   /รับประทาน/,
   /วันละ/,
@@ -47,6 +62,39 @@ const normalizeText = (text: string) =>
     .trim();
 
 const unique = <T>(items: T[]) => Array.from(new Set(items));
+const THAI_CHAR_REGEX = /[\u0E00-\u0E7F]/g;
+const ENGLISH_CHAR_REGEX = /[A-Za-z]/g;
+const OCR_NOISE_REGEX = /[“”"':;,_`~^|<>\[\]{}]+/g;
+const LEADING_SYMBOL_REGEX = /^[^A-Za-z\u0E00-\u0E7F]+/;
+const TRAILING_SYMBOL_REGEX = /[^A-Za-z\u0E00-\u0E7F0-9)]+$/;
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+const countMatches = (text: string, pattern: RegExp) => text.match(pattern)?.length ?? 0;
+
+const normalizeNameCandidate = (value: string) =>
+  value
+    .replace(OCR_NOISE_REGEX, " ")
+    .replace(/\s+/g, " ")
+    .replace(LEADING_SYMBOL_REGEX, "")
+    .replace(TRAILING_SYMBOL_REGEX, "")
+    .trim();
+
+const isValidEnglishMedicineName = (value: string) => {
+  const normalized = normalizeNameCandidate(value);
+  const englishChars = countMatches(normalized, ENGLISH_CHAR_REGEX);
+  if (englishChars < 5) return false;
+  if (!/[aeiou]/i.test(normalized)) return false;
+  if (!/[A-Za-z]{3,}/.test(normalized)) return false;
+  return /[A-Za-z][A-Za-z0-9\- ]{3,}/.test(normalized);
+};
+
+const isValidThaiMedicineName = (value: string) => {
+  const normalized = normalizeNameCandidate(value);
+  const thaiChars = countMatches(normalized, THAI_CHAR_REGEX);
+  if (thaiChars < 4) return false;
+  if (normalized.length < 4) return false;
+  return !/^[\u0E00-\u0E7F]\s*$/.test(normalized);
+};
 
 const matchEnglishDrugLine = (lines: string[]) =>
   lines.find((line) => /[A-Za-z]/.test(line) && /(mg|mcg|g|ml|tab|cap)/i.test(line));
@@ -60,24 +108,27 @@ const extractMedicineFromEnglishLine = (line: string | undefined) => {
   const cleaned = cleanLine(line);
   const bracketed = cleaned.match(/([A-Za-z][A-Za-z0-9\- ]{2,40})\s*\(/);
   if (bracketed?.[1]) {
-    return bracketed[1].trim();
+    const normalized = normalizeNameCandidate(bracketed[1]);
+    return isValidEnglishMedicineName(normalized) ? normalized : null;
   }
 
   const strengthMarker = cleaned.match(/(.+?)\s+\d+(?:\.\d+)?\s*(mg|mcg|g|ml)\b/i);
   if (strengthMarker?.[1]) {
-    return strengthMarker[1].trim();
+    const normalized = normalizeNameCandidate(strengthMarker[1]);
+    return isValidEnglishMedicineName(normalized) ? normalized : null;
   }
 
   const words = cleaned.match(/[A-Za-z][A-Za-z0-9\- ]{2,50}/);
-  return words?.[0]?.trim() ?? null;
+  const normalized = normalizeNameCandidate(words?.[0] ?? "");
+  return normalized && isValidEnglishMedicineName(normalized) ? normalized : null;
 };
 
 const extractMedicineFromThaiLine = (line: string | undefined) => {
   if (!line) return null;
-  const cleaned = cleanLine(line);
+  const cleaned = normalizeNameCandidate(cleanLine(line));
   if (cleaned.length < 2) return null;
   if (INSTRUCTION_SKIP_PATTERNS.some((pattern) => pattern.test(cleaned))) return null;
-  return cleaned;
+  return isValidThaiMedicineName(cleaned) ? cleaned : null;
 };
 
 const extractDoseTextLines = (lines: string[]) => {
@@ -154,6 +205,75 @@ const computeConfidence = (details: Omit<ParsedMedicationDetails, "confidence">)
   if (details.periods.length || details.customTimes.length) score += 0.1;
   if (details.mealTiming !== "unspecified") score += 0.1;
   return Math.min(0.98, Number(score.toFixed(2)));
+};
+
+const validationMessageFromIssues = (issues: OcrValidationIssue[]) => {
+  if (!issues.length) return "ข้อมูล OCR ชัดเจน สามารถยืนยันได้";
+  if (issues.includes("missing_name_th") || issues.includes("suspicious_name_th")) {
+    return "ชื่อยาไทยไม่ชัดเจน กรุณาสแกนใหม่ในแสงที่สว่างขึ้น";
+  }
+  if (issues.includes("missing_name_en") || issues.includes("suspicious_name_en")) {
+    return "ชื่อยาอังกฤษไม่ชัดเจน กรุณาสแกนใหม่ให้เห็นชื่อยาเต็มบรรทัด";
+  }
+  if (issues.includes("dosage_unclear")) {
+    return "รายละเอียดวิธีใช้ยาไม่ชัดเจน กรุณาสแกนใหม่";
+  }
+  return "ความมั่นใจ OCR ต่ำ กรุณาสแกนใหม่";
+};
+
+export const validateParsedMedicationDetails = (
+  details: ParsedMedicationDetails,
+): OcrValidationResult => {
+  const issues: OcrValidationIssue[] = [];
+  const medicineNameEn = details.medicineNameEn?.trim() ?? "";
+  const medicineNameTh = details.medicineNameTh?.trim() ?? "";
+
+  if (!medicineNameEn) {
+    issues.push("missing_name_en");
+  } else if (!isValidEnglishMedicineName(medicineNameEn)) {
+    issues.push("suspicious_name_en");
+  }
+
+  if (!medicineNameTh) {
+    issues.push("missing_name_th");
+  } else if (!isValidThaiMedicineName(medicineNameTh)) {
+    issues.push("suspicious_name_th");
+  }
+
+  const hasDoseInfo =
+    Boolean(details.quantityPerDose) ||
+    Boolean(details.frequencyPerDay) ||
+    details.periods.length > 0 ||
+    details.customTimes.length > 0 ||
+    details.mealTiming !== "unspecified";
+  if (!hasDoseInfo) {
+    issues.push("dosage_unclear");
+  }
+
+  if (details.confidence < 0.72) {
+    issues.push("low_confidence");
+  }
+
+  let score = 1;
+  if (issues.includes("missing_name_en")) score -= 0.28;
+  if (issues.includes("suspicious_name_en")) score -= 0.2;
+  if (issues.includes("missing_name_th")) score -= 0.26;
+  if (issues.includes("suspicious_name_th")) score -= 0.2;
+  if (issues.includes("dosage_unclear")) score -= 0.12;
+  if (issues.includes("low_confidence")) score -= 0.2;
+  score = Number(clamp01(score).toFixed(2));
+
+  const hasBlockingNameIssue = issues.some((issue) =>
+    ["missing_name_en", "missing_name_th", "suspicious_name_en", "suspicious_name_th"].includes(issue),
+  );
+  const canConfirm = !hasBlockingNameIssue && score >= 0.68;
+
+  return {
+    canConfirm,
+    score,
+    issues,
+    messageTh: validationMessageFromIssues(issues),
+  };
 };
 
 export const parseMedicationDetailsFromText = (inputText: string): ParsedMedicationDetails => {

@@ -8,6 +8,7 @@ import {
   extractLikelyMedicineQuery,
   extractTextFromImageFallback,
   parseMedicationDetailsFromText,
+  validateParsedMedicationDetails,
 } from "@/lib/scan/ocr";
 
 const schema = z.object({
@@ -37,10 +38,11 @@ export async function POST(request: Request) {
   }
 
   const parsedDetails = parseMedicationDetailsFromText(ocrText);
+  const validation = validateParsedMedicationDetails(parsedDetails);
   const query = extractLikelyMedicineQuery(ocrText);
 
   const supabase = await createSupabaseServerClient();
-  const { data: localMedicines } = query
+  const { data: localMedicines } = validation.canConfirm && query
     ? await supabase
         .from("medicines")
         .select("id, name, strength")
@@ -49,7 +51,7 @@ export async function POST(request: Request) {
     : { data: [] as { id: string; name: string; strength: string | null }[] };
 
   let matchedMedicine = localMedicines?.[0] ?? null;
-  if (!matchedMedicine && query) {
+  if (validation.canConfirm && !matchedMedicine && query) {
     const fdaResults = await searchOpenFdaMedicines(query);
     const first = fdaResults[0];
     if (first) {
@@ -71,25 +73,34 @@ export async function POST(request: Request) {
     }
   }
 
+  const effectiveMedicine = validation.canConfirm ? matchedMedicine : null;
+  const effectiveConfidence = validation.canConfirm
+    ? matchedMedicine
+      ? Math.max(0.72, parsedDetails.confidence)
+      : parsedDetails.confidence
+    : Math.min(parsedDetails.confidence, validation.score);
+
   await supabase.from("scan_sessions").insert({
     patient_id: resolvedPatientId,
-    medicine_id: matchedMedicine?.id ?? null,
+    medicine_id: effectiveMedicine?.id ?? null,
     guidance_state: "hold_steady",
     matched_via: "ocr",
-    confidence: matchedMedicine ? Math.max(0.72, parsedDetails.confidence) : parsedDetails.confidence,
+    confidence: effectiveConfidence,
     raw_payload: {
       ocrText,
       query,
       parsedDetails,
+      validation,
     },
   });
 
   return NextResponse.json({
-    guidance: "hold_steady",
-    foundMedicine: Boolean(matchedMedicine),
-    medicine: matchedMedicine,
+    guidance: validation.canConfirm ? "hold_steady" : "move_closer",
+    foundMedicine: Boolean(effectiveMedicine),
+    medicine: effectiveMedicine,
     ocrText,
     query,
     parsedDetails,
+    validation,
   });
 }

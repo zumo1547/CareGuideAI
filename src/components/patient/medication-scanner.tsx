@@ -16,7 +16,11 @@ import {
   guidanceToThaiSpeech,
   type DetectionFrame,
 } from "@/lib/scan/guidance";
-import { parseMedicationDetailsFromText } from "@/lib/scan/ocr";
+import {
+  parseMedicationDetailsFromText,
+  validateParsedMedicationDetails,
+  type OcrValidationResult,
+} from "@/lib/scan/ocr";
 import { speakThai, stopThaiSpeech, warmupSpeechSynthesis } from "@/lib/voice/speak";
 import type { ScanGuidanceState } from "@/types/domain";
 
@@ -61,6 +65,7 @@ interface OcrResponse {
   ocrText?: string;
   query?: string;
   parsedDetails?: ParsedMedicationDetails;
+  validation?: OcrValidationResult;
 }
 
 interface MedicationScannerProps {
@@ -110,11 +115,11 @@ const AUTO_FINALIZE_MIN_CONFIDENCE = 0.05;
 const AUTO_FINALIZE_MIN_TEXT_LENGTH = 12;
 const AUTO_FINALIZE_STABLE_FRAMES = 1;
 const SAFETY_WARNING_COOLDOWN_MS = 2800;
-const QUALITY_MIN_BRIGHTNESS = 0.2;
+const QUALITY_MIN_BRIGHTNESS = 0.25;
 const QUALITY_MAX_BRIGHTNESS = 0.92;
 const QUALITY_MIN_CONTRAST = 0.08;
 const QUALITY_MIN_SHARPNESS = 0.085;
-const NAME_CLARITY_MIN_SCORE = 0.64;
+const NAME_CLARITY_MIN_SCORE = 0.7;
 
 interface ScanCandidate {
   text: string;
@@ -283,10 +288,11 @@ const analyzeFrameQuality = (canvas: HTMLCanvasElement): ScanQualityMetrics | nu
 
 const evaluateScanSafety = (canvas: HTMLCanvasElement, normalizedText: string): ScanSafetyResult => {
   const parsed = parseMedicationDetailsFromText(normalizedText);
+  const validation = validateParsedMedicationDetails(parsed);
   const fallbackNameClarity = analyzeNameClarity(normalizedText);
   const hasEnglishName = Boolean(parsed.medicineNameEn?.trim()) || fallbackNameClarity.hasEnglishName;
   const hasThaiName = Boolean(parsed.medicineNameTh?.trim()) || fallbackNameClarity.hasThaiName;
-  const nameClarityScore = Math.max(parsed.confidence, fallbackNameClarity.nameClarityScore);
+  const nameClarityScore = Math.max(validation.score, parsed.confidence, fallbackNameClarity.nameClarityScore);
   const quality =
     analyzeFrameQuality(canvas) ??
     ({
@@ -331,6 +337,10 @@ const evaluateScanSafety = (canvas: HTMLCanvasElement, normalizedText: string): 
     blockingIssue = "low_contrast";
     statusMessage = "ฉลากยาไม่คมชัดพอ กรุณาปรับระยะหรือแสงให้ตัวอักษรตัดกับพื้นหลัง แล้วสแกนใหม่";
     voiceMessage = "ฉลากยาไม่คมชัดพอ กรุณาปรับแสง แล้วสแกนใหม่";
+  } else if (!validation.canConfirm) {
+    blockingIssue = "name_unclear";
+    statusMessage = `ข้อมูลชื่อยาไม่ปลอดภัยต่อการยืนยัน: ${validation.messageTh}`;
+    voiceMessage = "ชื่อยาไทยหรืออังกฤษยังไม่ชัดเจน กรุณาสแกนใหม่";
   } else if ((!hasEnglishName || !hasThaiName) && nameClarityScore < 0.82) {
     blockingIssue = "name_unclear";
     statusMessage = "ชื่อยาไทยหรืออังกฤษยังไม่ครบถ้วน กรุณาจัดฉลากให้อยู่กลางกรอบและสแกนใหม่";
@@ -581,6 +591,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const [ocrProgress, setOcrProgress] = useState<number | null>(null);
   const [scanCompletion, setScanCompletion] = useState(0);
   const [scanSafety, setScanSafety] = useState<ScanSafetyResult | null>(null);
+  const [ocrValidation, setOcrValidation] = useState<OcrValidationResult | null>(null);
   const [parsedDetails, setParsedDetails] = useState<ParsedMedicationDetails | null>(null);
   const [isCreatingPlan, setIsCreatingPlan] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -710,6 +721,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     lastSafetyIssueRef.current = null;
     lastSafetyWarningAtRef.current = 0;
     setScanSafety(null);
+    setOcrValidation(null);
   }, []);
 
   const ensureOcrWorker = useCallback(async () => {
@@ -758,6 +770,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       updateGuidance(result.guidance);
       setScanResult(result);
       setParsedDetails(null);
+      setOcrValidation(null);
       setPlanError(null);
       setPlanSuccess(null);
 
@@ -880,6 +893,20 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       setPlanError(null);
       setPlanSuccess(null);
 
+      const resolvedValidation =
+        result.validation ??
+        (result.parsedDetails ? validateParsedMedicationDetails(result.parsedDetails) : null);
+      setOcrValidation(resolvedValidation);
+
+      if (resolvedValidation && !resolvedValidation.canConfirm) {
+        const failMessage = `ยังยืนยันไม่ได้: ${resolvedValidation.messageTh}`;
+        setStatus(failMessage);
+        if (voiceEnabled && speakResult) {
+          speakThai(`ยังยืนยันไม่ได้ ${resolvedValidation.messageTh}`);
+        }
+        return result;
+      }
+
       if (result.foundMedicine && result.medicine?.name) {
         setStatus(`จับคู่ยาได้แล้ว: ${result.medicine.name}`);
         if (voiceEnabled && speakResult) {
@@ -914,7 +941,17 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       }
 
       try {
-        await submitOcrText(candidate.text, false);
+        const ocrResponse = await submitOcrText(candidate.text, false);
+        if (ocrResponse.validation?.canConfirm === false) {
+          setStatus(`ผล OCR ยังไม่ปลอดภัย: ${ocrResponse.validation.messageTh}`);
+          if (voiceEnabled) {
+            speakThai(`ผลสแกนยังไม่ปลอดภัย ${ocrResponse.validation.messageTh}`);
+          }
+          moveToConfirmationSection();
+          isFinalizingRef.current = false;
+          return;
+        }
+
         setStatus("วิเคราะห์อัตโนมัติเสร็จแล้ว เลื่อนลงเพื่อกดยืนยันได้เลย");
         moveToConfirmationSection();
       } catch (error) {
@@ -947,6 +984,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     setStatus("กำลังอ่านรูปฉลากยา...");
     setPlanError(null);
     setPlanSuccess(null);
+    setOcrValidation(null);
 
     try {
       const canvas = await createCanvasFromFile(file);
@@ -971,7 +1009,15 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       }
 
       setOcrText(normalizedText);
-      await submitOcrText(normalizedText, false);
+      const ocrResponse = await submitOcrText(normalizedText, false);
+      if (ocrResponse.validation?.canConfirm === false) {
+        setStatus(`ผล OCR ยังไม่ปลอดภัย: ${ocrResponse.validation.messageTh}`);
+        if (voiceEnabled) {
+          speakThai(`ผล OCR ยังไม่ปลอดภัย ${ocrResponse.validation.messageTh}`);
+        }
+        return;
+      }
+
       setStatus("อ่านฉลากจากรูปเสร็จแล้ว กรุณาตรวจสอบข้อมูลและกดยืนยัน");
       if (voiceEnabled) {
         speakThai("อ่านฉลากจากรูปสำเร็จ กรุณากดยืนยัน");
@@ -988,6 +1034,16 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const confirmAndCreateMedicationPlan = useCallback(async () => {
     if (!parsedDetails) {
       setPlanError("ยังไม่มีผล OCR สำหรับยืนยัน กรุณาสแกนฉลากยาก่อน");
+      return;
+    }
+
+    if (!ocrValidation) {
+      setPlanError("ยังไม่ผ่านการตรวจความน่าเชื่อถือ OCR กรุณาสแกนใหม่");
+      return;
+    }
+
+    if (!ocrValidation.canConfirm) {
+      setPlanError(`ยังยืนยันไม่ได้: ${ocrValidation.messageTh}`);
       return;
     }
 
@@ -1021,6 +1077,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
           notes:
             parsedDetails.dosageText?.trim() || `OCR confidence: ${(parsedDetails.confidence * 100).toFixed(0)}%`,
           schedule,
+          ocrRawText: parsedDetails.rawText || ocrText || undefined,
         }),
       });
 
@@ -1039,7 +1096,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     } finally {
       setIsCreatingPlan(false);
     }
-  }, [parsedDetails, patientId, scanResult, voiceEnabled]);
+  }, [ocrText, ocrValidation, parsedDetails, patientId, scanResult, voiceEnabled]);
 
   useEffect(() => {
     if (!isScanning || !isCameraSupported) {
@@ -1463,6 +1520,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                   resetAutoScanState();
                   setScanResult(null);
                   setParsedDetails(null);
+                  setOcrValidation(null);
                   setPlanError(null);
                   setPlanSuccess(null);
                   setLastDetectedBarcode(null);
@@ -1638,6 +1696,23 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
+                {ocrValidation ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={ocrValidation.canConfirm ? "default" : "destructive"}>
+                      ตรวจสอบความน่าเชื่อถือ {Math.round(ocrValidation.score * 100)}%
+                    </Badge>
+                  </div>
+                ) : null}
+
+                {ocrValidation && !ocrValidation.canConfirm ? (
+                  <Alert variant="destructive">
+                    <AlertTitle>ยังไม่อนุญาตให้ยืนยันผล</AlertTitle>
+                    <AlertDescription>
+                      {ocrValidation.messageTh} กรุณาสแกนใหม่ด้วยภาพที่สว่างและคมชัดกว่าเดิม
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+
                 <div className="grid gap-2 md:grid-cols-2">
                   <p>
                     <span className="text-muted-foreground">ชื่อยา (EN): </span>
@@ -1684,7 +1759,10 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                 </p>
 
                 <div className="flex flex-wrap gap-2 pt-1">
-                  <Button onClick={() => void confirmAndCreateMedicationPlan()} disabled={isCreatingPlan}>
+                  <Button
+                    onClick={() => void confirmAndCreateMedicationPlan()}
+                    disabled={isCreatingPlan || !ocrValidation?.canConfirm}
+                  >
                     {isCreatingPlan ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
