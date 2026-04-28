@@ -64,7 +64,7 @@ const normalizeText = (text: string) =>
 const unique = <T>(items: T[]) => Array.from(new Set(items));
 const THAI_CHAR_REGEX = /[\u0E00-\u0E7F]/g;
 const ENGLISH_CHAR_REGEX = /[A-Za-z]/g;
-const OCR_NOISE_REGEX = /[“”"':;,_`~^|<>\[\]{}]+/g;
+const OCR_NOISE_REGEX = /[\u201C\u201D"':;,_`~^|<>\[\]{}]+/g;
 const LEADING_SYMBOL_REGEX = /^[^A-Za-z\u0E00-\u0E7F]+/;
 const TRAILING_SYMBOL_REGEX = /[^A-Za-z\u0E00-\u0E7F0-9)]+$/;
 
@@ -96,11 +96,38 @@ const isValidThaiMedicineName = (value: string) => {
   return !/^[\u0E00-\u0E7F]\s*$/.test(normalized);
 };
 
-const matchEnglishDrugLine = (lines: string[]) =>
-  lines.find((line) => /[A-Za-z]/.test(line) && /(mg|mcg|g|ml|tab|cap)/i.test(line));
+const isInstructionLine = (line: string) =>
+  INSTRUCTION_SKIP_PATTERNS.some((pattern) => pattern.test(line));
 
-const matchThaiDrugLine = (lines: string[]) =>
-  lines.find((line) => /[ก-๙]/.test(line) && !INSTRUCTION_SKIP_PATTERNS.some((pattern) => pattern.test(line)));
+const hasEnglishDrugShape = (line: string) => {
+  if (!/[A-Za-z]/.test(line)) return false;
+  if (isInstructionLine(line)) return false;
+
+  const normalized = normalizeNameCandidate(line);
+  const englishChars = countMatches(normalized, ENGLISH_CHAR_REGEX);
+  if (englishChars < 5) return false;
+
+  return (
+    /(mg|mcg|g|ml|tab|cap)\b/i.test(normalized) ||
+    /\([A-Za-z0-9\- ]{3,}\)/.test(normalized) ||
+    /\b[A-Za-z][A-Za-z0-9\-]{3,}\b(?:\s+\b[A-Za-z][A-Za-z0-9\-]{2,}\b)?/.test(normalized)
+  );
+};
+
+const hasThaiDrugShape = (line: string) => {
+  if (!/[\u0E00-\u0E7F]/.test(line)) return false;
+  if (isInstructionLine(line)) return false;
+
+  const normalized = normalizeNameCandidate(line);
+  const thaiChars = countMatches(normalized, THAI_CHAR_REGEX);
+  return thaiChars >= 4;
+};
+
+const matchEnglishDrugLine = (lines: string[]) =>
+  lines.find((line) => /[A-Za-z]/.test(line) && /(mg|mcg|g|ml|tab|cap)\b/i.test(line)) ??
+  lines.find((line) => hasEnglishDrugShape(line));
+
+const matchThaiDrugLine = (lines: string[]) => lines.find((line) => hasThaiDrugShape(line));
 
 const extractMedicineFromEnglishLine = (line: string | undefined) => {
   if (!line) return null;
@@ -200,6 +227,8 @@ const fallbackPeriodsFromFrequency = (frequencyPerDay: number | null): DayPeriod
 const computeConfidence = (details: Omit<ParsedMedicationDetails, "confidence">) => {
   let score = 0.2;
   if (details.medicineQuery.length >= 3) score += 0.25;
+  if (details.medicineNameEn) score += 0.12;
+  if (details.medicineNameTh) score += 0.12;
   if (details.dosageText.length >= 8) score += 0.2;
   if (details.frequencyPerDay) score += 0.2;
   if (details.periods.length || details.customTimes.length) score += 0.1;
@@ -208,17 +237,14 @@ const computeConfidence = (details: Omit<ParsedMedicationDetails, "confidence">)
 };
 
 const validationMessageFromIssues = (issues: OcrValidationIssue[]) => {
-  if (!issues.length) return "ข้อมูล OCR ชัดเจน สามารถยืนยันได้";
-  if (issues.includes("missing_name_th") || issues.includes("suspicious_name_th")) {
-    return "ชื่อยาไทยไม่ชัดเจน กรุณาสแกนใหม่ในแสงที่สว่างขึ้น";
-  }
-  if (issues.includes("missing_name_en") || issues.includes("suspicious_name_en")) {
-    return "ชื่อยาอังกฤษไม่ชัดเจน กรุณาสแกนใหม่ให้เห็นชื่อยาเต็มบรรทัด";
-  }
-  if (issues.includes("dosage_unclear")) {
-    return "รายละเอียดวิธีใช้ยาไม่ชัดเจน กรุณาสแกนใหม่";
-  }
-  return "ความมั่นใจ OCR ต่ำ กรุณาสแกนใหม่";
+  if (!issues.length) return "OCR is clear. You can confirm this medicine.";
+  const hasThIssue = issues.includes("missing_name_th") || issues.includes("suspicious_name_th");
+  const hasEnIssue = issues.includes("missing_name_en") || issues.includes("suspicious_name_en");
+  if (hasThIssue && hasEnIssue) return "Thai and English medicine names are unclear. Please rescan.";
+  if (issues.includes("dosage_unclear")) return "Dosage instructions are unclear. Please rescan.";
+  if (hasThIssue) return "Thai medicine name is unclear. Please center the label and rescan.";
+  if (hasEnIssue) return "English medicine name is unclear. Please rescan with full line visible.";
+  return "OCR confidence is low. Please rescan.";
 };
 
 export const validateParsedMedicationDetails = (
@@ -227,16 +253,19 @@ export const validateParsedMedicationDetails = (
   const issues: OcrValidationIssue[] = [];
   const medicineNameEn = details.medicineNameEn?.trim() ?? "";
   const medicineNameTh = details.medicineNameTh?.trim() ?? "";
+  const hasValidEn = Boolean(medicineNameEn) && isValidEnglishMedicineName(medicineNameEn);
+  const hasValidTh = Boolean(medicineNameTh) && isValidThaiMedicineName(medicineNameTh);
+  const hasAnyValidName = hasValidEn || hasValidTh;
 
   if (!medicineNameEn) {
     issues.push("missing_name_en");
-  } else if (!isValidEnglishMedicineName(medicineNameEn)) {
+  } else if (!hasValidEn) {
     issues.push("suspicious_name_en");
   }
 
   if (!medicineNameTh) {
     issues.push("missing_name_th");
-  } else if (!isValidThaiMedicineName(medicineNameTh)) {
+  } else if (!hasValidTh) {
     issues.push("suspicious_name_th");
   }
 
@@ -250,23 +279,24 @@ export const validateParsedMedicationDetails = (
     issues.push("dosage_unclear");
   }
 
-  if (details.confidence < 0.72) {
+  if (details.confidence < 0.58) {
     issues.push("low_confidence");
   }
 
   let score = 1;
-  if (issues.includes("missing_name_en")) score -= 0.28;
-  if (issues.includes("suspicious_name_en")) score -= 0.2;
-  if (issues.includes("missing_name_th")) score -= 0.26;
-  if (issues.includes("suspicious_name_th")) score -= 0.2;
-  if (issues.includes("dosage_unclear")) score -= 0.12;
-  if (issues.includes("low_confidence")) score -= 0.2;
+  if (issues.includes("missing_name_en")) score -= 0.08;
+  if (issues.includes("suspicious_name_en")) score -= 0.16;
+  if (issues.includes("missing_name_th")) score -= 0.08;
+  if (issues.includes("suspicious_name_th")) score -= 0.16;
+  if (issues.includes("dosage_unclear")) score -= 0.14;
+  if (issues.includes("low_confidence")) score -= 0.12;
+  if (!hasAnyValidName) score -= 0.24;
   score = Number(clamp01(score).toFixed(2));
 
-  const hasBlockingNameIssue = issues.some((issue) =>
-    ["missing_name_en", "missing_name_th", "suspicious_name_en", "suspicious_name_th"].includes(issue),
-  );
-  const canConfirm = !hasBlockingNameIssue && score >= 0.68;
+  const canConfirm =
+    hasAnyValidName &&
+    score >= 0.45 &&
+    (!issues.includes("dosage_unclear") || details.confidence >= 0.7);
 
   return {
     canConfirm,

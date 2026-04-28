@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   const query = extractLikelyMedicineQuery(ocrText);
 
   const supabase = await createSupabaseServerClient();
-  const { data: localMedicines } = validation.canConfirm && query
+  const { data: localMedicines } = query
     ? await supabase
         .from("medicines")
         .select("id, name, strength")
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     : { data: [] as { id: string; name: string; strength: string | null }[] };
 
   let matchedMedicine = localMedicines?.[0] ?? null;
-  if (validation.canConfirm && !matchedMedicine && query) {
+  if (!matchedMedicine && query) {
     const fdaResults = await searchOpenFdaMedicines(query);
     const first = fdaResults[0];
     if (first) {
@@ -73,8 +73,28 @@ export async function POST(request: Request) {
     }
   }
 
-  const effectiveMedicine = validation.canConfirm ? matchedMedicine : null;
-  const effectiveConfidence = validation.canConfirm
+  const hasDoseSignal =
+    Boolean(parsedDetails.quantityPerDose) ||
+    Boolean(parsedDetails.frequencyPerDay) ||
+    parsedDetails.periods.length > 0 ||
+    parsedDetails.customTimes.length > 0 ||
+    parsedDetails.mealTiming !== "unspecified";
+  const hasStrongCatalogMatch =
+    Boolean(matchedMedicine) && query.trim().length >= 4 && parsedDetails.confidence >= 0.55;
+  const effectiveCanConfirm = validation.canConfirm || (hasStrongCatalogMatch && hasDoseSignal);
+  const effectiveValidation = effectiveCanConfirm
+    ? {
+        ...validation,
+        canConfirm: true,
+        score: Math.max(validation.score, hasStrongCatalogMatch ? 0.62 : validation.score),
+        messageTh: validation.canConfirm
+          ? validation.messageTh
+          : "ตรวจพบชื่อยาตรงฐานข้อมูลและวิธีใช้ยาแล้ว สามารถยืนยันได้",
+      }
+    : validation;
+
+  const effectiveMedicine = effectiveCanConfirm ? matchedMedicine : null;
+  const effectiveConfidence = effectiveCanConfirm
     ? matchedMedicine
       ? Math.max(0.72, parsedDetails.confidence)
       : parsedDetails.confidence
@@ -90,17 +110,17 @@ export async function POST(request: Request) {
       ocrText,
       query,
       parsedDetails,
-      validation,
+      validation: effectiveValidation,
     },
   });
 
   return NextResponse.json({
-    guidance: validation.canConfirm ? "hold_steady" : "move_closer",
+    guidance: effectiveCanConfirm ? "hold_steady" : "move_closer",
     foundMedicine: Boolean(effectiveMedicine),
     medicine: effectiveMedicine,
     ocrText,
     query,
     parsedDetails,
-    validation,
+    validation: effectiveValidation,
   });
 }

@@ -49,7 +49,9 @@ export async function POST(request: Request) {
   if (payload.ocrRawText?.trim()) {
     const parsedOcr = parseMedicationDetailsFromText(payload.ocrRawText);
     const ocrValidation = validateParsedMedicationDetails(parsedOcr);
-    if (!ocrValidation.canConfirm) {
+    const hasStrongManualInput =
+      payload.medicineQuery.trim().length >= 4 && payload.dosage.trim().length >= 4;
+    if (!ocrValidation.canConfirm && !hasStrongManualInput) {
       return badRequest(`OCR quality too low: ${ocrValidation.messageTh}`, {
         ocrValidation,
       });
