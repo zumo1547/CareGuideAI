@@ -37,6 +37,22 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
+  const isOnboardingRoute = request.nextUrl.pathname.startsWith("/app/onboarding");
+  const { data: onboardingProfile, error: onboardingError } = await supabase
+    .from("user_onboarding_profiles")
+    .select("user_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const hasCompletedOnboarding = !onboardingError && Boolean(onboardingProfile);
+  if (!hasCompletedOnboarding && !isOnboardingRoute) {
+    return NextResponse.redirect(new URL("/app/onboarding", request.url));
+  }
+
+  if (hasCompletedOnboarding && isOnboardingRoute) {
+    return NextResponse.redirect(new URL(ROLE_HOME[profile.role], request.url));
+  }
+
   const requiredRoles = findRequiredRoles(request.nextUrl.pathname);
   if (requiredRoles && !canAccessAnyRole(profile.role, requiredRoles)) {
     return NextResponse.redirect(new URL(ROLE_HOME[profile.role], request.url));

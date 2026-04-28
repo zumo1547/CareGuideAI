@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { LogoutButton } from "@/components/auth/logout-button";
 import { BrandLogo } from "@/components/layout/brand-logo";
@@ -10,9 +10,16 @@ const navByRole: Record<Role, { href: string; label: string }[]> = {
   patient: [
     { href: "/app/patient", label: "หน้าแดชบอร์ดผู้พิการ" },
     { href: "/app/scan", label: "สแกนยา" },
+    { href: "/app/profile", label: "แฟ้มข้อมูลของฉัน" },
   ],
-  doctor: [{ href: "/app/doctor", label: "หน้าแดชบอร์ดคุณหมอ" }],
-  admin: [{ href: "/app/admin", label: "หน้าแอดมิน" }],
+  doctor: [
+    { href: "/app/doctor", label: "หน้าแดชบอร์ดคุณหมอ" },
+    { href: "/app/profile", label: "แฟ้มข้อมูลของฉัน" },
+  ],
+  admin: [
+    { href: "/app/admin", label: "หน้าแอดมิน" },
+    { href: "/app/profile", label: "แฟ้มข้อมูลของฉัน" },
+  ],
 };
 
 interface AppShellProps {
