@@ -5,6 +5,7 @@ import { z } from "zod";
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
 import { normalizeScheduleInput } from "@/lib/medications/schedule";
 import { searchOpenFdaMedicines } from "@/lib/openfda";
+import { hasTwilioConfig } from "@/lib/reminders/twilio-sms-provider";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -157,7 +158,7 @@ export async function POST(request: Request) {
             channel: "sms" as const,
             due_at: dueAt.toISOString(),
             status: "pending",
-            provider: "mock-sms",
+            provider: hasTwilioConfig() ? "twilio" : "mock-sms",
           },
           {
             patient_id: patientId,

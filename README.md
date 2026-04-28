@@ -118,3 +118,9 @@ git push -u origin main
 
 - SMS ใน MVP ใช้ `MockSmsProvider` และเตรียม interface สำหรับต่อ Twilio ในรอบถัดไป
 - Voice notification ฝั่งผู้ใช้ทำผ่าน Web Speech API (ภาษาไทย)
+
+## Runtime SMS Provider
+
+- If `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_PHONE` are present, `/api/reminders/dispatch` sends real SMS via Twilio.
+- If one of these variables is missing, it automatically falls back to `MockSmsProvider`.
+- Use E.164 phone format for patient phone numbers, for example `+66812345678`.

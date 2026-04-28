@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import type { IScannerControls } from "@zxing/browser";
 import { Camera, Loader2, ScanLine } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -9,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { guidanceToThaiSpeech } from "@/lib/scan/guidance";
+import { guidanceToThaiSpeech, type DetectionFrame } from "@/lib/scan/guidance";
 import { speakThai } from "@/lib/voice/speak";
 import type { ScanGuidanceState } from "@/types/domain";
 
@@ -38,16 +39,68 @@ interface MedicationScannerProps {
   patientId: string;
 }
 
+type ScannerEngine = "barcode_detector" | "zxing";
+type ZxingPointLike = { getX: () => number; getY: () => number };
+type ZxingResultLike = {
+  getText?: () => string;
+  getResultPoints?: () => ZxingPointLike[];
+};
+
 const COOL_DOWN_MS = 2500;
 const DETECT_INTERVAL_MS = 1000;
 const SPEAK_COOLDOWN_MS = 1400;
+
+const preferredVideoConstraints = (): MediaTrackConstraints => ({
+  facingMode: { ideal: "environment" },
+  width: { ideal: 1920 },
+  height: { ideal: 1080 },
+});
+
+const extractFrameFromZxingResult = (
+  result: ZxingResultLike | undefined,
+  videoEl: HTMLVideoElement | null,
+): DetectionFrame | undefined => {
+  if (!result?.getResultPoints || !videoEl) {
+    return undefined;
+  }
+
+  const points = result.getResultPoints();
+  if (!points?.length) {
+    return undefined;
+  }
+
+  const xs = points.map((point) => point.getX()).filter((value) => Number.isFinite(value));
+  const ys = points.map((point) => point.getY()).filter((value) => Number.isFinite(value));
+  if (!xs.length || !ys.length) {
+    return undefined;
+  }
+
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+
+  return {
+    frameWidth: videoEl.videoWidth || 1,
+    frameHeight: videoEl.videoHeight || 1,
+    x: minX,
+    y: minY,
+    width,
+    height,
+  };
+};
 
 export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectorRef = useRef<BarcodeDetector | null>(null);
+  const zxingControlsRef = useRef<IScannerControls | null>(null);
   const timerRef = useRef<number | null>(null);
   const inflightDetectRef = useRef(false);
+  const isScanningRef = useRef(false);
   const lastSpokenAtRef = useRef(0);
   const lastScannedAtRef = useRef(0);
   const lastGuidanceRef = useRef<ScanGuidanceState>("move_closer");
@@ -60,9 +113,16 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const [isScanning, setIsScanning] = useState(false);
   const [isStartingCamera, setIsStartingCamera] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResponse | OcrResponse | null>(null);
+  const [activeEngine, setActiveEngine] = useState<ScannerEngine | null>(null);
 
+  const isCameraSupported =
+    typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
   const isBarcodeDetectorSupported =
     typeof window !== "undefined" && "BarcodeDetector" in window;
+
+  useEffect(() => {
+    isScanningRef.current = isScanning;
+  }, [isScanning]);
 
   const updateGuidance = useCallback((nextGuidance: ScanGuidanceState, forceSpeak = false) => {
     setGuidance((previous) => (previous === nextGuidance ? previous : nextGuidance));
@@ -91,6 +151,11 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
 
     inflightDetectRef.current = false;
     detectorRef.current = null;
+
+    if (zxingControlsRef.current) {
+      zxingControlsRef.current.stop();
+      zxingControlsRef.current = null;
+    }
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -125,6 +190,25 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     [patientId, updateGuidance],
   );
 
+  const submitScannedBarcode = useCallback(
+    async (barcode: string, frame?: DetectionFrame) => {
+      const now = Date.now();
+      if (now - lastScannedAtRef.current < COOL_DOWN_MS) return;
+      lastScannedAtRef.current = now;
+
+      try {
+        await callBarcodeApi({
+          barcode,
+          frame,
+        });
+        setStatus("จับบาร์โค้ดได้แล้ว");
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "สแกนไม่สำเร็จ");
+      }
+    },
+    [callBarcodeApi],
+  );
+
   const scanManualBarcode = async () => {
     if (!manualBarcode.trim()) return;
 
@@ -132,10 +216,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     setStatus("กำลังตรวจสอบบาร์โค้ด...");
 
     try {
-      await callBarcodeApi({ barcode: manualBarcode.trim() });
-      setStatus("สแกนบาร์โค้ดสำเร็จ");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "สแกนไม่สำเร็จ");
+      await submitScannedBarcode(manualBarcode.trim());
     } finally {
       setLoading(false);
     }
@@ -183,109 +264,164 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   };
 
   useEffect(() => {
-    if (!isBarcodeDetectorSupported || !isScanning) {
+    if (!isScanning || !isCameraSupported) {
       return;
     }
 
     let cancelled = false;
 
-    const scheduleNextDetection = () => {
-      if (cancelled) return;
-      timerRef.current = window.setTimeout(() => {
-        void detectLoop();
-      }, DETECT_INTERVAL_MS);
-    };
+    const startWithBarcodeDetector = async () => {
+      if (!videoRef.current) return;
 
-    const detectLoop = async () => {
-      if (
-        cancelled ||
-        inflightDetectRef.current ||
-        !detectorRef.current ||
-        !videoRef.current ||
-        videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
-      ) {
-        scheduleNextDetection();
+      const openStream = async () => {
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            video: preferredVideoConstraints(),
+            audio: false,
+          });
+        } catch {
+          return navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
+      };
+
+      const stream = await openStream();
+      if (cancelled) {
+        stream.getTracks().forEach((track) => track.stop());
         return;
       }
 
-      inflightDetectRef.current = true;
+      streamRef.current = stream;
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
 
-      try {
-        const barcodes = await detectorRef.current.detect(videoRef.current);
+      const Detector = window.BarcodeDetector;
+      if (!Detector) {
+        throw new Error("BarcodeDetector ไม่พร้อมใช้งาน");
+      }
 
-        if (!barcodes.length) {
+      detectorRef.current = new Detector({
+        formats: ["qr_code", "ean_13", "ean_8", "code_128", "upc_a", "upc_e"],
+      });
+
+      const scheduleNextDetection = () => {
+        if (cancelled) return;
+        timerRef.current = window.setTimeout(() => {
+          void detectLoop();
+        }, DETECT_INTERVAL_MS);
+      };
+
+      const detectLoop = async () => {
+        if (
+          cancelled ||
+          inflightDetectRef.current ||
+          !detectorRef.current ||
+          !videoRef.current ||
+          videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+        ) {
+          scheduleNextDetection();
+          return;
+        }
+
+        inflightDetectRef.current = true;
+
+        try {
+          const barcodes = await detectorRef.current.detect(videoRef.current);
+
+          if (!barcodes.length) {
+            updateGuidance("move_closer");
+            return;
+          }
+
+          const current = barcodes[0];
+          if (!current.rawValue || !current.boundingBox) {
+            return;
+          }
+
+          const frame: DetectionFrame = {
+            frameWidth: videoRef.current.videoWidth || 1,
+            frameHeight: videoRef.current.videoHeight || 1,
+            x: current.boundingBox.x,
+            y: current.boundingBox.y,
+            width: current.boundingBox.width,
+            height: current.boundingBox.height,
+          };
+
+          await submitScannedBarcode(current.rawValue, frame);
+        } catch {
+          setStatus("กำลังอ่านภาพจากกล้อง...");
+        } finally {
+          inflightDetectRef.current = false;
+          scheduleNextDetection();
+        }
+      };
+
+      setStatus("พร้อมสแกนแบบกล้อง");
+      scheduleNextDetection();
+    };
+
+    const startWithZxing = async () => {
+      if (!videoRef.current) return;
+
+      const { BrowserMultiFormatReader } = await import("@zxing/browser");
+      const reader = new BrowserMultiFormatReader(undefined, {
+        delayBetweenScanAttempts: DETECT_INTERVAL_MS,
+        delayBetweenScanSuccess: DETECT_INTERVAL_MS,
+      });
+
+      const callback = (result: unknown) => {
+        if (!isScanningRef.current) return;
+
+        const decoded = result as ZxingResultLike | undefined;
+        const value = decoded?.getText?.();
+        if (!value) {
           updateGuidance("move_closer");
           return;
         }
 
-        const current = barcodes[0];
-        if (!current.rawValue || !current.boundingBox) {
-          return;
-        }
+        const frame = extractFrameFromZxingResult(decoded, videoRef.current);
+        void submitScannedBarcode(value, frame);
+      };
 
-        const now = Date.now();
-        if (now - lastScannedAtRef.current < COOL_DOWN_MS) {
-          return;
-        }
-
-        lastScannedAtRef.current = now;
-
-        const frame = {
-          frameWidth: videoRef.current.videoWidth || 1,
-          frameHeight: videoRef.current.videoHeight || 1,
-          x: current.boundingBox.x,
-          y: current.boundingBox.y,
-          width: current.boundingBox.width,
-          height: current.boundingBox.height,
-        };
-
-        await callBarcodeApi({
-          barcode: current.rawValue,
-          frame,
-        });
-
-        setStatus("จับบาร์โค้ดได้แล้ว");
+      let controls: IScannerControls;
+      try {
+        controls = await reader.decodeFromConstraints(
+          {
+            video: preferredVideoConstraints(),
+            audio: false,
+          },
+          videoRef.current,
+          (result) => callback(result),
+        );
       } catch {
-        setStatus("กำลังอ่านภาพจากกล้อง...");
-      } finally {
-        inflightDetectRef.current = false;
-        scheduleNextDetection();
+        controls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) =>
+          callback(result),
+        );
       }
+
+      if (cancelled) {
+        controls.stop();
+        return;
+      }
+
+      zxingControlsRef.current = controls;
+      setStatus("พร้อมสแกนแบบกล้อง (ZXing)");
     };
 
     const startScanner = async () => {
-      if (!videoRef.current) return;
-
       setIsStartingCamera(true);
 
+      const engine: ScannerEngine = isBarcodeDetectorSupported ? "barcode_detector" : "zxing";
+      setActiveEngine(engine);
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-          audio: false,
-        });
-
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
+        if (engine === "barcode_detector") {
+          await startWithBarcodeDetector();
+        } else {
+          await startWithZxing();
         }
-
-        streamRef.current = stream;
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-
-        const Detector = window.BarcodeDetector;
-        if (!Detector) {
-          setStatus("BarcodeDetector ไม่พร้อมใช้งาน");
-          setIsScanning(false);
-          return;
-        }
-
-        detectorRef.current = new Detector({
-          formats: ["qr_code", "ean_13", "ean_8", "code_128", "upc_a", "upc_e"],
-        });
-
-        setStatus("พร้อมสแกนแบบกล้อง");
-        scheduleNextDetection();
       } catch {
         setStatus("ไม่สามารถเปิดกล้องได้ กรุณาอนุญาตสิทธิ์กล้อง");
         setIsScanning(false);
@@ -301,8 +437,16 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     return () => {
       cancelled = true;
       stopScanner();
+      setActiveEngine(null);
     };
-  }, [callBarcodeApi, isBarcodeDetectorSupported, isScanning, stopScanner, updateGuidance]);
+  }, [
+    isBarcodeDetectorSupported,
+    isCameraSupported,
+    isScanning,
+    stopScanner,
+    submitScannedBarcode,
+    updateGuidance,
+  ]);
 
   useEffect(() => {
     if (!isScanning) {
@@ -324,9 +468,18 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   useEffect(() => () => stopScanner(), [stopScanner]);
 
   const guidanceLabel = useMemo(() => guidanceToThaiSpeech(guidance), [guidance]);
-  const resolvedStatus = isBarcodeDetectorSupported
-    ? status
-    : "เบราว์เซอร์นี้ไม่รองรับ BarcodeDetector ใช้โหมดกรอกโค้ดแทน";
+
+  const resolvedStatus = useMemo(() => {
+    if (!isCameraSupported) {
+      return "อุปกรณ์นี้ไม่รองรับการเปิดกล้องผ่านเบราว์เซอร์";
+    }
+
+    if (activeEngine === "zxing" && isScanning) {
+      return `${status} (โหมดรองรับมือถือ)`;
+    }
+
+    return status;
+  }, [activeEngine, isCameraSupported, isScanning, status]);
 
   return (
     <Card className="shadow-sm">
@@ -348,7 +501,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
           </AlertDescription>
         </Alert>
 
-        {isBarcodeDetectorSupported ? (
+        {isCameraSupported ? (
           <>
             <div className="flex flex-wrap gap-2">
               <Button

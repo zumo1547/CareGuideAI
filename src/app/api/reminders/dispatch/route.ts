@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { getApiAuthContext } from "@/lib/api/auth-helpers";
 import { env } from "@/lib/env";
 import { makeReminderMessage, shouldDispatchNow } from "@/lib/reminders/engine";
-import { MockSmsProvider } from "@/lib/reminders/mock-sms-provider";
+import { getSmsProvider } from "@/lib/reminders/sms-provider";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const isCronAuthorized = (request: Request) => {
@@ -46,6 +46,7 @@ const dispatch = async (request: Request) => {
       success: true,
       scanned: 0,
       sent: 0,
+      provider: getSmsProvider().providerName,
       message: "No pending reminders in dispatch window",
     });
   }
@@ -64,7 +65,7 @@ const dispatch = async (request: Request) => {
     : { data: [] as { id: string; name: string }[] };
 
   const medicineMap = new Map((medicines ?? []).map((item) => [item.id, item.name]));
-  const smsProvider = new MockSmsProvider();
+  const smsProvider = getSmsProvider();
   let sent = 0;
   let failed = 0;
 
@@ -122,6 +123,7 @@ const dispatch = async (request: Request) => {
     scanned: events.length,
     sent,
     failed,
+    provider: smsProvider.providerName,
     timestamp: now.toISOString(),
   });
 };
