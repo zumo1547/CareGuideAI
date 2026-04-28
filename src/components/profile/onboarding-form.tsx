@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CheckCircle2, Loader2, Stethoscope } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { useRouter } from "next/navigation";
 
@@ -36,9 +36,9 @@ const toNumber = (value: unknown, fallback: number) => {
 };
 
 const defaultsFromProfile = (profile: OnboardingProfile | null): OnboardingFormValues => ({
-  disabilityType: profile?.disability_type ?? "visual",
+  disabilityType: profile?.disability_type ?? "normal",
   disabilityOther: profile?.disability_other ?? "",
-  disabilitySeverity: profile?.disability_severity ?? "moderate",
+  disabilitySeverity: profile?.disability_severity ?? "none",
   chronicConditions: profile?.chronic_conditions ?? "",
   regularMedications: profile?.regular_medications ?? "",
   drugAllergies: profile?.drug_allergies ?? "",
@@ -61,6 +61,7 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
   const {
     register,
     control,
+    setValue,
     handleSubmit,
     formState: { errors },
   } = useForm<OnboardingFormValues>({
@@ -78,6 +79,18 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
     if (!nextWeight || !nextHeight) return 0;
     return calculateBmi(nextWeight, nextHeight);
   }, [heightCm, weightKg]);
+
+  useEffect(() => {
+    if (disabilityType === "normal") {
+      setValue("disabilitySeverity", "none", { shouldValidate: true });
+      setValue("disabilityOther", "");
+      return;
+    }
+
+    if (disabilityType !== "other") {
+      setValue("disabilityOther", "");
+    }
+  }, [disabilityType, setValue]);
 
   const submit = handleSubmit(async (values) => {
     setLoading(true);
@@ -171,12 +184,20 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
                   name="disabilitySeverity"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={(value) => field.onChange(value ?? "moderate")}>
+                    <Select
+                      value={field.value}
+                      onValueChange={(value) =>
+                        field.onChange(value ?? (disabilityType === "normal" ? "none" : "moderate"))
+                      }
+                    >
                       <SelectTrigger className="w-full">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {DISABILITY_SEVERITY.map((value) => (
+                        {(disabilityType === "normal"
+                          ? (["none"] as const)
+                          : DISABILITY_SEVERITY.filter((item) => item !== "none")
+                        ).map((value) => (
                           <SelectItem key={value} value={value}>
                             {DISABILITY_SEVERITY_LABELS[value]}
                           </SelectItem>
@@ -185,6 +206,9 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
                     </Select>
                   )}
                 />
+                {errors.disabilitySeverity ? (
+                  <p className="text-sm text-destructive">{errors.disabilitySeverity.message}</p>
+                ) : null}
               </div>
             </div>
 

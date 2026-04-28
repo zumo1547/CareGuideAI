@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const DISABILITY_TYPES = [
+  "normal",
   "visual",
   "hearing",
   "mobility",
@@ -9,6 +10,7 @@ export const DISABILITY_TYPES = [
 ] as const;
 
 export const DISABILITY_TYPE_LABELS: Record<(typeof DISABILITY_TYPES)[number], string> = {
+  normal: "ผู้ใช้ปกติ (ไม่มีความพิการ)",
   visual: "ทางการมองเห็น (ตาบอด / สายตาเลือนลาง)",
   hearing: "ทางการได้ยิน (หูหนวก / หูตึง)",
   mobility: "ทางการเคลื่อนไหว",
@@ -16,9 +18,10 @@ export const DISABILITY_TYPE_LABELS: Record<(typeof DISABILITY_TYPES)[number], s
   other: "อื่น ๆ (ระบุ)",
 };
 
-export const DISABILITY_SEVERITY = ["mild", "moderate", "severe"] as const;
+export const DISABILITY_SEVERITY = ["none", "mild", "moderate", "severe"] as const;
 
 export const DISABILITY_SEVERITY_LABELS: Record<(typeof DISABILITY_SEVERITY)[number], string> = {
+  none: "ไม่ระบุ (ผู้ใช้ปกติ)",
   mild: "เล็กน้อย",
   moderate: "ปานกลาง",
   severe: "รุนแรง",
@@ -47,6 +50,22 @@ export const onboardingSchema = z
         code: z.ZodIssueCode.custom,
         message: "โปรดระบุประเภทความพิการ",
         path: ["disabilityOther"],
+      });
+    }
+
+    if (value.disabilityType === "normal" && value.disabilitySeverity !== "none") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "ผู้ใช้ปกติต้องเลือกระดับเป็น ไม่ระบุ (ผู้ใช้ปกติ)",
+        path: ["disabilitySeverity"],
+      });
+    }
+
+    if (value.disabilityType !== "normal" && value.disabilitySeverity === "none") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "โปรดเลือกระดับความรุนแรง",
+        path: ["disabilitySeverity"],
       });
     }
   });

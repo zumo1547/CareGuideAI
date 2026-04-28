@@ -27,6 +27,13 @@ const SELECT_COLUMNS = `
 
 const unauthorized = () => NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+const toReadableDbError = (error: { message: string; code?: string | null }) => {
+  if (error.code === "PGRST205" || error.message.includes("schema cache")) {
+    return "ยังไม่พบตาราง user_onboarding_profiles ใน Supabase API schema cache โปรดรัน SQL ในโปรเจกต์เดียวกับที่เว็บใช้งาน และรัน `select pg_notify('pgrst', 'reload schema');` จากนั้นลองใหม่";
+  }
+  return error.message;
+};
+
 export async function GET() {
   const supabase = await createSupabaseServerClient();
   const {
@@ -42,7 +49,7 @@ export async function GET() {
     .maybeSingle();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: toReadableDbError(error) }, { status: 500 });
   }
 
   return NextResponse.json({
@@ -98,7 +105,7 @@ export async function POST(request: Request) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: toReadableDbError(error) }, { status: 500 });
   }
 
   return NextResponse.json({
