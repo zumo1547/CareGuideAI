@@ -16,10 +16,7 @@ const navByRole: Record<Role, { href: string; label: string }[]> = {
     { href: "/app/doctor", label: "หน้าแดชบอร์ดคุณหมอ" },
     { href: "/app/profile", label: "แฟ้มข้อมูลของฉัน" },
   ],
-  admin: [
-    { href: "/app/admin", label: "หน้าแอดมิน" },
-    { href: "/app/profile", label: "แฟ้มข้อมูลของฉัน" },
-  ],
+  admin: [{ href: "/app/admin", label: "หน้าแอดมิน" }],
 };
 
 interface AppShellProps {

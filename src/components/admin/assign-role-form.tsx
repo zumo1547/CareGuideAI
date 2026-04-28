@@ -9,8 +9,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { Role } from "@/types/domain";
 
-export const AssignRoleForm = () => {
+interface AssignRoleFormProps {
+  users: Array<{
+    id: string;
+    fullName: string;
+    role: Role;
+  }>;
+}
+
+export const AssignRoleForm = ({ users }: AssignRoleFormProps) => {
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState("patient");
   const [loading, setLoading] = useState(false);
@@ -69,7 +78,23 @@ export const AssignRoleForm = () => {
             id="assign-role-user-id"
             value={userId}
             onChange={(event) => setUserId(event.target.value)}
+            placeholder="วาง UUID หรือเลือกจากรายการด้านล่าง"
           />
+        </div>
+        <div className="space-y-2">
+          <Label>เลือกรายชื่อผู้ใช้</Label>
+          <Select value={userId || undefined} onValueChange={(value) => setUserId(value ?? "")}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="เลือกผู้ใช้เพื่อเติม User ID อัตโนมัติ" />
+            </SelectTrigger>
+            <SelectContent>
+              {users.map((user) => (
+                <SelectItem key={user.id} value={user.id}>
+                  {user.fullName} ({user.role})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="space-y-2">
           <Label>Role</Label>

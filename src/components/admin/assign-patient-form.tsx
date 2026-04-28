@@ -8,8 +8,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-export const AssignPatientForm = () => {
+interface AssignPatientFormProps {
+  patients: Array<{
+    id: string;
+    fullName: string;
+  }>;
+  doctors: Array<{
+    id: string;
+    fullName: string;
+  }>;
+}
+
+export const AssignPatientForm = ({ patients, doctors }: AssignPatientFormProps) => {
   const [patientId, setPatientId] = useState("");
   const [doctorId, setDoctorId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -70,7 +82,23 @@ export const AssignPatientForm = () => {
             id="assign-patient-id"
             value={patientId}
             onChange={(event) => setPatientId(event.target.value)}
+            placeholder="วาง UUID หรือเลือกจากรายการด้านล่าง"
           />
+        </div>
+        <div className="space-y-2">
+          <Label>เลือกผู้ป่วย</Label>
+          <Select value={patientId || undefined} onValueChange={(value) => setPatientId(value ?? "")}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="เลือกผู้ป่วยเพื่อเติม Patient ID" />
+            </SelectTrigger>
+            <SelectContent>
+              {patients.map((patient) => (
+                <SelectItem key={patient.id} value={patient.id}>
+                  {patient.fullName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="space-y-2">
           <Label htmlFor="assign-doctor-id">Doctor ID</Label>
@@ -78,7 +106,23 @@ export const AssignPatientForm = () => {
             id="assign-doctor-id"
             value={doctorId}
             onChange={(event) => setDoctorId(event.target.value)}
+            placeholder="วาง UUID หรือเลือกจากรายการด้านล่าง"
           />
+        </div>
+        <div className="space-y-2">
+          <Label>เลือกคุณหมอ</Label>
+          <Select value={doctorId || undefined} onValueChange={(value) => setDoctorId(value ?? "")}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="เลือกหมอเพื่อเติม Doctor ID" />
+            </SelectTrigger>
+            <SelectContent>
+              {doctors.map((doctor) => (
+                <SelectItem key={doctor.id} value={doctor.id}>
+                  {doctor.fullName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <Button onClick={submit} disabled={loading || !patientId || !doctorId}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
