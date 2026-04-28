@@ -16,7 +16,7 @@ import {
   guidanceToThaiSpeech,
   type DetectionFrame,
 } from "@/lib/scan/guidance";
-import { speakThai, warmupSpeechSynthesis } from "@/lib/voice/speak";
+import { speakThai, stopThaiSpeech, warmupSpeechSynthesis } from "@/lib/voice/speak";
 import type { ScanGuidanceState } from "@/types/domain";
 
 interface ScanResponse {
@@ -105,8 +105,8 @@ const SPEAK_COOLDOWN_MS = 1400;
 const AUTO_OCR_INTERVAL_MS = 2800;
 const OCR_MIN_TEXT_LENGTH = 12;
 const OCR_SUCCESS_MIN_CONFIDENCE = 0.38;
-const AUTO_FINALIZE_MIN_COMPLETION = 51;
-const AUTO_FINALIZE_MIN_CONFIDENCE = 0.15;
+const AUTO_FINALIZE_MIN_COMPLETION = 66;
+const AUTO_FINALIZE_MIN_CONFIDENCE = 0.05;
 const AUTO_FINALIZE_MIN_TEXT_LENGTH = 12;
 const AUTO_FINALIZE_STABLE_FRAMES = 1;
 
@@ -375,6 +375,10 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     (nextGuidance: ScanGuidanceState, forceSpeak = false) => {
       setGuidance((previous) => (previous === nextGuidance ? previous : nextGuidance));
 
+      if (!isScanningRef.current && !forceSpeak) {
+        return;
+      }
+
       if (!voiceEnabled) {
         return;
       }
@@ -422,6 +426,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
 
   const stopScanner = useCallback(() => {
     isScanningRef.current = false;
+    stopThaiSpeech();
 
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
@@ -645,22 +650,19 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
 
       isFinalizingRef.current = true;
       setScanCompletion(100);
-      setStatus("สแกนครบ 100% แล้ว กำลังหยุดสแกนเพื่อวิเคราะห์อัตโนมัติ");
+      setStatus("สแกนเสร็จสิ้น กำลังหยุดกล้องและวิเคราะห์อัตโนมัติ");
       stopScanner();
       setIsScanning(false);
       setOcrText(candidate.text);
       setOcrPreviewDataUrl(candidate.previewDataUrl);
 
       if (voiceEnabled) {
-        speakThai("สแกนครบแล้ว กำลังวิเคราะห์อัตโนมัติ กรุณารอสักครู่");
+        speakThai("สแกนเสร็จสิ้น ถ้าต้องการเริ่มใหม่ให้กดสแกนใหม่");
       }
 
       try {
         await submitOcrText(candidate.text, false);
         setStatus("วิเคราะห์อัตโนมัติเสร็จแล้ว เลื่อนลงเพื่อกดยืนยันได้เลย");
-        if (voiceEnabled) {
-          speakThai("วิเคราะห์เสร็จแล้ว กำลังเลื่อนไปด้านล่างเพื่อยืนยันผล");
-        }
         moveToConfirmationSection();
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "วิเคราะห์อัตโนมัติไม่สำเร็จ");
@@ -1304,11 +1306,11 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
             id="ocrText"
             value={ocrText}
             readOnly
-            placeholder="เมื่อสแกนครบ 100% ระบบจะเติมข้อความ OCR อัตโนมัติ"
+            placeholder="เมื่อสแกนเกิน 65% ระบบจะหยุดและเติมข้อความ OCR อัตโนมัติ"
             rows={5}
           />
           <p className="text-xs text-muted-foreground">
-            ไม่ต้องกดวิเคราะห์เอง ระบบจะหยุดสแกนและวิเคราะห์ให้อัตโนมัติทันทีเมื่อครบ 100%
+            ไม่ต้องกดวิเคราะห์เอง ระบบจะหยุดสแกนและวิเคราะห์ให้อัตโนมัติทันทีเมื่อสแกนเกิน 65%
           </p>
         </div>
 
