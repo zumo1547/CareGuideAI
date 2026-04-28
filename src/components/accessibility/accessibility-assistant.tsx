@@ -1,7 +1,6 @@
-﻿"use client";
+"use client";
 
 import { Accessibility, Contrast, Type, Volume2, VolumeX } from "lucide-react";
-import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -9,42 +8,52 @@ import { speakThai, warmupSpeechSynthesis } from "@/lib/voice/speak";
 
 interface AccessibilityPrefs {
   voiceEnabled: boolean;
-  announceInteractions: boolean;
+  announceButtonPress: boolean;
   largeText: boolean;
   highContrast: boolean;
 }
+
+type StoredAccessibilityPrefs = Partial<AccessibilityPrefs> & {
+  announceInteractions?: boolean;
+};
 
 const STORAGE_KEY = "careguide-a11y-prefs-v1";
 
 const DEFAULT_PREFS: AccessibilityPrefs = {
   voiceEnabled: true,
-  announceInteractions: true,
+  announceButtonPress: true,
   largeText: false,
   highContrast: false,
 };
 
-const INTERACTIVE_SELECTOR = [
-  "button",
-  "a[href]",
-  "input",
-  "textarea",
-  "select",
-  "[role='button']",
-  "[role='link']",
-].join(",");
-
 const normalizeText = (value: string) => value.replace(/\s+/g, " ").trim();
 
-const routeNameFromPath = (pathname: string) => {
-  if (pathname.startsWith("/login")) return "login page";
-  if (pathname.startsWith("/register")) return "register page";
-  if (pathname.startsWith("/app/patient")) return "patient dashboard";
-  if (pathname.startsWith("/app/doctor")) return "doctor dashboard";
-  if (pathname.startsWith("/app/admin")) return "admin dashboard";
-  if (pathname.startsWith("/app/scan")) return "scan page";
-  if (pathname.startsWith("/app")) return "app home";
-  if (pathname === "/") return "home page";
-  return "page";
+const readInitialPrefs = (): AccessibilityPrefs => {
+  if (typeof window === "undefined") return DEFAULT_PREFS;
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_PREFS;
+
+    const parsed = JSON.parse(raw) as StoredAccessibilityPrefs;
+    const announceButtonPress =
+      typeof parsed.announceButtonPress === "boolean"
+        ? parsed.announceButtonPress
+        : typeof parsed.announceInteractions === "boolean"
+          ? parsed.announceInteractions
+          : DEFAULT_PREFS.announceButtonPress;
+
+    return {
+      voiceEnabled:
+        typeof parsed.voiceEnabled === "boolean" ? parsed.voiceEnabled : DEFAULT_PREFS.voiceEnabled,
+      announceButtonPress,
+      largeText: typeof parsed.largeText === "boolean" ? parsed.largeText : DEFAULT_PREFS.largeText,
+      highContrast:
+        typeof parsed.highContrast === "boolean" ? parsed.highContrast : DEFAULT_PREFS.highContrast,
+    };
+  } catch {
+    return DEFAULT_PREFS;
+  }
 };
 
 const getElementLabel = (element: HTMLElement) => {
@@ -62,73 +71,19 @@ const getElementLabel = (element: HTMLElement) => {
     if (text) return text;
   }
 
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-    const labelFromControl = element.labels?.[0]?.textContent;
-    if (labelFromControl) return normalizeText(labelFromControl);
-
-    const elementId = element.id;
-    if (elementId) {
-      const escaped = typeof CSS !== "undefined" ? CSS.escape(elementId) : elementId;
-      const linkedLabel = document.querySelector<HTMLLabelElement>(`label[for="${escaped}"]`);
-      if (linkedLabel?.textContent) return normalizeText(linkedLabel.textContent);
-    }
-
-    if (element.placeholder) return normalizeText(element.placeholder);
-    if (element.name) return normalizeText(element.name);
-  }
-
-  if (element instanceof HTMLSelectElement) {
-    const labelFromControl = element.labels?.[0]?.textContent;
-    if (labelFromControl) return normalizeText(labelFromControl);
-    if (element.name) return normalizeText(element.name);
-  }
-
-  if (element instanceof HTMLButtonElement) {
+  if (element instanceof HTMLButtonElement || element instanceof HTMLAnchorElement) {
     const text = normalizeText(element.textContent ?? "");
     if (text) return text;
   }
 
-  if (element instanceof HTMLAnchorElement) {
-    const text = normalizeText(element.textContent ?? "");
-    if (text) return text;
-  }
-
-  const dataLabel = element.getAttribute("data-a11y-label");
-  if (dataLabel) return normalizeText(dataLabel);
-
-  return normalizeText(element.textContent ?? "") || "control";
-};
-
-const describeElementType = (element: HTMLElement) => {
-  if (element instanceof HTMLButtonElement) return "button";
-  if (element instanceof HTMLAnchorElement) return "link";
-  if (element instanceof HTMLInputElement) return "input";
-  if (element instanceof HTMLTextAreaElement) return "text area";
-  if (element instanceof HTMLSelectElement) return "selection";
-  return "control";
+  return "คำสั่ง";
 };
 
 export const AccessibilityAssistant = () => {
-  const pathname = usePathname();
-  const [prefs, setPrefs] = useState<AccessibilityPrefs>(() => {
-    if (typeof window === "undefined") return DEFAULT_PREFS;
-
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return DEFAULT_PREFS;
-      const parsed = JSON.parse(raw) as Partial<AccessibilityPrefs>;
-      return {
-        ...DEFAULT_PREFS,
-        ...parsed,
-      };
-    } catch {
-      return DEFAULT_PREFS;
-    }
-  });
+  const [prefs, setPrefs] = useState<AccessibilityPrefs>(readInitialPrefs);
   const [panelOpen, setPanelOpen] = useState(false);
 
   const lastSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
-  const inputTimersRef = useRef<Map<EventTarget, number>>(new Map());
 
   const speakFeedback = useCallback(
     (text: string, force = false) => {
@@ -161,78 +116,26 @@ export const AccessibilityAssistant = () => {
   }, [prefs.highContrast, prefs.largeText]);
 
   useEffect(() => {
-    if (!prefs.voiceEnabled) return;
-    speakFeedback(`Opened ${routeNameFromPath(pathname)}`);
-  }, [pathname, prefs.voiceEnabled, speakFeedback]);
-
-  useEffect(() => {
-    if (!prefs.voiceEnabled || !prefs.announceInteractions) return;
-
-    const inputTimers = inputTimersRef.current;
-
-    const onFocusIn = (event: FocusEvent) => {
-      const target = event.target as HTMLElement | null;
-      const control = target?.closest(INTERACTIVE_SELECTOR) as HTMLElement | null;
-      if (!control) return;
-
-      const label = getElementLabel(control);
-      const type = describeElementType(control);
-      speakFeedback(`${type} ${label}`);
-    };
+    if (!prefs.voiceEnabled || !prefs.announceButtonPress) return;
 
     const onClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
-      const control = target?.closest("button, a[href], [role='button'], [role='link']") as
+      const control = target?.closest("button, [role='button'], a[href], [role='link']") as
         | HTMLElement
         | null;
       if (!control) return;
 
       const label = getElementLabel(control);
-      const type = describeElementType(control);
-      speakFeedback(`Pressed ${type} ${label}`);
+      const type = control instanceof HTMLAnchorElement ? "ลิงก์" : "ปุ่ม";
+      speakFeedback(`กด${type} ${label}`);
     };
 
-    const onInput = (event: Event) => {
-      const target = event.target as HTMLElement | null;
-      if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
-        return;
-      }
-
-      const existingTimer = inputTimers.get(target);
-      if (existingTimer) {
-        window.clearTimeout(existingTimer);
-      }
-
-      const nextTimer = window.setTimeout(() => {
-        const label = getElementLabel(target);
-        if (target instanceof HTMLInputElement && target.type === "password") {
-          speakFeedback(`Editing password field ${label}`);
-          return;
-        }
-
-        const charCount = target.value.length;
-        speakFeedback(`Editing ${label}. ${charCount} characters`);
-      }, 450);
-
-      inputTimers.set(target, nextTimer);
-    };
-
-    document.addEventListener("focusin", onFocusIn, true);
     document.addEventListener("click", onClick, true);
-    document.addEventListener("input", onInput, true);
-
-    return () => {
-      document.removeEventListener("focusin", onFocusIn, true);
-      document.removeEventListener("click", onClick, true);
-      document.removeEventListener("input", onInput, true);
-
-      inputTimers.forEach((timerId) => window.clearTimeout(timerId));
-      inputTimers.clear();
-    };
-  }, [prefs.announceInteractions, prefs.voiceEnabled, speakFeedback]);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [prefs.announceButtonPress, prefs.voiceEnabled, speakFeedback]);
 
   const voiceLabel = useMemo(
-    () => (prefs.voiceEnabled ? "Voice Feedback: On" : "Voice Feedback: Off"),
+    () => (prefs.voiceEnabled ? "เปิดเสียงช่วยการกดปุ่ม" : "ปิดเสียงช่วยการกดปุ่ม"),
     [prefs.voiceEnabled],
   );
 
@@ -241,9 +144,9 @@ export const AccessibilityAssistant = () => {
       <div className="pointer-events-auto flex flex-col items-end gap-2">
         {panelOpen ? (
           <div className="w-[19rem] rounded-2xl border bg-background/95 p-3 shadow-xl backdrop-blur">
-            <p className="text-sm font-semibold">Accessibility Assistant</p>
+            <p className="text-sm font-semibold">ผู้ช่วยการเข้าถึง</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Improve usability for visually impaired users with spoken interaction feedback.
+              โหมดนี้จะอ่านเสียงเฉพาะตอนกดปุ่มหรือกดลิงก์ เพื่อให้ใช้งานง่ายขึ้นสำหรับผู้พิการทางสายตา
             </p>
             <div className="mt-3 flex flex-col gap-2">
               <Button
@@ -255,9 +158,9 @@ export const AccessibilityAssistant = () => {
                   setPrefs((previous) => ({ ...previous, voiceEnabled: next }));
                   if (next) {
                     warmupSpeechSynthesis();
-                    speakFeedback("Voice feedback enabled", true);
+                    speakFeedback("เปิดเสียงช่วยการกดปุ่มแล้ว", true);
                   } else {
-                    speakFeedback("Voice feedback disabled", true);
+                    speakFeedback("ปิดเสียงช่วยการกดปุ่มแล้ว", true);
                   }
                 }}
               >
@@ -267,20 +170,18 @@ export const AccessibilityAssistant = () => {
 
               <Button
                 type="button"
-                variant={prefs.announceInteractions ? "default" : "outline"}
+                variant={prefs.announceButtonPress ? "default" : "outline"}
                 className="justify-start"
                 onClick={() =>
                   setPrefs((previous) => ({
                     ...previous,
-                    announceInteractions: !previous.announceInteractions,
+                    announceButtonPress: !previous.announceButtonPress,
                   }))
                 }
                 disabled={!prefs.voiceEnabled}
               >
                 <Accessibility className="h-4 w-4" />
-                <span>
-                  {prefs.announceInteractions ? "Spoken Button/Input Cues: On" : "Spoken Button/Input Cues: Off"}
-                </span>
+                <span>{prefs.announceButtonPress ? "อ่านชื่อปุ่มที่กด: เปิด" : "อ่านชื่อปุ่มที่กด: ปิด"}</span>
               </Button>
 
               <Button
@@ -295,7 +196,7 @@ export const AccessibilityAssistant = () => {
                 }
               >
                 <Type className="h-4 w-4" />
-                <span>{prefs.largeText ? "Large Text: On" : "Large Text: Off"}</span>
+                <span>{prefs.largeText ? "ตัวอักษรใหญ่: เปิด" : "ตัวอักษรใหญ่: ปิด"}</span>
               </Button>
 
               <Button
@@ -310,7 +211,7 @@ export const AccessibilityAssistant = () => {
                 }
               >
                 <Contrast className="h-4 w-4" />
-                <span>{prefs.highContrast ? "High Contrast: On" : "High Contrast: Off"}</span>
+                <span>{prefs.highContrast ? "คอนทราสต์สูง: เปิด" : "คอนทราสต์สูง: ปิด"}</span>
               </Button>
             </div>
           </div>
@@ -320,7 +221,7 @@ export const AccessibilityAssistant = () => {
           type="button"
           size="icon-lg"
           className="rounded-full shadow-lg"
-          aria-label="Open accessibility assistant"
+          aria-label="เปิดผู้ช่วยการเข้าถึง"
           onClick={() => setPanelOpen((previous) => !previous)}
         >
           <Accessibility className="h-5 w-5" />
@@ -329,3 +230,4 @@ export const AccessibilityAssistant = () => {
     </div>
   );
 };
+
