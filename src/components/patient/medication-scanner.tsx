@@ -104,6 +104,7 @@ const DETECT_INTERVAL_MS = 1000;
 const SPEAK_COOLDOWN_MS = 1400;
 const AUTO_OCR_INTERVAL_MS = 2800;
 const OCR_MIN_TEXT_LENGTH = 12;
+const OCR_SUCCESS_MIN_CONFIDENCE = 0.38;
 
 const preferredVideoConstraints = (): MediaTrackConstraints => ({
   facingMode: { ideal: "environment" },
@@ -313,12 +314,12 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const inflightDetectRef = useRef(false);
   const ocrBusyRef = useRef(false);
   const isScanningRef = useRef(false);
-  const isAutoLabelScanningRef = useRef(false);
   const lastSpokenAtRef = useRef(0);
   const lastScannedAtRef = useRef(0);
   const lastGuidanceRef = useRef<ScanGuidanceState>("move_closer");
   const ocrWorkerRef = useRef<OcrWorkerLike | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const resultSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [status, setStatus] = useState("พร้อมสแกน");
   const [guidance, setGuidance] = useState<ScanGuidanceState>("move_closer");
@@ -333,7 +334,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const [activeEngine, setActiveEngine] = useState<ScannerEngine | null>(null);
   const [isOcrLoading, setIsOcrLoading] = useState(false);
   const [ocrProgress, setOcrProgress] = useState<number | null>(null);
-  const [isAutoLabelScanning, setIsAutoLabelScanning] = useState(false);
+  const [scanCompletion, setScanCompletion] = useState(0);
   const [parsedDetails, setParsedDetails] = useState<ParsedMedicationDetails | null>(null);
   const [isCreatingPlan, setIsCreatingPlan] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -348,10 +349,6 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   useEffect(() => {
     isScanningRef.current = isScanning;
   }, [isScanning]);
-
-  useEffect(() => {
-    isAutoLabelScanningRef.current = isAutoLabelScanning;
-  }, [isAutoLabelScanning]);
 
   const updateGuidance = useCallback(
     (nextGuidance: ScanGuidanceState, forceSpeak = false) => {
@@ -384,11 +381,22 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       window.clearTimeout(autoOcrTimerRef.current);
       autoOcrTimerRef.current = null;
     }
-    setIsAutoLabelScanning(false);
-    isAutoLabelScanningRef.current = false;
+  }, []);
+
+  const moveToResultSection = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        resultSectionRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
+    });
   }, []);
 
   const stopScanner = useCallback(() => {
+    isScanningRef.current = false;
+
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -970,7 +978,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   ]);
 
   useEffect(() => {
-    if (!isScanning || !isAutoLabelScanning) {
+    if (!isScanning) {
       return;
     }
 
@@ -1008,16 +1016,28 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
         updateGuidance(nextGuidance);
 
         const normalizedText = ocr.text.trim();
-        if (nextGuidance === "hold_steady" && normalizedText.length >= OCR_MIN_TEXT_LENGTH) {
+        let completion = 0;
+        completion += nextGuidance === "hold_steady" ? 45 : 20;
+        completion += Math.min(25, Math.round((Math.min(normalizedText.length, 90) / 90) * 25));
+        completion += Math.min(30, Math.round((Math.min(ocr.confidence, 1) / 1) * 30));
+        setScanCompletion(Math.min(99, completion));
+
+        if (
+          nextGuidance === "hold_steady" &&
+          normalizedText.length >= OCR_MIN_TEXT_LENGTH &&
+          ocr.confidence >= OCR_SUCCESS_MIN_CONFIDENCE
+        ) {
+          setScanCompletion(100);
           setOcrText(normalizedText);
           await submitOcrText(normalizedText, false);
-          setStatus("อ่านฉลากยาได้แล้ว กรุณาตรวจสอบข้อมูลและกดยืนยัน");
+          setStatus("สแกนฉลากครบ 100% แล้ว กำลังพาไปหน้าผลลัพธ์");
           if (voiceEnabled) {
-            speakThai("อ่านฉลากยาได้แล้ว กรุณาตรวจสอบแล้วกดยืนยัน");
+            speakThai("สแกนฉลากครบแล้ว กำลังเลื่อนไปผลลัพธ์ กรุณาตรวจสอบและกดยืนยัน");
           }
 
-          setIsAutoLabelScanning(false);
-          isAutoLabelScanningRef.current = false;
+          stopScanner();
+          setIsScanning(false);
+          moveToResultSection();
           return;
         }
 
@@ -1032,7 +1052,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
         ocrBusyRef.current = false;
         setIsOcrLoading(false);
         setOcrProgress(null);
-        if (!cancelled && isAutoLabelScanningRef.current) {
+        if (!cancelled && isScanningRef.current) {
           scheduleNext();
         }
       }
@@ -1047,7 +1067,16 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
         autoOcrTimerRef.current = null;
       }
     };
-  }, [captureFrameForOcr, isAutoLabelScanning, isScanning, recognizeLabelImage, submitOcrText, updateGuidance, voiceEnabled]);
+  }, [
+    captureFrameForOcr,
+    isScanning,
+    moveToResultSection,
+    recognizeLabelImage,
+    stopScanner,
+    submitOcrText,
+    updateGuidance,
+    voiceEnabled,
+  ]);
 
   useEffect(() => {
     if (!isScanning) {
@@ -1058,14 +1087,14 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       if (!document.hidden) return;
       setStatus("หยุดสแกนชั่วคราวเมื่อออกจากหน้าจอ");
       setIsScanning(false);
-      stopAutoLabelLoop();
+      stopScanner();
     };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [isScanning, stopAutoLabelLoop]);
+  }, [isScanning, stopScanner]);
 
   useEffect(() => {
     return () => {
@@ -1113,7 +1142,12 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
               <Badge variant="secondary">{guidanceLabel}</Badge>
               {isOcrLoading ? <Badge variant="outline">OCR กำลังทำงาน</Badge> : null}
               {ocrProgress !== null ? <Badge variant="outline">{ocrProgress}%</Badge> : null}
-              {isAutoLabelScanning ? <Badge>โหมดสแกนฉลากอัตโนมัติ</Badge> : null}
+              {isScanning ? <Badge>โหมดสแกนฉลากอัตโนมัติ</Badge> : null}
+              {isScanning || scanCompletion > 0 ? (
+                <Badge variant={scanCompletion === 100 ? "default" : "outline"}>
+                  ความครบถ้วน {scanCompletion}%
+                </Badge>
+              ) : null}
             </div>
           </AlertDescription>
         </Alert>
@@ -1128,11 +1162,13 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                   setPlanError(null);
                   setPlanSuccess(null);
                   setLastDetectedBarcode(null);
-                  setStatus("กำลังเตรียมกล้อง...");
+                  setScanCompletion(0);
+                  setStatus("กำลังเตรียมกล้องและเริ่มสแกนอัตโนมัติ...");
+                  isScanningRef.current = true;
                   warmupSpeechSynthesis();
                   updateGuidance("move_closer", true);
                   if (voiceEnabled) {
-                    speakThai("เริ่มสแกนยาแล้ว กรุณาหันกล้องไปที่ฉลากยา");
+                    speakThai("เริ่มสแกนอัตโนมัติแล้ว กรุณาหันกล้องไปที่ฉลากยา");
                   }
                   setIsScanning(true);
                 }}
@@ -1150,36 +1186,13 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                 variant="outline"
                 onClick={() => {
                   stopScanner();
+                  setScanCompletion(0);
                   setStatus("หยุดการสแกนแล้ว");
                   setIsScanning(false);
                 }}
                 disabled={!isScanning}
               >
                 หยุดสแกน
-              </Button>
-
-              <Button
-                variant={isAutoLabelScanning ? "secondary" : "outline"}
-                disabled={!isScanning || isOcrLoading}
-                onClick={() => {
-                  const next = !isAutoLabelScanning;
-                  setIsAutoLabelScanning(next);
-                  isAutoLabelScanningRef.current = next;
-                  setStatus(
-                    next
-                      ? "เปิดโหมดสแกนฉลากอัตโนมัติแล้ว จัดฉลากให้อยู่ในกรอบ"
-                      : "ปิดโหมดสแกนฉลากอัตโนมัติแล้ว",
-                  );
-                  if (voiceEnabled) {
-                    speakThai(
-                      next
-                        ? "เปิดโหมดสแกนฉลากอัตโนมัติแล้ว กรุณาจัดฉลากให้อยู่ตรงกลาง"
-                        : "ปิดโหมดสแกนอัตโนมัติแล้ว",
-                    );
-                  }
-                }}
-              >
-                {isAutoLabelScanning ? "ปิดโหมดสแกนอัตโนมัติ" : "เปิดโหมดสแกนอัตโนมัติ"}
               </Button>
 
               <Button
@@ -1322,84 +1335,86 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
           </div>
         ) : null}
 
-        {parsedDetails ? (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">ผลอ่านฉลากยา (AI OCR)</CardTitle>
-              <CardDescription>
-                ตรวจสอบข้อมูลก่อนกดยืนยันเพื่อสร้างแผนยาและแจ้งเตือน SMS
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="grid gap-2 md:grid-cols-2">
+        <div ref={resultSectionRef} className="scroll-mt-24">
+          {parsedDetails ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">ผลอ่านฉลากยา (AI OCR)</CardTitle>
+                <CardDescription>
+                  ตรวจสอบข้อมูลก่อนกดยืนยันเพื่อสร้างแผนยาและแจ้งเตือน SMS
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="grid gap-2 md:grid-cols-2">
+                  <p>
+                    <span className="text-muted-foreground">ชื่อยา (EN): </span>
+                    <strong>{parsedDetails.medicineNameEn || "-"}</strong>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">ชื่อยา (TH): </span>
+                    <strong>{parsedDetails.medicineNameTh || "-"}</strong>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">คำค้นยา: </span>
+                    <strong>{parsedDetails.medicineQuery || "-"}</strong>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">ความมั่นใจ OCR: </span>
+                    <strong>{Math.round(parsedDetails.confidence * 100)}%</strong>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">จำนวนต่อครั้ง: </span>
+                    <strong>{parsedDetails.quantityPerDose || "-"}</strong>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">ความถี่ต่อวัน: </span>
+                    <strong>
+                      {parsedDetails.frequencyPerDay ? `${parsedDetails.frequencyPerDay} ครั้ง` : "-"}
+                    </strong>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">ช่วงเวลา: </span>
+                    <strong>{parsedPeriodsLabel}</strong>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">ก่อน/หลังอาหาร: </span>
+                    <strong>{parsedMealLabel}</strong>
+                  </p>
+                </div>
                 <p>
-                  <span className="text-muted-foreground">ชื่อยา (EN): </span>
-                  <strong>{parsedDetails.medicineNameEn || "-"}</strong>
+                  <span className="text-muted-foreground">เวลาที่อ่านได้: </span>
+                  <strong>{parsedDetails.customTimes.length ? parsedDetails.customTimes.join(", ") : "-"}</strong>
                 </p>
-                <p>
-                  <span className="text-muted-foreground">ชื่อยา (TH): </span>
-                  <strong>{parsedDetails.medicineNameTh || "-"}</strong>
+                <p className="rounded-md bg-muted/40 p-2 text-sm">
+                  <span className="text-muted-foreground">สรุปการใช้ยา: </span>
+                  {buildDosageFromParsed(parsedDetails)}
                 </p>
-                <p>
-                  <span className="text-muted-foreground">คำค้นยา: </span>
-                  <strong>{parsedDetails.medicineQuery || "-"}</strong>
-                </p>
-                <p>
-                  <span className="text-muted-foreground">ความมั่นใจ OCR: </span>
-                  <strong>{Math.round(parsedDetails.confidence * 100)}%</strong>
-                </p>
-                <p>
-                  <span className="text-muted-foreground">จำนวนต่อครั้ง: </span>
-                  <strong>{parsedDetails.quantityPerDose || "-"}</strong>
-                </p>
-                <p>
-                  <span className="text-muted-foreground">ความถี่ต่อวัน: </span>
-                  <strong>
-                    {parsedDetails.frequencyPerDay ? `${parsedDetails.frequencyPerDay} ครั้ง` : "-"}
-                  </strong>
-                </p>
-                <p>
-                  <span className="text-muted-foreground">ช่วงเวลา: </span>
-                  <strong>{parsedPeriodsLabel}</strong>
-                </p>
-                <p>
-                  <span className="text-muted-foreground">ก่อน/หลังอาหาร: </span>
-                  <strong>{parsedMealLabel}</strong>
-                </p>
-              </div>
-              <p>
-                <span className="text-muted-foreground">เวลาที่อ่านได้: </span>
-                <strong>{parsedDetails.customTimes.length ? parsedDetails.customTimes.join(", ") : "-"}</strong>
-              </p>
-              <p className="rounded-md bg-muted/40 p-2 text-sm">
-                <span className="text-muted-foreground">สรุปการใช้ยา: </span>
-                {buildDosageFromParsed(parsedDetails)}
-              </p>
 
-              <div className="flex flex-wrap gap-2 pt-1">
-                <Button onClick={() => void confirmAndCreateMedicationPlan()} disabled={isCreatingPlan}>
-                  {isCreatingPlan ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  ยืนยันผลและสร้างแผนยา + แจ้งเตือน SMS
-                </Button>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <Button onClick={() => void confirmAndCreateMedicationPlan()} disabled={isCreatingPlan}>
+                    {isCreatingPlan ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" />
+                    )}
+                    ยืนยันผลและสร้างแผนยา + แจ้งเตือน SMS
+                  </Button>
 
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    fileInputRef.current?.click();
-                  }}
-                  disabled={isCreatingPlan || isOcrLoading}
-                >
-                  <Upload className="h-4 w-4" />
-                  อัปโหลดรูปใหม่
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      fileInputRef.current?.click();
+                    }}
+                    disabled={isCreatingPlan || isOcrLoading}
+                  >
+                    <Upload className="h-4 w-4" />
+                    อัปโหลดรูปใหม่
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
 
         {planError ? (
           <Alert variant="destructive">
