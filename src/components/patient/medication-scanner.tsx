@@ -383,14 +383,19 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     }
   }, []);
 
-  const moveToResultSection = useCallback(() => {
+  const moveToConfirmationSection = useCallback(() => {
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        resultSectionRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
+      resultSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
       });
+
+      window.setTimeout(() => {
+        window.scrollTo({
+          top: document.body.scrollHeight,
+          behavior: "smooth",
+        });
+      }, 240);
     });
   }, []);
 
@@ -618,84 +623,6 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       setLoading(false);
     }
   };
-
-  const scanViaOcrText = async () => {
-    if (!ocrText.trim()) return;
-
-    setLoading(true);
-    setStatus("กำลังวิเคราะห์ข้อความฉลาก...");
-
-    try {
-      await submitOcrText(ocrText.trim());
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "วิเคราะห์ OCR ไม่สำเร็จ");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const scanFromCameraLabel = useCallback(async () => {
-    if (!isScanning) {
-      setStatus("กรุณาเริ่มกล้องก่อนสแกนฉลากยา");
-      if (voiceEnabled) {
-        speakThai("กรุณาเริ่มกล้องก่อนสแกนฉลากยา");
-      }
-      return;
-    }
-
-    if (ocrBusyRef.current) {
-      return;
-    }
-
-    const capture = captureFrameForOcr();
-    if (!capture) {
-      setStatus("ยังจับภาพจากกล้องไม่ได้ ลองขยับกล้องแล้วสแกนอีกครั้ง");
-      updateGuidance("move_closer", true);
-      return;
-    }
-
-    ocrBusyRef.current = true;
-    setIsOcrLoading(true);
-    setOcrProgress(0);
-    setStatus("กำลังอ่านฉลากยา...");
-    setOcrPreviewDataUrl(capture.previewDataUrl);
-
-    try {
-      const ocr = await recognizeLabelImage(capture.canvas);
-      const frame = extractFrameFromOcrBlocks(ocr.blocks, capture.canvas.width, capture.canvas.height);
-      const nextGuidance = frame ? computeScanGuidance(frame) : "move_closer";
-      updateGuidance(nextGuidance);
-
-      if (!ocr.text || ocr.text.length < OCR_MIN_TEXT_LENGTH) {
-        setStatus("ยังอ่านข้อความไม่ชัด กรุณาจัดฉลากให้อยู่กลางภาพและขยับใกล้อีกนิด");
-        if (voiceEnabled) {
-          speakThai("ข้อความยังไม่ชัด กรุณาขยับกล้องตามเสียงนำทาง");
-        }
-        return;
-      }
-
-      setOcrText(ocr.text);
-      await submitOcrText(ocr.text, false);
-      setStatus("อ่านฉลากได้แล้ว กรุณาตรวจสอบข้อมูลและกดยืนยัน");
-
-      if (voiceEnabled) {
-        speakThai("อ่านฉลากยาได้แล้ว กรุณาตรวจสอบแล้วกดยืนยัน");
-      }
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "อ่านฉลากยาไม่สำเร็จ");
-    } finally {
-      setIsOcrLoading(false);
-      setOcrProgress(null);
-      ocrBusyRef.current = false;
-    }
-  }, [
-    captureFrameForOcr,
-    isScanning,
-    recognizeLabelImage,
-    submitOcrText,
-    updateGuidance,
-    voiceEnabled,
-  ]);
 
   const scanFromUploadedImage = async (file: File) => {
     if (ocrBusyRef.current) return;
@@ -1028,16 +955,25 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
           ocr.confidence >= OCR_SUCCESS_MIN_CONFIDENCE
         ) {
           setScanCompletion(100);
-          setOcrText(normalizedText);
-          await submitOcrText(normalizedText, false);
-          setStatus("สแกนฉลากครบ 100% แล้ว กำลังพาไปหน้าผลลัพธ์");
-          if (voiceEnabled) {
-            speakThai("สแกนฉลากครบแล้ว กำลังเลื่อนไปผลลัพธ์ กรุณาตรวจสอบและกดยืนยัน");
-          }
-
+          setStatus("สแกนครบ 100% แล้ว กำลังหยุดสแกนเพื่อวิเคราะห์อัตโนมัติ");
           stopScanner();
           setIsScanning(false);
-          moveToResultSection();
+          setOcrText(normalizedText);
+          setOcrPreviewDataUrl(capture.previewDataUrl);
+          if (voiceEnabled) {
+            speakThai("สแกนครบแล้ว กำลังวิเคราะห์อัตโนมัติ กรุณารอสักครู่");
+          }
+
+          try {
+            await submitOcrText(normalizedText, false);
+            setStatus("วิเคราะห์อัตโนมัติเสร็จแล้ว เลื่อนลงเพื่อกดยืนยันได้เลย");
+            if (voiceEnabled) {
+              speakThai("วิเคราะห์เสร็จแล้ว กำลังเลื่อนไปด้านล่างเพื่อยืนยันผล");
+            }
+            moveToConfirmationSection();
+          } catch (error) {
+            setStatus(error instanceof Error ? error.message : "วิเคราะห์อัตโนมัติไม่สำเร็จ");
+          }
           return;
         }
 
@@ -1070,7 +1006,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   }, [
     captureFrameForOcr,
     isScanning,
-    moveToResultSection,
+    moveToConfirmationSection,
     recognizeLabelImage,
     stopScanner,
     submitOcrText,
@@ -1196,17 +1132,6 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
               </Button>
 
               <Button
-                variant="outline"
-                onClick={() => {
-                  void scanFromCameraLabel();
-                }}
-                disabled={!isScanning || isOcrLoading}
-              >
-                {isOcrLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                อ่านฉลากจากกล้องตอนนี้
-              </Button>
-
-              <Button
                 variant={voiceEnabled ? "secondary" : "outline"}
                 onClick={() => {
                   setVoiceEnabled((previous) => {
@@ -1292,18 +1217,17 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="ocrText">ข้อความ OCR (แก้ไขได้ก่อนยืนยัน)</Label>
+          <Label htmlFor="ocrText">ข้อความ OCR (วิเคราะห์อัตโนมัติแล้ว)</Label>
           <Textarea
             id="ocrText"
             value={ocrText}
-            onChange={(event) => setOcrText(event.target.value)}
-            placeholder="วางข้อความจากฉลากยา หรือกดอ่านจากกล้อง/อัปโหลดรูป"
+            readOnly
+            placeholder="เมื่อสแกนครบ 100% ระบบจะเติมข้อความ OCR อัตโนมัติ"
             rows={5}
           />
-          <Button variant="outline" onClick={scanViaOcrText} disabled={loading || !ocrText.trim()}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            วิเคราะห์ข้อความ OCR
-          </Button>
+          <p className="text-xs text-muted-foreground">
+            ไม่ต้องกดวิเคราะห์เอง ระบบจะหยุดสแกนและวิเคราะห์ให้อัตโนมัติทันทีเมื่อครบ 100%
+          </p>
         </div>
 
         {lastDetectedBarcode && !scanResult?.medicine ? (
