@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Sarabun } from "next/font/google";
 
+import { AccessibilityAssistant } from "@/components/accessibility/accessibility-assistant";
+
 import "./globals.css";
 
 const sarabun = Sarabun({
@@ -31,7 +33,10 @@ export default function RootLayout({
       lang="th"
       className={`${sarabun.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <AccessibilityAssistant />
+      </body>
     </html>
   );
 }

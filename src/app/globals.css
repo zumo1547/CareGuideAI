@@ -129,6 +129,44 @@
   }
 }
 
+html.a11y-large-text {
+  font-size: 112%;
+}
+
+html.a11y-large-text [data-slot="button"],
+html.a11y-large-text [data-slot="input"],
+html.a11y-large-text [data-slot="textarea"],
+html.a11y-large-text select,
+html.a11y-large-text a[href] {
+  min-height: 2.75rem;
+  line-height: 1.35;
+}
+
+html.a11y-high-contrast {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.15 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.15 0 0);
+  --primary: oklch(0.2 0 0);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.92 0 0);
+  --secondary-foreground: oklch(0.16 0 0);
+  --muted: oklch(0.94 0 0);
+  --muted-foreground: oklch(0.24 0 0);
+  --accent: oklch(0.9 0 0);
+  --accent-foreground: oklch(0.16 0 0);
+  --border: oklch(0.34 0 0);
+  --input: oklch(0.34 0 0);
+  --ring: oklch(0.22 0 0);
+}
+
+html.a11y-high-contrast *:focus-visible {
+  outline: 3px solid color-mix(in oklab, black 90%, #2563eb);
+  outline-offset: 2px;
+}
+
 @keyframes page-enter {
   from {
     opacity: 0;
