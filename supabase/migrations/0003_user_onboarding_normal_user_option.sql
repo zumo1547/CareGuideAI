@@ -20,6 +20,6 @@ alter table public.user_onboarding_profiles
 alter table public.user_onboarding_profiles
   add constraint disability_severity_consistency
   check (
-    (disability_type = 'normal' and disability_severity = 'none')
-    or (disability_type <> 'normal' and disability_severity <> 'none')
+    (disability_type::text = 'normal' and disability_severity::text = 'none')
+    or (disability_type::text <> 'normal' and disability_severity::text <> 'none')
   );
