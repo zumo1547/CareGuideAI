@@ -105,6 +105,17 @@ const SPEAK_COOLDOWN_MS = 1400;
 const AUTO_OCR_INTERVAL_MS = 2800;
 const OCR_MIN_TEXT_LENGTH = 12;
 const OCR_SUCCESS_MIN_CONFIDENCE = 0.38;
+const AUTO_FINALIZE_MIN_COMPLETION = 72;
+const AUTO_FINALIZE_MIN_CONFIDENCE = 0.2;
+const AUTO_FINALIZE_MIN_TEXT_LENGTH = 20;
+const AUTO_FINALIZE_STABLE_FRAMES = 2;
+
+interface ScanCandidate {
+  text: string;
+  previewDataUrl: string;
+  completion: number;
+  confidence: number;
+}
 
 const preferredVideoConstraints = (): MediaTrackConstraints => ({
   facingMode: { ideal: "environment" },
@@ -113,6 +124,12 @@ const preferredVideoConstraints = (): MediaTrackConstraints => ({
 });
 
 const isValidCustomTime = (value: string) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value);
+const normalizeComparableText = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
 const periodToThai = (period: DayPeriod) => {
   switch (period) {
@@ -320,6 +337,10 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const ocrWorkerRef = useRef<OcrWorkerLike | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const resultSectionRef = useRef<HTMLDivElement | null>(null);
+  const isFinalizingRef = useRef(false);
+  const stableCandidateCountRef = useRef(0);
+  const lastCandidateFingerprintRef = useRef("");
+  const bestCandidateRef = useRef<ScanCandidate | null>(null);
 
   const [status, setStatus] = useState("พร้อมสแกน");
   const [guidance, setGuidance] = useState<ScanGuidanceState>("move_closer");
@@ -425,6 +446,13 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       videoRef.current.srcObject = null;
     }
   }, [stopAutoLabelLoop]);
+
+  const resetAutoScanState = useCallback(() => {
+    isFinalizingRef.current = false;
+    stableCandidateCountRef.current = 0;
+    lastCandidateFingerprintRef.current = "";
+    bestCandidateRef.current = null;
+  }, []);
 
   const ensureOcrWorker = useCallback(async () => {
     if (ocrWorkerRef.current) {
@@ -609,6 +637,37 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       return result;
     },
     [patientId, updateGuidance, voiceEnabled],
+  );
+
+  const finalizeScanAndAnalyze = useCallback(
+    async (candidate: ScanCandidate) => {
+      if (isFinalizingRef.current) return;
+
+      isFinalizingRef.current = true;
+      setScanCompletion(100);
+      setStatus("สแกนครบ 100% แล้ว กำลังหยุดสแกนเพื่อวิเคราะห์อัตโนมัติ");
+      stopScanner();
+      setIsScanning(false);
+      setOcrText(candidate.text);
+      setOcrPreviewDataUrl(candidate.previewDataUrl);
+
+      if (voiceEnabled) {
+        speakThai("สแกนครบแล้ว กำลังวิเคราะห์อัตโนมัติ กรุณารอสักครู่");
+      }
+
+      try {
+        await submitOcrText(candidate.text, false);
+        setStatus("วิเคราะห์อัตโนมัติเสร็จแล้ว เลื่อนลงเพื่อกดยืนยันได้เลย");
+        if (voiceEnabled) {
+          speakThai("วิเคราะห์เสร็จแล้ว กำลังเลื่อนไปด้านล่างเพื่อยืนยันผล");
+        }
+        moveToConfirmationSection();
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "วิเคราะห์อัตโนมัติไม่สำเร็จ");
+        isFinalizingRef.current = false;
+      }
+    },
+    [moveToConfirmationSection, stopScanner, submitOcrText, voiceEnabled],
   );
 
   const scanManualBarcode = async () => {
@@ -947,33 +1006,55 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
         completion += nextGuidance === "hold_steady" ? 45 : 20;
         completion += Math.min(25, Math.round((Math.min(normalizedText.length, 90) / 90) * 25));
         completion += Math.min(30, Math.round((Math.min(ocr.confidence, 1) / 1) * 30));
-        setScanCompletion(Math.min(99, completion));
+        const boundedCompletion = Math.min(99, completion);
+        setScanCompletion((previous) => {
+          const smoothed = Math.round(previous * 0.5 + boundedCompletion * 0.5);
+          return Math.max(previous > 85 ? previous - 1 : 0, smoothed);
+        });
+
+        const currentCandidate: ScanCandidate = {
+          text: normalizedText,
+          previewDataUrl: capture.previewDataUrl,
+          completion: boundedCompletion,
+          confidence: ocr.confidence,
+        };
+
+        const best = bestCandidateRef.current;
+        if (
+          !best ||
+          currentCandidate.completion > best.completion + 3 ||
+          (currentCandidate.completion >= best.completion - 2 &&
+            currentCandidate.confidence > best.confidence + 0.03)
+        ) {
+          bestCandidateRef.current = currentCandidate;
+        }
+
+        const canAutoFinalize =
+          normalizedText.length >= AUTO_FINALIZE_MIN_TEXT_LENGTH &&
+          ocr.confidence >= AUTO_FINALIZE_MIN_CONFIDENCE &&
+          boundedCompletion >= AUTO_FINALIZE_MIN_COMPLETION;
+
+        if (canAutoFinalize) {
+          const fingerprint = normalizeComparableText(normalizedText).slice(0, 180);
+          if (fingerprint && fingerprint === lastCandidateFingerprintRef.current) {
+            stableCandidateCountRef.current += 1;
+          } else {
+            stableCandidateCountRef.current = 1;
+            lastCandidateFingerprintRef.current = fingerprint;
+          }
+        } else {
+          stableCandidateCountRef.current = 0;
+          lastCandidateFingerprintRef.current = "";
+        }
 
         if (
-          nextGuidance === "hold_steady" &&
-          normalizedText.length >= OCR_MIN_TEXT_LENGTH &&
-          ocr.confidence >= OCR_SUCCESS_MIN_CONFIDENCE
+          (nextGuidance === "hold_steady" &&
+            normalizedText.length >= OCR_MIN_TEXT_LENGTH &&
+            ocr.confidence >= OCR_SUCCESS_MIN_CONFIDENCE) ||
+          stableCandidateCountRef.current >= AUTO_FINALIZE_STABLE_FRAMES
         ) {
-          setScanCompletion(100);
-          setStatus("สแกนครบ 100% แล้ว กำลังหยุดสแกนเพื่อวิเคราะห์อัตโนมัติ");
-          stopScanner();
-          setIsScanning(false);
-          setOcrText(normalizedText);
-          setOcrPreviewDataUrl(capture.previewDataUrl);
-          if (voiceEnabled) {
-            speakThai("สแกนครบแล้ว กำลังวิเคราะห์อัตโนมัติ กรุณารอสักครู่");
-          }
-
-          try {
-            await submitOcrText(normalizedText, false);
-            setStatus("วิเคราะห์อัตโนมัติเสร็จแล้ว เลื่อนลงเพื่อกดยืนยันได้เลย");
-            if (voiceEnabled) {
-              speakThai("วิเคราะห์เสร็จแล้ว กำลังเลื่อนไปด้านล่างเพื่อยืนยันผล");
-            }
-            moveToConfirmationSection();
-          } catch (error) {
-            setStatus(error instanceof Error ? error.message : "วิเคราะห์อัตโนมัติไม่สำเร็จ");
-          }
+          const finalCandidate = bestCandidateRef.current ?? currentCandidate;
+          void finalizeScanAndAnalyze(finalCandidate);
           return;
         }
 
@@ -1005,13 +1086,10 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     };
   }, [
     captureFrameForOcr,
+    finalizeScanAndAnalyze,
     isScanning,
-    moveToConfirmationSection,
     recognizeLabelImage,
-    stopScanner,
-    submitOcrText,
     updateGuidance,
-    voiceEnabled,
   ]);
 
   useEffect(() => {
@@ -1023,6 +1101,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       if (!document.hidden) return;
       setStatus("หยุดสแกนชั่วคราวเมื่อออกจากหน้าจอ");
       setIsScanning(false);
+      resetAutoScanState();
       stopScanner();
     };
 
@@ -1030,14 +1109,15 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [isScanning, stopScanner]);
+  }, [isScanning, resetAutoScanState, stopScanner]);
 
   useEffect(() => {
     return () => {
       stopScanner();
+      resetAutoScanState();
       void terminateOcrWorker();
     };
-  }, [stopScanner, terminateOcrWorker]);
+  }, [resetAutoScanState, stopScanner, terminateOcrWorker]);
 
   const guidanceLabel = useMemo(() => guidanceToThaiSpeech(guidance), [guidance]);
 
@@ -1093,6 +1173,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
             <div className="flex flex-wrap gap-2">
               <Button
                 onClick={() => {
+                  resetAutoScanState();
                   setScanResult(null);
                   setParsedDetails(null);
                   setPlanError(null);
@@ -1121,6 +1202,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
               <Button
                 variant="outline"
                 onClick={() => {
+                  resetAutoScanState();
                   stopScanner();
                   setScanCompletion(0);
                   setStatus("หยุดการสแกนแล้ว");
