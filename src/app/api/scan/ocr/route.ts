@@ -4,7 +4,11 @@ import { z } from "zod";
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
 import { searchOpenFdaMedicines } from "@/lib/openfda";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { extractLikelyMedicineQuery, extractTextFromImageFallback } from "@/lib/scan/ocr";
+import {
+  extractLikelyMedicineQuery,
+  extractTextFromImageFallback,
+  parseMedicationDetailsFromText,
+} from "@/lib/scan/ocr";
 
 const schema = z.object({
   patientId: z.uuid().optional(),
@@ -32,20 +36,20 @@ export async function POST(request: Request) {
     return badRequest("No text found for OCR fallback");
   }
 
+  const parsedDetails = parseMedicationDetailsFromText(ocrText);
   const query = extractLikelyMedicineQuery(ocrText);
-  if (!query) {
-    return badRequest("Unable to derive medicine query from OCR text");
-  }
 
   const supabase = await createSupabaseServerClient();
-  const { data: localMedicines } = await supabase
-    .from("medicines")
-    .select("id, name, strength")
-    .or(`name.ilike.%${query}%,generic_name.ilike.%${query}%`)
-    .limit(5);
+  const { data: localMedicines } = query
+    ? await supabase
+        .from("medicines")
+        .select("id, name, strength")
+        .or(`name.ilike.%${query}%,generic_name.ilike.%${query}%`)
+        .limit(5)
+    : { data: [] as { id: string; name: string; strength: string | null }[] };
 
   let matchedMedicine = localMedicines?.[0] ?? null;
-  if (!matchedMedicine) {
+  if (!matchedMedicine && query) {
     const fdaResults = await searchOpenFdaMedicines(query);
     const first = fdaResults[0];
     if (first) {
@@ -70,20 +74,22 @@ export async function POST(request: Request) {
   await supabase.from("scan_sessions").insert({
     patient_id: resolvedPatientId,
     medicine_id: matchedMedicine?.id ?? null,
-    guidance_state: matchedMedicine ? "hold_steady" : "move_closer",
+    guidance_state: "hold_steady",
     matched_via: "ocr",
-    confidence: matchedMedicine ? 0.72 : 0.2,
+    confidence: matchedMedicine ? Math.max(0.72, parsedDetails.confidence) : parsedDetails.confidence,
     raw_payload: {
       ocrText,
       query,
+      parsedDetails,
     },
   });
 
   return NextResponse.json({
-    guidance: matchedMedicine ? "hold_steady" : "move_closer",
+    guidance: "hold_steady",
     foundMedicine: Boolean(matchedMedicine),
     medicine: matchedMedicine,
     ocrText,
     query,
+    parsedDetails,
   });
 }

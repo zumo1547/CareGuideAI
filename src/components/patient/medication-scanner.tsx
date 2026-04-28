@@ -1,7 +1,7 @@
-﻿"use client";
+"use client";
 
 import type { IScannerControls } from "@zxing/browser";
-import { Camera, Loader2, ScanLine } from "lucide-react";
+import { Camera, CheckCircle2, Loader2, ScanLine, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -10,7 +10,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { guidanceToThaiSpeech, type DetectionFrame } from "@/lib/scan/guidance";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  computeScanGuidance,
+  guidanceToThaiSpeech,
+  type DetectionFrame,
+} from "@/lib/scan/guidance";
 import { speakThai, warmupSpeechSynthesis } from "@/lib/voice/speak";
 import type { ScanGuidanceState } from "@/types/domain";
 
@@ -27,6 +32,23 @@ interface ScanResponse {
   };
 }
 
+type MealTiming = "before_meal" | "after_meal" | "unspecified";
+type DayPeriod = "morning" | "noon" | "evening" | "night";
+
+interface ParsedMedicationDetails {
+  medicineQuery: string;
+  medicineNameEn: string | null;
+  medicineNameTh: string | null;
+  dosageText: string;
+  quantityPerDose: string | null;
+  frequencyPerDay: number | null;
+  mealTiming: MealTiming;
+  periods: DayPeriod[];
+  customTimes: string[];
+  confidence: number;
+  rawText: string;
+}
+
 interface OcrResponse {
   guidance: ScanGuidanceState;
   foundMedicine: boolean;
@@ -36,6 +58,8 @@ interface OcrResponse {
     strength: string | null;
   };
   ocrText?: string;
+  query?: string;
+  parsedDetails?: ParsedMedicationDetails;
 }
 
 interface MedicationScannerProps {
@@ -49,15 +73,131 @@ type ZxingResultLike = {
   getResultPoints?: () => ZxingPointLike[];
 };
 
+type OcrBlockLike = {
+  bbox?: {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  };
+  confidence?: number;
+};
+
+type OcrWorkerLike = {
+  recognize: (
+    image: HTMLCanvasElement | File | Blob,
+    options?: Record<string, unknown>,
+    output?: Record<string, boolean>,
+  ) => Promise<{
+    data?: {
+      text?: string;
+      confidence?: number;
+      blocks?: OcrBlockLike[] | null;
+    };
+  }>;
+  setParameters?: (params: Record<string, string>) => Promise<unknown>;
+  terminate: () => Promise<unknown>;
+};
+
 const COOL_DOWN_MS = 2500;
 const DETECT_INTERVAL_MS = 1000;
 const SPEAK_COOLDOWN_MS = 1400;
+const AUTO_OCR_INTERVAL_MS = 2800;
+const OCR_MIN_TEXT_LENGTH = 12;
 
 const preferredVideoConstraints = (): MediaTrackConstraints => ({
   facingMode: { ideal: "environment" },
   width: { ideal: 1920 },
   height: { ideal: 1080 },
 });
+
+const isValidCustomTime = (value: string) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value);
+
+const periodToThai = (period: DayPeriod) => {
+  switch (period) {
+    case "morning":
+      return "เช้า";
+    case "noon":
+      return "กลางวัน";
+    case "evening":
+      return "เย็น";
+    case "night":
+      return "ก่อนนอน";
+    default:
+      return period;
+  }
+};
+
+const mealTimingToThai = (mealTiming: MealTiming) => {
+  switch (mealTiming) {
+    case "before_meal":
+      return "ก่อนอาหาร";
+    case "after_meal":
+      return "หลังอาหาร";
+    default:
+      return "ไม่ระบุ";
+  }
+};
+
+const buildDosageFromParsed = (details: ParsedMedicationDetails) => {
+  const parts: string[] = [];
+  if (details.quantityPerDose) {
+    parts.push(`ครั้งละ ${details.quantityPerDose}`);
+  }
+
+  if (details.frequencyPerDay) {
+    parts.push(`วันละ ${details.frequencyPerDay} ครั้ง`);
+  }
+
+  if (details.periods.length) {
+    parts.push(`ช่วงเวลา ${details.periods.map(periodToThai).join(" / ")}`);
+  }
+
+  if (details.mealTiming !== "unspecified") {
+    parts.push(mealTimingToThai(details.mealTiming));
+  }
+
+  return (parts.join(" ").trim() || details.dosageText || "ทานตามฉลากยา").slice(0, 250);
+};
+
+const scheduleFromParsed = (details: ParsedMedicationDetails) => {
+  const presets = new Set<"morning" | "noon" | "evening">();
+  const customTimes = new Set<string>();
+
+  for (const period of details.periods) {
+    if (period === "morning") presets.add("morning");
+    if (period === "noon") presets.add("noon");
+    if (period === "evening") presets.add("evening");
+    if (period === "night") customTimes.add("21:00");
+  }
+
+  for (const time of details.customTimes) {
+    if (isValidCustomTime(time)) {
+      customTimes.add(time);
+    }
+  }
+
+  if (!presets.size && !customTimes.size) {
+    if (details.frequencyPerDay === 1) {
+      presets.add("morning");
+    } else if (details.frequencyPerDay === 2) {
+      presets.add("morning");
+      presets.add("evening");
+    } else if ((details.frequencyPerDay ?? 0) >= 3) {
+      presets.add("morning");
+      presets.add("noon");
+      presets.add("evening");
+    } else {
+      presets.add("morning");
+      presets.add("evening");
+    }
+  }
+
+  return {
+    presets: [...presets],
+    customTimes: [...customTimes].sort(),
+  };
+};
 
 const extractFrameFromZxingResult = (
   result: ZxingResultLike | undefined,
@@ -96,17 +236,89 @@ const extractFrameFromZxingResult = (
   };
 };
 
+const extractFrameFromOcrBlocks = (
+  blocks: OcrBlockLike[] | null | undefined,
+  frameWidth: number,
+  frameHeight: number,
+): DetectionFrame | undefined => {
+  if (!blocks?.length) {
+    return undefined;
+  }
+
+  const usable = blocks.filter((block) => {
+    const bbox = block.bbox;
+    if (!bbox) return false;
+    const width = bbox.x1 - bbox.x0;
+    const height = bbox.y1 - bbox.y0;
+    return width > 8 && height > 8;
+  });
+
+  if (!usable.length) {
+    return undefined;
+  }
+
+  const minX = Math.min(...usable.map((block) => block.bbox?.x0 ?? 0));
+  const minY = Math.min(...usable.map((block) => block.bbox?.y0 ?? 0));
+  const maxX = Math.max(...usable.map((block) => block.bbox?.x1 ?? 0));
+  const maxY = Math.max(...usable.map((block) => block.bbox?.y1 ?? 0));
+
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  return {
+    frameWidth: Math.max(1, frameWidth),
+    frameHeight: Math.max(1, frameHeight),
+    x: Math.max(0, minX),
+    y: Math.max(0, minY),
+    width,
+    height,
+  };
+};
+
+const createCanvasFromFile = (file: File) =>
+  new Promise<HTMLCanvasElement>((resolve, reject) => {
+    const image = new Image();
+
+    image.onload = () => {
+      const maxWidth = 1400;
+      const scale = Math.min(1, maxWidth / image.width);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(280, Math.floor(image.width * scale));
+      canvas.height = Math.max(280, Math.floor(image.height * scale));
+
+      const context = canvas.getContext("2d");
+      if (!context) {
+        reject(new Error("ไม่สามารถเตรียมภาพสำหรับ OCR ได้"));
+        return;
+      }
+
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(image.src);
+      resolve(canvas);
+    };
+
+    image.onerror = () => {
+      reject(new Error("ไม่สามารถอ่านไฟล์รูปได้"));
+    };
+
+    image.src = URL.createObjectURL(file);
+  });
+
 export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectorRef = useRef<BarcodeDetector | null>(null);
   const zxingControlsRef = useRef<IScannerControls | null>(null);
   const timerRef = useRef<number | null>(null);
+  const autoOcrTimerRef = useRef<number | null>(null);
   const inflightDetectRef = useRef(false);
+  const ocrBusyRef = useRef(false);
   const isScanningRef = useRef(false);
+  const isAutoLabelScanningRef = useRef(false);
   const lastSpokenAtRef = useRef(0);
   const lastScannedAtRef = useRef(0);
   const lastGuidanceRef = useRef<ScanGuidanceState>("move_closer");
+  const ocrWorkerRef = useRef<OcrWorkerLike | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [status, setStatus] = useState("พร้อมสแกน");
   const [guidance, setGuidance] = useState<ScanGuidanceState>("move_closer");
@@ -119,6 +331,14 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const [lastDetectedBarcode, setLastDetectedBarcode] = useState<string | null>(null);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [activeEngine, setActiveEngine] = useState<ScannerEngine | null>(null);
+  const [isOcrLoading, setIsOcrLoading] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState<number | null>(null);
+  const [isAutoLabelScanning, setIsAutoLabelScanning] = useState(false);
+  const [parsedDetails, setParsedDetails] = useState<ParsedMedicationDetails | null>(null);
+  const [isCreatingPlan, setIsCreatingPlan] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [planSuccess, setPlanSuccess] = useState<string | null>(null);
+  const [ocrPreviewDataUrl, setOcrPreviewDataUrl] = useState<string | null>(null);
 
   const isCameraSupported =
     typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
@@ -129,28 +349,44 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     isScanningRef.current = isScanning;
   }, [isScanning]);
 
-  const updateGuidance = useCallback((nextGuidance: ScanGuidanceState, forceSpeak = false) => {
-    setGuidance((previous) => (previous === nextGuidance ? previous : nextGuidance));
+  useEffect(() => {
+    isAutoLabelScanningRef.current = isAutoLabelScanning;
+  }, [isAutoLabelScanning]);
 
-    if (!voiceEnabled) {
-      return;
+  const updateGuidance = useCallback(
+    (nextGuidance: ScanGuidanceState, forceSpeak = false) => {
+      setGuidance((previous) => (previous === nextGuidance ? previous : nextGuidance));
+
+      if (!voiceEnabled) {
+        return;
+      }
+
+      const now = Date.now();
+      if (!forceSpeak && now - lastSpokenAtRef.current < SPEAK_COOLDOWN_MS) return;
+
+      if (
+        !forceSpeak &&
+        lastGuidanceRef.current === nextGuidance &&
+        now - lastSpokenAtRef.current < SPEAK_COOLDOWN_MS * 2
+      ) {
+        return;
+      }
+
+      lastSpokenAtRef.current = now;
+      lastGuidanceRef.current = nextGuidance;
+      speakThai(guidanceToThaiSpeech(nextGuidance), 1.02);
+    },
+    [voiceEnabled],
+  );
+
+  const stopAutoLabelLoop = useCallback(() => {
+    if (autoOcrTimerRef.current !== null) {
+      window.clearTimeout(autoOcrTimerRef.current);
+      autoOcrTimerRef.current = null;
     }
-
-    const now = Date.now();
-    if (!forceSpeak && now - lastSpokenAtRef.current < SPEAK_COOLDOWN_MS) return;
-
-    if (
-      !forceSpeak &&
-      lastGuidanceRef.current === nextGuidance &&
-      now - lastSpokenAtRef.current < SPEAK_COOLDOWN_MS * 2
-    ) {
-      return;
-    }
-
-    lastSpokenAtRef.current = now;
-    lastGuidanceRef.current = nextGuidance;
-    speakThai(guidanceToThaiSpeech(nextGuidance), 1.02);
-  }, [voiceEnabled]);
+    setIsAutoLabelScanning(false);
+    isAutoLabelScanningRef.current = false;
+  }, []);
 
   const stopScanner = useCallback(() => {
     if (timerRef.current !== null) {
@@ -158,6 +394,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       timerRef.current = null;
     }
 
+    stopAutoLabelLoop();
     inflightDetectRef.current = false;
     detectorRef.current = null;
 
@@ -174,6 +411,36 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+  }, [stopAutoLabelLoop]);
+
+  const ensureOcrWorker = useCallback(async () => {
+    if (ocrWorkerRef.current) {
+      return ocrWorkerRef.current;
+    }
+
+    const { createWorker } = await import("tesseract.js");
+    const worker = (await createWorker(["tha", "eng"], 1, {
+      logger: (message: { status?: string; progress?: number }) => {
+        if (message?.status === "recognizing text" && typeof message.progress === "number") {
+          setOcrProgress(Math.round(message.progress * 100));
+        }
+      },
+    })) as unknown as OcrWorkerLike;
+
+    await worker.setParameters?.({
+      tessedit_pageseg_mode: "6",
+      preserve_interword_spaces: "1",
+    });
+
+    ocrWorkerRef.current = worker;
+    return worker;
+  }, []);
+
+  const terminateOcrWorker = useCallback(async () => {
+    const worker = ocrWorkerRef.current;
+    if (!worker) return;
+    ocrWorkerRef.current = null;
+    await worker.terminate().catch(() => undefined);
   }, []);
 
   const callBarcodeApi = useCallback(
@@ -191,6 +458,9 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
 
       updateGuidance(result.guidance);
       setScanResult(result);
+      setParsedDetails(null);
+      setPlanError(null);
+      setPlanSuccess(null);
 
       return result;
     },
@@ -232,6 +502,102 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     [callBarcodeApi, updateGuidance, voiceEnabled],
   );
 
+  const captureFrameForOcr = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      return null;
+    }
+
+    const sourceWidth = video.videoWidth || 0;
+    const sourceHeight = video.videoHeight || 0;
+    if (!sourceWidth || !sourceHeight) {
+      return null;
+    }
+
+    const cropWidth = Math.floor(sourceWidth * 0.84);
+    const cropHeight = Math.floor(sourceHeight * 0.7);
+    const cropX = Math.floor((sourceWidth - cropWidth) / 2);
+    const cropY = Math.floor((sourceHeight - cropHeight) / 2);
+
+    const maxWidth = 1400;
+    const scale = Math.min(1, maxWidth / cropWidth);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(320, Math.floor(cropWidth * scale));
+    canvas.height = Math.max(260, Math.floor(cropHeight * scale));
+
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) {
+      return null;
+    }
+
+    context.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+    return {
+      canvas,
+      previewDataUrl: canvas.toDataURL("image/jpeg", 0.9),
+    };
+  }, []);
+
+  const recognizeLabelImage = useCallback(
+    async (image: HTMLCanvasElement | File | Blob) => {
+      const worker = await ensureOcrWorker();
+      const result = await worker.recognize(image, {}, { blocks: true });
+      const text = String(result?.data?.text ?? "")
+        .replace(/\r/g, "")
+        .trim();
+      const confidenceRaw = Number(result?.data?.confidence ?? 0);
+      const confidence = Number.isFinite(confidenceRaw)
+        ? Math.max(0, Math.min(1, confidenceRaw / 100))
+        : 0;
+
+      return {
+        text,
+        confidence,
+        blocks: result?.data?.blocks ?? [],
+      };
+    },
+    [ensureOcrWorker],
+  );
+
+  const submitOcrText = useCallback(
+    async (text: string, speakResult = true) => {
+      const response = await fetch("/api/scan/ocr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId,
+          extractedText: text,
+        }),
+      });
+
+      const result = (await response.json()) as OcrResponse & { error?: string };
+      if (!response.ok) {
+        throw new Error(result.error ?? "วิเคราะห์ OCR ไม่สำเร็จ");
+      }
+
+      updateGuidance(result.guidance);
+      setScanResult(result);
+      setParsedDetails(result.parsedDetails ?? null);
+      setOcrText(result.ocrText ?? text);
+      setPlanError(null);
+      setPlanSuccess(null);
+
+      if (result.foundMedicine && result.medicine?.name) {
+        setStatus(`จับคู่ยาได้แล้ว: ${result.medicine.name}`);
+        if (voiceEnabled && speakResult) {
+          speakThai(`พบข้อมูลยา ${result.medicine.name} กรุณาตรวจสอบแล้วกดยืนยัน`);
+        }
+      } else {
+        setStatus("อ่านฉลากได้แล้ว กรุณาตรวจสอบข้อมูลและกดยืนยัน");
+        if (voiceEnabled && speakResult) {
+          speakThai("อ่านฉลากได้แล้ว กรุณาตรวจสอบข้อมูลแล้วกดยืนยัน");
+        }
+      }
+
+      return result;
+    },
+    [patientId, updateGuidance, voiceEnabled],
+  );
+
   const scanManualBarcode = async () => {
     if (!manualBarcode.trim()) return;
 
@@ -245,46 +611,178 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     }
   };
 
-  const scanViaOcrFallback = async () => {
+  const scanViaOcrText = async () => {
     if (!ocrText.trim()) return;
 
     setLoading(true);
-    setStatus("กำลังวิเคราะห์ฉลากยา...");
+    setStatus("กำลังวิเคราะห์ข้อความฉลาก...");
 
     try {
-      const response = await fetch("/api/scan/ocr", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          patientId,
-          extractedText: ocrText,
-        }),
-      });
-
-      const result = (await response.json()) as OcrResponse & { error?: string };
-
-      if (!response.ok) {
-        setStatus(result.error ?? "วิเคราะห์ OCR ไม่สำเร็จ");
-        return;
-      }
-
-      updateGuidance(result.guidance);
-      setScanResult(result);
-      setStatus(
-        result.foundMedicine
-          ? "พบข้อมูลยาแล้ว"
-          : "ยังไม่พบยา ลองพิมพ์ชื่อยาให้ละเอียดขึ้น",
-      );
-
-      if (voiceEnabled && result.foundMedicine && result.medicine?.name) {
-        speakThai(`จับคู่ได้กับยา ${result.medicine.name}`);
-      }
-    } catch {
-      setStatus("วิเคราะห์ OCR ไม่สำเร็จ");
+      await submitOcrText(ocrText.trim());
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "วิเคราะห์ OCR ไม่สำเร็จ");
     } finally {
       setLoading(false);
     }
   };
+
+  const scanFromCameraLabel = useCallback(async () => {
+    if (!isScanning) {
+      setStatus("กรุณาเริ่มกล้องก่อนสแกนฉลากยา");
+      if (voiceEnabled) {
+        speakThai("กรุณาเริ่มกล้องก่อนสแกนฉลากยา");
+      }
+      return;
+    }
+
+    if (ocrBusyRef.current) {
+      return;
+    }
+
+    const capture = captureFrameForOcr();
+    if (!capture) {
+      setStatus("ยังจับภาพจากกล้องไม่ได้ ลองขยับกล้องแล้วสแกนอีกครั้ง");
+      updateGuidance("move_closer", true);
+      return;
+    }
+
+    ocrBusyRef.current = true;
+    setIsOcrLoading(true);
+    setOcrProgress(0);
+    setStatus("กำลังอ่านฉลากยา...");
+    setOcrPreviewDataUrl(capture.previewDataUrl);
+
+    try {
+      const ocr = await recognizeLabelImage(capture.canvas);
+      const frame = extractFrameFromOcrBlocks(ocr.blocks, capture.canvas.width, capture.canvas.height);
+      const nextGuidance = frame ? computeScanGuidance(frame) : "move_closer";
+      updateGuidance(nextGuidance);
+
+      if (!ocr.text || ocr.text.length < OCR_MIN_TEXT_LENGTH) {
+        setStatus("ยังอ่านข้อความไม่ชัด กรุณาจัดฉลากให้อยู่กลางภาพและขยับใกล้อีกนิด");
+        if (voiceEnabled) {
+          speakThai("ข้อความยังไม่ชัด กรุณาขยับกล้องตามเสียงนำทาง");
+        }
+        return;
+      }
+
+      setOcrText(ocr.text);
+      await submitOcrText(ocr.text, false);
+      setStatus("อ่านฉลากได้แล้ว กรุณาตรวจสอบข้อมูลและกดยืนยัน");
+
+      if (voiceEnabled) {
+        speakThai("อ่านฉลากยาได้แล้ว กรุณาตรวจสอบแล้วกดยืนยัน");
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "อ่านฉลากยาไม่สำเร็จ");
+    } finally {
+      setIsOcrLoading(false);
+      setOcrProgress(null);
+      ocrBusyRef.current = false;
+    }
+  }, [
+    captureFrameForOcr,
+    isScanning,
+    recognizeLabelImage,
+    submitOcrText,
+    updateGuidance,
+    voiceEnabled,
+  ]);
+
+  const scanFromUploadedImage = async (file: File) => {
+    if (ocrBusyRef.current) return;
+
+    ocrBusyRef.current = true;
+    setIsOcrLoading(true);
+    setOcrProgress(0);
+    setStatus("กำลังอ่านรูปฉลากยา...");
+    setPlanError(null);
+    setPlanSuccess(null);
+
+    try {
+      const canvas = await createCanvasFromFile(file);
+      setOcrPreviewDataUrl(canvas.toDataURL("image/jpeg", 0.9));
+
+      const ocr = await recognizeLabelImage(canvas);
+      const frame = extractFrameFromOcrBlocks(ocr.blocks, canvas.width, canvas.height);
+      const nextGuidance = frame ? computeScanGuidance(frame) : "move_closer";
+      updateGuidance(nextGuidance);
+
+      if (!ocr.text || ocr.text.length < OCR_MIN_TEXT_LENGTH) {
+        setStatus("อ่านข้อความจากรูปยังไม่ครบ ลองอัปโหลดรูปที่ชัดขึ้น");
+        return;
+      }
+
+      setOcrText(ocr.text);
+      await submitOcrText(ocr.text, false);
+      setStatus("อ่านฉลากจากรูปเสร็จแล้ว กรุณาตรวจสอบข้อมูลและกดยืนยัน");
+      if (voiceEnabled) {
+        speakThai("อ่านฉลากจากรูปสำเร็จ กรุณากดยืนยัน");
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "อ่านรูปฉลากไม่สำเร็จ");
+    } finally {
+      setIsOcrLoading(false);
+      setOcrProgress(null);
+      ocrBusyRef.current = false;
+    }
+  };
+
+  const confirmAndCreateMedicationPlan = useCallback(async () => {
+    if (!parsedDetails) {
+      setPlanError("ยังไม่มีผล OCR สำหรับยืนยัน กรุณาสแกนฉลากยาก่อน");
+      return;
+    }
+
+    const medicineQuery =
+      parsedDetails.medicineQuery.trim() ||
+      parsedDetails.medicineNameEn?.trim() ||
+      parsedDetails.medicineNameTh?.trim() ||
+      (scanResult?.medicine?.name ?? "").trim();
+
+    if (!medicineQuery) {
+      setPlanError("ไม่พบชื่อยาที่ใช้งานได้ กรุณาลองสแกนใหม่");
+      return;
+    }
+
+    const dosage = buildDosageFromParsed(parsedDetails);
+    const schedule = scheduleFromParsed(parsedDetails);
+
+    setIsCreatingPlan(true);
+    setPlanError(null);
+    setPlanSuccess(null);
+
+    try {
+      const response = await fetch("/api/medication-plans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId,
+          medicineQuery,
+          selectedSourceId: scanResult?.medicine?.id ?? undefined,
+          dosage,
+          notes:
+            parsedDetails.dosageText?.trim() || `OCR confidence: ${(parsedDetails.confidence * 100).toFixed(0)}%`,
+          schedule,
+        }),
+      });
+
+      const payload = (await response.json()) as { error?: string; planId?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "ยืนยันและสร้างแผนยาไม่สำเร็จ");
+      }
+
+      setPlanSuccess("ยืนยันผลสแกนแล้ว และสร้างตารางยา/แจ้งเตือน SMS สำเร็จ");
+      setStatus("บันทึกแผนยาเรียบร้อยแล้ว");
+      if (voiceEnabled) {
+        speakThai("บันทึกแผนยาเรียบร้อยแล้ว ระบบเตือนพร้อมใช้งาน");
+      }
+    } catch (error) {
+      setPlanError(error instanceof Error ? error.message : "ยืนยันผลไม่สำเร็จ");
+    } finally {
+      setIsCreatingPlan(false);
+    }
+  }, [parsedDetails, patientId, scanResult, voiceEnabled]);
 
   useEffect(() => {
     if (!isScanning || !isCameraSupported) {
@@ -472,6 +970,86 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   ]);
 
   useEffect(() => {
+    if (!isScanning || !isAutoLabelScanning) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const scheduleNext = (delay = AUTO_OCR_INTERVAL_MS) => {
+      if (cancelled) return;
+      autoOcrTimerRef.current = window.setTimeout(() => {
+        void runLoop();
+      }, delay);
+    };
+
+    const runLoop = async () => {
+      if (cancelled || ocrBusyRef.current) {
+        scheduleNext(1200);
+        return;
+      }
+
+      const capture = captureFrameForOcr();
+      if (!capture) {
+        updateGuidance("move_closer");
+        scheduleNext(1200);
+        return;
+      }
+
+      ocrBusyRef.current = true;
+      setIsOcrLoading(true);
+      setOcrProgress(0);
+      setOcrPreviewDataUrl(capture.previewDataUrl);
+
+      try {
+        const ocr = await recognizeLabelImage(capture.canvas);
+        const frame = extractFrameFromOcrBlocks(ocr.blocks, capture.canvas.width, capture.canvas.height);
+        const nextGuidance = frame ? computeScanGuidance(frame) : "move_closer";
+        updateGuidance(nextGuidance);
+
+        const normalizedText = ocr.text.trim();
+        if (nextGuidance === "hold_steady" && normalizedText.length >= OCR_MIN_TEXT_LENGTH) {
+          setOcrText(normalizedText);
+          await submitOcrText(normalizedText, false);
+          setStatus("อ่านฉลากยาได้แล้ว กรุณาตรวจสอบข้อมูลและกดยืนยัน");
+          if (voiceEnabled) {
+            speakThai("อ่านฉลากยาได้แล้ว กรุณาตรวจสอบแล้วกดยืนยัน");
+          }
+
+          setIsAutoLabelScanning(false);
+          isAutoLabelScanningRef.current = false;
+          return;
+        }
+
+        if (normalizedText.length < OCR_MIN_TEXT_LENGTH) {
+          setStatus("กำลังหาโฟกัสฉลากยา... จัดฉลากให้อยู่กลางกรอบและใกล้อีกนิด");
+        } else {
+          setStatus("อ่านข้อความบางส่วนได้แล้ว ขยับเล็กน้อยและค้างกล้องไว้");
+        }
+      } catch {
+        setStatus("OCR อัตโนมัติยังอ่านไม่ชัด ลองปรับแสงหรือมุมกล้อง");
+      } finally {
+        ocrBusyRef.current = false;
+        setIsOcrLoading(false);
+        setOcrProgress(null);
+        if (!cancelled && isAutoLabelScanningRef.current) {
+          scheduleNext();
+        }
+      }
+    };
+
+    scheduleNext(500);
+
+    return () => {
+      cancelled = true;
+      if (autoOcrTimerRef.current !== null) {
+        window.clearTimeout(autoOcrTimerRef.current);
+        autoOcrTimerRef.current = null;
+      }
+    };
+  }, [captureFrameForOcr, isAutoLabelScanning, isScanning, recognizeLabelImage, submitOcrText, updateGuidance, voiceEnabled]);
+
+  useEffect(() => {
     if (!isScanning) {
       return;
     }
@@ -480,15 +1058,21 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       if (!document.hidden) return;
       setStatus("หยุดสแกนชั่วคราวเมื่อออกจากหน้าจอ");
       setIsScanning(false);
+      stopAutoLabelLoop();
     };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [isScanning]);
+  }, [isScanning, stopAutoLabelLoop]);
 
-  useEffect(() => () => stopScanner(), [stopScanner]);
+  useEffect(() => {
+    return () => {
+      stopScanner();
+      void terminateOcrWorker();
+    };
+  }, [stopScanner, terminateOcrWorker]);
 
   const guidanceLabel = useMemo(() => guidanceToThaiSpeech(guidance), [guidance]);
 
@@ -504,15 +1088,20 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     return status;
   }, [activeEngine, isCameraSupported, isScanning, status]);
 
+  const parsedPeriodsLabel =
+    parsedDetails?.periods.length ? parsedDetails.periods.map(periodToThai).join(", ") : "-";
+
+  const parsedMealLabel = parsedDetails ? mealTimingToThai(parsedDetails.mealTiming) : "-";
+
   return (
     <Card className="shadow-sm">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <ScanLine className="h-5 w-5" />
-          สแกนยาแบบ Hybrid
+          สแกนฉลากยาและบาร์โค้ดแบบใช้งานจริง
         </CardTitle>
         <CardDescription>
-          ระบบจะช่วยบอกทิศทางด้วยเสียงเพื่อให้สแกนยาได้ถูกต้อง (ไทยเป็นหลัก)
+          รองรับการอ่านฉลากยาไทย/อังกฤษจากกล้องโดยไม่ต้องพึ่งบาร์โค้ด พร้อมเสียงนำทางและยืนยันเพื่อสร้างเตือน SMS
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -520,7 +1109,12 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
           <AlertTitle>สถานะสแกน</AlertTitle>
           <AlertDescription className="space-y-2">
             <p>{resolvedStatus}</p>
-            <Badge variant="secondary">{guidanceLabel}</Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">{guidanceLabel}</Badge>
+              {isOcrLoading ? <Badge variant="outline">OCR กำลังทำงาน</Badge> : null}
+              {ocrProgress !== null ? <Badge variant="outline">{ocrProgress}%</Badge> : null}
+              {isAutoLabelScanning ? <Badge>โหมดสแกนฉลากอัตโนมัติ</Badge> : null}
+            </div>
           </AlertDescription>
         </Alert>
 
@@ -530,18 +1124,25 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
               <Button
                 onClick={() => {
                   setScanResult(null);
+                  setParsedDetails(null);
+                  setPlanError(null);
+                  setPlanSuccess(null);
                   setLastDetectedBarcode(null);
                   setStatus("กำลังเตรียมกล้อง...");
                   warmupSpeechSynthesis();
                   updateGuidance("move_closer", true);
                   if (voiceEnabled) {
-                    speakThai("เริ่มสแกนยาแล้ว กรุณาหันกล้องไปที่บาร์โค้ดยา", 1);
+                    speakThai("เริ่มสแกนยาแล้ว กรุณาหันกล้องไปที่ฉลากยา");
                   }
                   setIsScanning(true);
                 }}
                 disabled={isScanning || isStartingCamera}
               >
-                {isStartingCamera ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                {isStartingCamera ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Camera className="h-4 w-4" />
+                )}
                 <span>{isStartingCamera ? "กำลังเปิดกล้อง" : "เริ่มสแกนด้วยกล้อง"}</span>
               </Button>
 
@@ -555,6 +1156,41 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                 disabled={!isScanning}
               >
                 หยุดสแกน
+              </Button>
+
+              <Button
+                variant={isAutoLabelScanning ? "secondary" : "outline"}
+                disabled={!isScanning || isOcrLoading}
+                onClick={() => {
+                  const next = !isAutoLabelScanning;
+                  setIsAutoLabelScanning(next);
+                  isAutoLabelScanningRef.current = next;
+                  setStatus(
+                    next
+                      ? "เปิดโหมดสแกนฉลากอัตโนมัติแล้ว จัดฉลากให้อยู่ในกรอบ"
+                      : "ปิดโหมดสแกนฉลากอัตโนมัติแล้ว",
+                  );
+                  if (voiceEnabled) {
+                    speakThai(
+                      next
+                        ? "เปิดโหมดสแกนฉลากอัตโนมัติแล้ว กรุณาจัดฉลากให้อยู่ตรงกลาง"
+                        : "ปิดโหมดสแกนอัตโนมัติแล้ว",
+                    );
+                  }
+                }}
+              >
+                {isAutoLabelScanning ? "ปิดโหมดสแกนอัตโนมัติ" : "เปิดโหมดสแกนอัตโนมัติ"}
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => {
+                  void scanFromCameraLabel();
+                }}
+                disabled={!isScanning || isOcrLoading}
+              >
+                {isOcrLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                อ่านฉลากจากกล้องตอนนี้
               </Button>
 
               <Button
@@ -585,8 +1221,11 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
             </div>
 
             {isScanning ? (
-              <div className="overflow-hidden rounded-xl border bg-black">
+              <div className="relative overflow-hidden rounded-xl border bg-black">
                 <video ref={videoRef} className="h-72 w-full object-cover" muted playsInline />
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div className="h-[68%] w-[84%] rounded-2xl border-2 border-cyan-300/90 shadow-[0_0_0_9999px_rgba(0,0,0,0.22)]" />
+                </div>
               </div>
             ) : (
               <div className="rounded-xl border border-dashed bg-muted/40 p-8 text-center text-sm text-muted-foreground">
@@ -618,22 +1257,45 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="ocrText">OCR fallback (พิมพ์ข้อความบนกล่องยา)</Label>
+            <Label htmlFor="ocrUpload">อัปโหลดรูปซองยา / ฉลากยา</Label>
             <Input
-              id="ocrText"
-              value={ocrText}
-              onChange={(event) => setOcrText(event.target.value)}
-              placeholder="เช่น Paracetamol 500 mg"
+              ref={fileInputRef}
+              id="ocrUpload"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  void scanFromUploadedImage(file);
+                }
+                event.currentTarget.value = "";
+              }}
             />
-            <Button variant="outline" onClick={scanViaOcrFallback} disabled={loading || !ocrText.trim()}>
-              วิเคราะห์ OCR
-            </Button>
+            <p className="text-xs text-muted-foreground">
+              รองรับถ่ายจากมือถือหรือเลือกรูปที่มีฉลากยาชัดเจน
+            </p>
           </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="ocrText">ข้อความ OCR (แก้ไขได้ก่อนยืนยัน)</Label>
+          <Textarea
+            id="ocrText"
+            value={ocrText}
+            onChange={(event) => setOcrText(event.target.value)}
+            placeholder="วางข้อความจากฉลากยา หรือกดอ่านจากกล้อง/อัปโหลดรูป"
+            rows={5}
+          />
+          <Button variant="outline" onClick={scanViaOcrText} disabled={loading || !ocrText.trim()}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            วิเคราะห์ข้อความ OCR
+          </Button>
         </div>
 
         {lastDetectedBarcode && !scanResult?.medicine ? (
           <Alert>
-            <AlertTitle>ยืนยันการสแกนแล้ว</AlertTitle>
+            <AlertTitle>ยืนยันการสแกนบาร์โค้ดแล้ว</AlertTitle>
             <AlertDescription>
               อ่านบาร์โค้ดได้: <strong>{lastDetectedBarcode}</strong> แต่ยังไม่พบชื่อยาในฐานข้อมูล
             </AlertDescription>
@@ -647,6 +1309,109 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
               พบยา <strong>{scanResult.medicine.name}</strong>{" "}
               {scanResult.medicine.strength ? `(${scanResult.medicine.strength})` : ""}
             </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {ocrPreviewDataUrl ? (
+          <div className="space-y-2">
+            <Label>ภาพล่าสุดที่ใช้วิเคราะห์ OCR</Label>
+            <div className="overflow-hidden rounded-xl border bg-muted/30">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={ocrPreviewDataUrl} alt="OCR preview" className="h-auto w-full object-contain" />
+            </div>
+          </div>
+        ) : null}
+
+        {parsedDetails ? (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">ผลอ่านฉลากยา (AI OCR)</CardTitle>
+              <CardDescription>
+                ตรวจสอบข้อมูลก่อนกดยืนยันเพื่อสร้างแผนยาและแจ้งเตือน SMS
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <div className="grid gap-2 md:grid-cols-2">
+                <p>
+                  <span className="text-muted-foreground">ชื่อยา (EN): </span>
+                  <strong>{parsedDetails.medicineNameEn || "-"}</strong>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">ชื่อยา (TH): </span>
+                  <strong>{parsedDetails.medicineNameTh || "-"}</strong>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">คำค้นยา: </span>
+                  <strong>{parsedDetails.medicineQuery || "-"}</strong>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">ความมั่นใจ OCR: </span>
+                  <strong>{Math.round(parsedDetails.confidence * 100)}%</strong>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">จำนวนต่อครั้ง: </span>
+                  <strong>{parsedDetails.quantityPerDose || "-"}</strong>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">ความถี่ต่อวัน: </span>
+                  <strong>
+                    {parsedDetails.frequencyPerDay ? `${parsedDetails.frequencyPerDay} ครั้ง` : "-"}
+                  </strong>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">ช่วงเวลา: </span>
+                  <strong>{parsedPeriodsLabel}</strong>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">ก่อน/หลังอาหาร: </span>
+                  <strong>{parsedMealLabel}</strong>
+                </p>
+              </div>
+              <p>
+                <span className="text-muted-foreground">เวลาที่อ่านได้: </span>
+                <strong>{parsedDetails.customTimes.length ? parsedDetails.customTimes.join(", ") : "-"}</strong>
+              </p>
+              <p className="rounded-md bg-muted/40 p-2 text-sm">
+                <span className="text-muted-foreground">สรุปการใช้ยา: </span>
+                {buildDosageFromParsed(parsedDetails)}
+              </p>
+
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button onClick={() => void confirmAndCreateMedicationPlan()} disabled={isCreatingPlan}>
+                  {isCreatingPlan ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4" />
+                  )}
+                  ยืนยันผลและสร้างแผนยา + แจ้งเตือน SMS
+                </Button>
+
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    fileInputRef.current?.click();
+                  }}
+                  disabled={isCreatingPlan || isOcrLoading}
+                >
+                  <Upload className="h-4 w-4" />
+                  อัปโหลดรูปใหม่
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {planError ? (
+          <Alert variant="destructive">
+            <AlertTitle>ยืนยันผลไม่สำเร็จ</AlertTitle>
+            <AlertDescription>{planError}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {planSuccess ? (
+          <Alert>
+            <AlertTitle>สำเร็จ</AlertTitle>
+            <AlertDescription>{planSuccess}</AlertDescription>
           </Alert>
         ) : null}
       </CardContent>
