@@ -66,6 +66,16 @@ interface OcrResponse {
   query?: string;
   parsedDetails?: ParsedMedicationDetails;
   validation?: OcrValidationResult;
+  externalInfo?: {
+    source: "local" | "openfda";
+    matchedNameEn: string;
+    matchedNameTh: string | null;
+    genericNameEn: string | null;
+    indicationEn: string | null;
+    indicationTh: string | null;
+    symptomTagsTh: string[];
+    matchScore: number;
+  } | null;
 }
 
 interface MedicationScannerProps {
@@ -174,7 +184,7 @@ const normalizeComparableText = (text: string) =>
 const THAI_LINE_REGEX = /[\u0E00-\u0E7F]/u;
 const ENGLISH_LINE_REGEX = /[A-Za-z]/;
 const NON_DRUG_LINE_REGEX =
-  /(hospital|clinic|doctor|patient|hn\b|opd\b|โรงพยาบาล|แพทย์|รับประทาน|วันละ|ครั้งละ|ก่อนอาหาร|หลังอาหาร|เช้า|กลางวัน|เที่ยง|เย็น|ก่อนนอน)/i;
+  /(hospital|clinic|doctor|patient|patient name|hn\b|opd\b|นาย|นางสาว|นาง|ด\.ช\.|ด\.ญ\.|โรงพยาบาล|แพทย์|ผู้ป่วย|รับประทาน|วันละ|ครั้งละ|ก่อนอาหาร|หลังอาหาร|เช้า|กลางวัน|เที่ยง|เย็น|ก่อนนอน)/i;
 const DOSE_HINT_REGEX =
   /(รับประทาน|วันละ|ครั้งละ|ก่อนอาหาร|หลังอาหาร|เช้า|กลางวัน|เที่ยง|เย็น|ก่อนนอน|take|daily|times?\s*(per|a)\s*day|before meal|after meal)/i;
 
@@ -1498,6 +1508,8 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     parsedDetails?.periods.length ? parsedDetails.periods.map(periodToThai).join(", ") : "-";
 
   const parsedMealLabel = parsedDetails ? mealTimingToThai(parsedDetails.mealTiming) : "-";
+  const externalInfo =
+    scanResult && "externalInfo" in scanResult ? scanResult.externalInfo ?? null : null;
 
   return (
     <Card className="shadow-sm">
@@ -1786,6 +1798,39 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                   <span className="text-muted-foreground">สรุปการใช้ยา: </span>
                   {buildDosageFromParsed(parsedDetails)}
                 </p>
+                {externalInfo ? (
+                  <div className="space-y-2 rounded-md border bg-cyan-50/60 p-3">
+                    <p className="text-sm font-semibold">ข้อมูลยาจริงจากฐานข้อมูลภายนอก</p>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <p>
+                        <span className="text-muted-foreground">ชื่อยาที่เทียบได้ (EN): </span>
+                        <strong>{externalInfo.matchedNameEn}</strong>
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">ชื่อยาภาษาไทย: </span>
+                        <strong>{externalInfo.matchedNameTh || "-"}</strong>
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">ตัวยาสำคัญ (Generic): </span>
+                        <strong>{externalInfo.genericNameEn || "-"}</strong>
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">ความตรงกับผลสแกน: </span>
+                        <strong>{Math.round(externalInfo.matchScore * 100)}%</strong>
+                      </p>
+                    </div>
+                    <p>
+                      <span className="text-muted-foreground">ยานี้ทำอะไร: </span>
+                      <strong>{externalInfo.indicationTh || "-"}</strong>
+                    </p>
+                    {externalInfo.symptomTagsTh.length ? (
+                      <p>
+                        <span className="text-muted-foreground">อาการที่ช่วยบรรเทา: </span>
+                        <strong>{externalInfo.symptomTagsTh.join(", ")}</strong>
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="flex flex-wrap gap-2 pt-1">
                   <Button

@@ -32,9 +32,13 @@ export interface MedicineSearchResult {
   sourceId: string;
   name: string;
   genericName?: string | null;
+  thaiName?: string | null;
   dosageForm?: string | null;
   strength?: string | null;
   barcode?: string | null;
+  indicationEn?: string | null;
+  indicationTh?: string | null;
+  symptomTagsTh?: string[];
 }
 
 export interface MedicationScheduleInput {

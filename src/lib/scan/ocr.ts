@@ -45,7 +45,14 @@ const INSTRUCTION_SKIP_PATTERNS = [
   /hn\b/i,
   /opd\b/i,
   /\d{1,2}[/-]\d{1,2}[/-]\d{2,4}/,
+  /patient|name|นาย|นางสาว|นาง|ด\.ช\.|ด\.ญ\./i,
 ];
+
+const PATIENT_CONTEXT_REGEX =
+  /(hn|opd|patient|name|age|dob|โรงพยาบาล|ผู้ป่วย|แพทย์|คลินิก|นาย|นางสาว|นาง|ด\.ช\.|ด\.ญ\.)/i;
+
+const DRUG_KEYWORD_REGEX =
+  /\b(tablet|tab|capsule|cap|syrup|suspension|cream|ointment|mg|mcg|ml|g)\b/i;
 
 const cleanLine = (line: string) =>
   line
@@ -97,7 +104,7 @@ const isValidThaiMedicineName = (value: string) => {
 };
 
 const isInstructionLine = (line: string) =>
-  INSTRUCTION_SKIP_PATTERNS.some((pattern) => pattern.test(line));
+  INSTRUCTION_SKIP_PATTERNS.some((pattern) => pattern.test(line)) || PATIENT_CONTEXT_REGEX.test(line);
 
 const hasEnglishDrugShape = (line: string) => {
   if (!/[A-Za-z]/.test(line)) return false;
@@ -120,7 +127,12 @@ const hasThaiDrugShape = (line: string) => {
 
   const normalized = normalizeNameCandidate(line);
   const thaiChars = countMatches(normalized, THAI_CHAR_REGEX);
-  return thaiChars >= 4;
+  if (thaiChars < 4) return false;
+
+  const hasDrugKeyword = DRUG_KEYWORD_REGEX.test(normalized);
+  const isLikelyTwoPartPersonName =
+    /^[\u0E00-\u0E7F]{2,20}\s+[\u0E00-\u0E7F]{2,30}$/.test(normalized) && !hasDrugKeyword;
+  return !isLikelyTwoPartPersonName;
 };
 
 const matchEnglishDrugLine = (lines: string[]) =>
@@ -155,7 +167,18 @@ const extractMedicineFromThaiLine = (line: string | undefined) => {
   const cleaned = normalizeNameCandidate(cleanLine(line));
   if (cleaned.length < 2) return null;
   if (INSTRUCTION_SKIP_PATTERNS.some((pattern) => pattern.test(cleaned))) return null;
+  if (PATIENT_CONTEXT_REGEX.test(cleaned) && !DRUG_KEYWORD_REGEX.test(cleaned)) return null;
   return isValidThaiMedicineName(cleaned) ? cleaned : null;
+};
+
+const extractThaiNameFromEnglishLineParenthesis = (line: string | undefined) => {
+  if (!line) return null;
+  const match = line.match(/\(([^)]*[\u0E00-\u0E7F][^)]*)\)/);
+  if (!match?.[1]) return null;
+  const normalized = normalizeNameCandidate(cleanLine(match[1]));
+  if (!normalized) return null;
+  if (PATIENT_CONTEXT_REGEX.test(normalized) && !DRUG_KEYWORD_REGEX.test(normalized)) return null;
+  return isValidThaiMedicineName(normalized) ? normalized : null;
 };
 
 const extractDoseTextLines = (lines: string[]) => {
@@ -317,7 +340,8 @@ export const parseMedicationDetailsFromText = (inputText: string): ParsedMedicat
   const thaiLine = matchThaiDrugLine(lines);
 
   const medicineNameEn = extractMedicineFromEnglishLine(englishLine);
-  const medicineNameTh = extractMedicineFromThaiLine(thaiLine);
+  const medicineNameTh =
+    extractMedicineFromThaiLine(thaiLine) ?? extractThaiNameFromEnglishLineParenthesis(englishLine);
 
   const doseLines = extractDoseTextLines(lines);
   const dosageText = doseLines.join(" ") || lines.slice(0, 6).join(" ");
