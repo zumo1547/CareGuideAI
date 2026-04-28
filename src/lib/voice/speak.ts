@@ -1,15 +1,51 @@
-"use client";
+﻿"use client";
 
 const THAI_LANG = "th-TH";
+let lastSpokenText = "";
+let lastSpokenAt = 0;
+
+const pickThaiVoice = () => {
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+
+  return (
+    voices.find((voice) => voice.lang.toLowerCase().startsWith("th")) ??
+    voices.find((voice) => voice.default) ??
+    voices[0]
+  );
+};
 
 export const speakThai = (text: string, rate = 1) => {
-  if (typeof window === "undefined" || !("speechSynthesis" in window) || !text) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window) || !text.trim()) {
+    return;
+  }
+
+  const now = Date.now();
+  if (text === lastSpokenText && now - lastSpokenAt < 1200) {
     return;
   }
 
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = THAI_LANG;
   utterance.rate = rate;
-  window.speechSynthesis.cancel();
+
+  const pickedVoice = pickThaiVoice();
+  if (pickedVoice) {
+    utterance.voice = pickedVoice;
+    utterance.lang = pickedVoice.lang || THAI_LANG;
+  }
+
+  window.speechSynthesis.speak(utterance);
+  lastSpokenText = text;
+  lastSpokenAt = now;
+};
+
+export const warmupSpeechSynthesis = () => {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    return;
+  }
+
+  const utterance = new SpeechSynthesisUtterance(" ");
+  utterance.volume = 0;
   window.speechSynthesis.speak(utterance);
 };

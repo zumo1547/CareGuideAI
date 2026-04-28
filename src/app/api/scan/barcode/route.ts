@@ -94,6 +94,9 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json({
+    scannedBarcode: barcode,
+    barcodeDetected: true,
+    matchStatus: medicine ? "matched" : "detected_only",
     guidance,
     foundMedicine: Boolean(medicine),
     medicine,

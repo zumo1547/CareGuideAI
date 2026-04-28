@@ -1,4 +1,4 @@
-import { env } from "@/lib/env";
+﻿import { env } from "@/lib/env";
 import type { MedicineSearchResult } from "@/types/domain";
 
 interface OpenFdaResult {
@@ -6,6 +6,7 @@ interface OpenFdaResult {
     brand_name?: string[];
     generic_name?: string[];
     product_ndc?: string[];
+    package_ndc?: string[];
     dosage_form?: string[];
     route?: string[];
     substance_name?: string[];
@@ -17,16 +18,28 @@ interface OpenFdaResponse {
   results?: OpenFdaResult[];
 }
 
+const normalizeQuery = (query: string) => query.trim().replace(/\s+/g, " ");
+
+const quote = (value: string) => `\"${value.replace(/\"/g, "").trim()}\"`;
+
 const makeOpenFdaUrl = (query: string) => {
-  const trimmed = query.trim();
-  const encoded = encodeURIComponent(trimmed);
+  const trimmed = normalizeQuery(query);
+  const isLikelyCode = /^[\d-]+$/.test(trimmed);
 
-  const search = [
-    `openfda.brand_name:${encoded}`,
-    `openfda.generic_name:${encoded}`,
-    `openfda.substance_name:${encoded}`,
-  ].join("+OR+");
+  const searchTerms = [
+    `openfda.brand_name:${quote(trimmed)}`,
+    `openfda.generic_name:${quote(trimmed)}`,
+    `openfda.substance_name:${quote(trimmed)}`,
+  ];
 
+  if (isLikelyCode) {
+    searchTerms.unshift(
+      `openfda.package_ndc:${quote(trimmed)}`,
+      `openfda.product_ndc:${quote(trimmed)}`,
+    );
+  }
+
+  const search = encodeURIComponent(searchTerms.join(" OR "));
   const apiKeyPart = env.OPENFDA_API_KEY ? `&api_key=${env.OPENFDA_API_KEY}` : "";
   return `${env.OPENFDA_API_BASE_URL}?search=${search}&limit=10${apiKeyPart}`;
 };
@@ -34,12 +47,13 @@ const makeOpenFdaUrl = (query: string) => {
 export const searchOpenFdaMedicines = async (
   query: string,
 ): Promise<MedicineSearchResult[]> => {
-  if (!query.trim()) {
+  const trimmed = normalizeQuery(query);
+  if (!trimmed) {
     return [];
   }
 
   try {
-    const response = await fetch(makeOpenFdaUrl(query), {
+    const response = await fetch(makeOpenFdaUrl(trimmed), {
       headers: {
         Accept: "application/json",
       },
@@ -55,15 +69,19 @@ export const searchOpenFdaMedicines = async (
     const payload = (await response.json()) as OpenFdaResponse;
     const results = payload.results ?? [];
 
-    return results.map((item, index) => ({
-      source: "openfda",
-      sourceId: item.openfda?.product_ndc?.[0] ?? `${query}-${index}`,
-      name: item.openfda?.brand_name?.[0] ?? item.openfda?.generic_name?.[0] ?? "Unknown",
-      genericName: item.openfda?.generic_name?.[0] ?? null,
-      dosageForm: item.openfda?.dosage_form?.[0] ?? null,
-      strength: item.openfda?.substance_name?.[0] ?? null,
-      barcode: item.openfda?.product_ndc?.[0] ?? null,
-    }));
+    return results.map((item, index) => {
+      const ndc = item.openfda?.package_ndc?.[0] ?? item.openfda?.product_ndc?.[0] ?? null;
+
+      return {
+        source: "openfda",
+        sourceId: ndc ?? `${trimmed}-${index}`,
+        name: item.openfda?.brand_name?.[0] ?? item.openfda?.generic_name?.[0] ?? "Unknown",
+        genericName: item.openfda?.generic_name?.[0] ?? null,
+        dosageForm: item.openfda?.dosage_form?.[0] ?? null,
+        strength: item.openfda?.substance_name?.[0] ?? null,
+        barcode: ndc,
+      };
+    });
   } catch (error) {
     console.error("OpenFDA search failed", error);
     return [];

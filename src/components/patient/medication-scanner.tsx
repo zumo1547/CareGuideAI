@@ -11,11 +11,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { guidanceToThaiSpeech, type DetectionFrame } from "@/lib/scan/guidance";
-import { speakThai } from "@/lib/voice/speak";
+import { speakThai, warmupSpeechSynthesis } from "@/lib/voice/speak";
 import type { ScanGuidanceState } from "@/types/domain";
 
 interface ScanResponse {
   guidance: ScanGuidanceState;
+  scannedBarcode?: string;
+  barcodeDetected?: boolean;
+  matchStatus?: "matched" | "detected_only";
   foundMedicine: boolean;
   medicine?: {
     id: string;
@@ -113,6 +116,8 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const [isScanning, setIsScanning] = useState(false);
   const [isStartingCamera, setIsStartingCamera] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResponse | OcrResponse | null>(null);
+  const [lastDetectedBarcode, setLastDetectedBarcode] = useState<string | null>(null);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [activeEngine, setActiveEngine] = useState<ScannerEngine | null>(null);
 
   const isCameraSupported =
@@ -126,6 +131,10 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
 
   const updateGuidance = useCallback((nextGuidance: ScanGuidanceState, forceSpeak = false) => {
     setGuidance((previous) => (previous === nextGuidance ? previous : nextGuidance));
+
+    if (!voiceEnabled) {
+      return;
+    }
 
     const now = Date.now();
     if (!forceSpeak && now - lastSpokenAtRef.current < SPEAK_COOLDOWN_MS) return;
@@ -141,7 +150,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     lastSpokenAtRef.current = now;
     lastGuidanceRef.current = nextGuidance;
     speakThai(guidanceToThaiSpeech(nextGuidance), 1.02);
-  }, []);
+  }, [voiceEnabled]);
 
   const stopScanner = useCallback(() => {
     if (timerRef.current !== null) {
@@ -183,9 +192,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       updateGuidance(result.guidance);
       setScanResult(result);
 
-      if (result.foundMedicine && result.medicine?.name) {
-        speakThai(`พบยา ${result.medicine.name} สแกนเสร็จสิ้นแล้ว`);
-      }
+      return result;
     },
     [patientId, updateGuidance],
   );
@@ -197,16 +204,32 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       lastScannedAtRef.current = now;
 
       try {
-        await callBarcodeApi({
+        updateGuidance("hold_steady");
+        const result = await callBarcodeApi({
           barcode,
           frame,
         });
-        setStatus("จับบาร์โค้ดได้แล้ว");
+
+        const detectedCode = result.scannedBarcode ?? barcode;
+        setLastDetectedBarcode(detectedCode);
+
+        if (result.foundMedicine && result.medicine?.name) {
+          setStatus(`สแกนสำเร็จ: ${result.medicine.name}`);
+          if (voiceEnabled) {
+            speakThai(`ยืนยันผลสแกนแล้ว พบยา ${result.medicine.name}`);
+          }
+          return;
+        }
+
+        setStatus(`อ่านบาร์โค้ดได้แล้ว: ${detectedCode} (ยังไม่พบชื่อยาในฐานข้อมูล)`);
+        if (voiceEnabled) {
+          speakThai(`สแกนสำเร็จ อ่านบาร์โค้ดได้แล้ว ${detectedCode}`);
+        }
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "สแกนไม่สำเร็จ");
       }
     },
-    [callBarcodeApi],
+    [callBarcodeApi, updateGuidance, voiceEnabled],
   );
 
   const scanManualBarcode = async () => {
@@ -253,7 +276,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
           : "ยังไม่พบยา ลองพิมพ์ชื่อยาให้ละเอียดขึ้น",
       );
 
-      if (result.foundMedicine && result.medicine?.name) {
+      if (voiceEnabled && result.foundMedicine && result.medicine?.name) {
         speakThai(`จับคู่ได้กับยา ${result.medicine.name}`);
       }
     } catch {
@@ -507,7 +530,13 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
               <Button
                 onClick={() => {
                   setScanResult(null);
+                  setLastDetectedBarcode(null);
                   setStatus("กำลังเตรียมกล้อง...");
+                  warmupSpeechSynthesis();
+                  updateGuidance("move_closer", true);
+                  if (voiceEnabled) {
+                    speakThai("เริ่มสแกนยาแล้ว กรุณาหันกล้องไปที่บาร์โค้ดยา", 1);
+                  }
                   setIsScanning(true);
                 }}
                 disabled={isScanning || isStartingCamera}
@@ -526,6 +555,32 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                 disabled={!isScanning}
               >
                 หยุดสแกน
+              </Button>
+
+              <Button
+                variant={voiceEnabled ? "secondary" : "outline"}
+                onClick={() => {
+                  setVoiceEnabled((previous) => {
+                    const next = !previous;
+                    if (next) {
+                      warmupSpeechSynthesis();
+                      speakThai("เปิดเสียงนำทางแล้ว");
+                    }
+                    return next;
+                  });
+                }}
+              >
+                {voiceEnabled ? "ปิดเสียงนำทาง" : "เปิดเสียงนำทาง"}
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => {
+                  warmupSpeechSynthesis();
+                  speakThai("ทดสอบเสียงนำทาง หากได้ยินแปลว่าเสียงพร้อมใช้งาน");
+                }}
+              >
+                ทดสอบเสียง
               </Button>
             </div>
 
@@ -575,6 +630,15 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
             </Button>
           </div>
         </div>
+
+        {lastDetectedBarcode && !scanResult?.medicine ? (
+          <Alert>
+            <AlertTitle>ยืนยันการสแกนแล้ว</AlertTitle>
+            <AlertDescription>
+              อ่านบาร์โค้ดได้: <strong>{lastDetectedBarcode}</strong> แต่ยังไม่พบชื่อยาในฐานข้อมูล
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         {scanResult?.medicine ? (
           <Alert>
