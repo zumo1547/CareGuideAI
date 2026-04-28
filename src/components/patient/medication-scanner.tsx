@@ -16,6 +16,7 @@ import {
   guidanceToThaiSpeech,
   type DetectionFrame,
 } from "@/lib/scan/guidance";
+import { parseMedicationDetailsFromText } from "@/lib/scan/ocr";
 import { speakThai, stopThaiSpeech, warmupSpeechSynthesis } from "@/lib/voice/speak";
 import type { ScanGuidanceState } from "@/types/domain";
 
@@ -104,17 +105,46 @@ const DETECT_INTERVAL_MS = 1000;
 const SPEAK_COOLDOWN_MS = 1400;
 const AUTO_OCR_INTERVAL_MS = 2800;
 const OCR_MIN_TEXT_LENGTH = 12;
-const OCR_SUCCESS_MIN_CONFIDENCE = 0.38;
 const AUTO_FINALIZE_MIN_COMPLETION = 66;
 const AUTO_FINALIZE_MIN_CONFIDENCE = 0.05;
 const AUTO_FINALIZE_MIN_TEXT_LENGTH = 12;
 const AUTO_FINALIZE_STABLE_FRAMES = 1;
+const SAFETY_WARNING_COOLDOWN_MS = 2800;
+const QUALITY_MIN_BRIGHTNESS = 0.2;
+const QUALITY_MAX_BRIGHTNESS = 0.92;
+const QUALITY_MIN_CONTRAST = 0.08;
+const QUALITY_MIN_SHARPNESS = 0.085;
+const NAME_CLARITY_MIN_SCORE = 0.64;
 
 interface ScanCandidate {
   text: string;
   previewDataUrl: string;
   completion: number;
   confidence: number;
+}
+
+type ScanSafetyIssue =
+  | "too_dark"
+  | "too_bright"
+  | "too_blurry"
+  | "low_contrast"
+  | "name_unclear";
+
+interface ScanQualityMetrics {
+  brightness: number;
+  contrast: number;
+  sharpness: number;
+}
+
+interface ScanSafetyResult {
+  quality: ScanQualityMetrics;
+  hasThaiName: boolean;
+  hasEnglishName: boolean;
+  nameClarityScore: number;
+  overallScore: number;
+  blockingIssue: ScanSafetyIssue | null;
+  statusMessage: string;
+  voiceMessage: string | null;
 }
 
 const preferredVideoConstraints = (): MediaTrackConstraints => ({
@@ -130,6 +160,198 @@ const normalizeComparableText = (text: string) =>
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+const THAI_LINE_REGEX = /[\u0E00-\u0E7F]/u;
+const ENGLISH_LINE_REGEX = /[A-Za-z]/;
+const NON_DRUG_LINE_REGEX =
+  /(hospital|clinic|doctor|patient|hn\b|opd\b|โรงพยาบาล|แพทย์|รับประทาน|วันละ|ครั้งละ|ก่อนอาหาร|หลังอาหาร|เช้า|กลางวัน|เที่ยง|เย็น|ก่อนนอน)/i;
+const DOSE_HINT_REGEX =
+  /(รับประทาน|วันละ|ครั้งละ|ก่อนอาหาร|หลังอาหาร|เช้า|กลางวัน|เที่ยง|เย็น|ก่อนนอน|take|daily|times?\s*(per|a)\s*day|before meal|after meal)/i;
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const findEnglishNameCandidate = (lines: string[]) =>
+  lines.find((line) => {
+    if (!ENGLISH_LINE_REGEX.test(line)) return false;
+    if (NON_DRUG_LINE_REGEX.test(line)) return false;
+
+    const englishLetters = (line.match(/[A-Za-z]/g) ?? []).length;
+    if (englishLetters < 5) return false;
+
+    return (
+      /\d+(?:\.\d+)?\s*(mg|mcg|g|ml)\b/i.test(line) ||
+      /\b[A-Za-z][A-Za-z-]{3,}\b.*\b[A-Za-z][A-Za-z-]{2,}\b/.test(line) ||
+      /\([A-Za-z0-9\- ]{3,}\)/.test(line)
+    );
+  });
+
+const findThaiNameCandidate = (lines: string[]) =>
+  lines.find((line) => {
+    if (!THAI_LINE_REGEX.test(line)) return false;
+    if (NON_DRUG_LINE_REGEX.test(line)) return false;
+
+    const thaiLength = (line.match(/[\u0E00-\u0E7F]/g) ?? []).length;
+    return thaiLength >= 4;
+  });
+
+const analyzeNameClarity = (text: string) => {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+
+  const englishCandidate = findEnglishNameCandidate(lines);
+  const thaiCandidate = findThaiNameCandidate(lines);
+  const hasEnglishName = Boolean(englishCandidate);
+  const hasThaiName = Boolean(thaiCandidate);
+  const hasDoseSignal = DOSE_HINT_REGEX.test(text);
+
+  let score = 0;
+  if (hasEnglishName) score += 0.4;
+  if (hasThaiName) score += 0.4;
+  if (hasDoseSignal) score += 0.12;
+  if (text.length >= 40) score += 0.08;
+
+  return {
+    hasEnglishName,
+    hasThaiName,
+    nameClarityScore: Number(clamp(score, 0, 1).toFixed(2)),
+  };
+};
+
+const analyzeFrameQuality = (canvas: HTMLCanvasElement): ScanQualityMetrics | null => {
+  const width = canvas.width;
+  const height = canvas.height;
+  if (!width || !height) return null;
+
+  const maxEdge = 220;
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
+  const sampleWidth = Math.max(80, Math.floor(width * scale));
+  const sampleHeight = Math.max(80, Math.floor(height * scale));
+
+  const sampleCanvas = document.createElement("canvas");
+  sampleCanvas.width = sampleWidth;
+  sampleCanvas.height = sampleHeight;
+
+  const context = sampleCanvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+
+  context.drawImage(canvas, 0, 0, sampleWidth, sampleHeight);
+  const frame = context.getImageData(0, 0, sampleWidth, sampleHeight);
+  const pixels = frame.data;
+  const pixelCount = sampleWidth * sampleHeight;
+  if (!pixelCount) return null;
+
+  const gray = new Float32Array(pixelCount);
+  let sum = 0;
+  for (let index = 0, pixel = 0; pixel < pixelCount; pixel += 1, index += 4) {
+    const luminance = pixels[index] * 0.299 + pixels[index + 1] * 0.587 + pixels[index + 2] * 0.114;
+    gray[pixel] = luminance;
+    sum += luminance;
+  }
+
+  const mean = sum / pixelCount;
+  let variance = 0;
+  let edgeSum = 0;
+  let edgeCount = 0;
+
+  for (let y = 1; y < sampleHeight - 1; y += 1) {
+    for (let x = 1; x < sampleWidth - 1; x += 1) {
+      const offset = y * sampleWidth + x;
+      const center = gray[offset];
+      const diff = center - mean;
+      variance += diff * diff;
+
+      const laplace =
+        4 * center -
+        gray[offset - 1] -
+        gray[offset + 1] -
+        gray[offset - sampleWidth] -
+        gray[offset + sampleWidth];
+      edgeSum += Math.abs(laplace);
+      edgeCount += 1;
+    }
+  }
+
+  const brightness = Number(clamp(mean / 255, 0, 1).toFixed(3));
+  const contrast = Number(clamp(Math.sqrt(variance / pixelCount) / 255, 0, 1).toFixed(3));
+  const sharpness = Number(clamp((edgeCount ? edgeSum / edgeCount : 0) / 255, 0, 1).toFixed(3));
+
+  return { brightness, contrast, sharpness };
+};
+
+const evaluateScanSafety = (canvas: HTMLCanvasElement, normalizedText: string): ScanSafetyResult => {
+  const parsed = parseMedicationDetailsFromText(normalizedText);
+  const fallbackNameClarity = analyzeNameClarity(normalizedText);
+  const hasEnglishName = Boolean(parsed.medicineNameEn?.trim()) || fallbackNameClarity.hasEnglishName;
+  const hasThaiName = Boolean(parsed.medicineNameTh?.trim()) || fallbackNameClarity.hasThaiName;
+  const nameClarityScore = Math.max(parsed.confidence, fallbackNameClarity.nameClarityScore);
+  const quality =
+    analyzeFrameQuality(canvas) ??
+    ({
+      brightness: 0.5,
+      contrast: 0.2,
+      sharpness: 0.2,
+    } satisfies ScanQualityMetrics);
+
+  const brightnessScore =
+    quality.brightness < QUALITY_MIN_BRIGHTNESS
+      ? clamp(quality.brightness / QUALITY_MIN_BRIGHTNESS, 0, 1)
+      : quality.brightness > QUALITY_MAX_BRIGHTNESS
+        ? clamp((1 - quality.brightness) / (1 - QUALITY_MAX_BRIGHTNESS), 0, 1)
+        : 1;
+  const contrastScore = clamp(quality.contrast / QUALITY_MIN_CONTRAST, 0, 1);
+  const sharpnessScore = clamp(quality.sharpness / QUALITY_MIN_SHARPNESS, 0, 1);
+  const overallScore = Number(
+    clamp(
+      brightnessScore * 0.22 + contrastScore * 0.23 + sharpnessScore * 0.25 + nameClarityScore * 0.3,
+      0,
+      1,
+    ).toFixed(2),
+  );
+
+  let blockingIssue: ScanSafetyIssue | null = null;
+  let statusMessage = "ภาพและข้อความฉลากยาชัดเจน พร้อมวิเคราะห์อัตโนมัติ";
+  let voiceMessage: string | null = null;
+
+  if (quality.brightness < QUALITY_MIN_BRIGHTNESS) {
+    blockingIssue = "too_dark";
+    statusMessage = "ภาพมืดเกินไป กรุณาเพิ่มแสงหรือย้ายไปจุดที่สว่าง แล้วสแกนใหม่";
+    voiceMessage = "ภาพมืดเกินไป กรุณาเพิ่มแสง แล้วสแกนใหม่";
+  } else if (quality.brightness > QUALITY_MAX_BRIGHTNESS) {
+    blockingIssue = "too_bright";
+    statusMessage = "ภาพสว่างจ้าเกินไปหรือมีแสงสะท้อน กรุณาปรับมุมกล้อง แล้วสแกนใหม่";
+    voiceMessage = "ภาพสว่างจ้าเกินไป กรุณาปรับมุมกล้อง แล้วสแกนใหม่";
+  } else if (quality.sharpness < QUALITY_MIN_SHARPNESS) {
+    blockingIssue = "too_blurry";
+    statusMessage = "ภาพเบลอหรือสั่น กรุณานิ่งกล้องและขยับเข้าใกล้อีกนิด แล้วสแกนใหม่";
+    voiceMessage = "ภาพเบลอ กรุณานิ่งกล้อง แล้วสแกนใหม่";
+  } else if (quality.contrast < QUALITY_MIN_CONTRAST) {
+    blockingIssue = "low_contrast";
+    statusMessage = "ฉลากยาไม่คมชัดพอ กรุณาปรับระยะหรือแสงให้ตัวอักษรตัดกับพื้นหลัง แล้วสแกนใหม่";
+    voiceMessage = "ฉลากยาไม่คมชัดพอ กรุณาปรับแสง แล้วสแกนใหม่";
+  } else if ((!hasEnglishName || !hasThaiName) && nameClarityScore < 0.82) {
+    blockingIssue = "name_unclear";
+    statusMessage = "ชื่อยาไทยหรืออังกฤษยังไม่ครบถ้วน กรุณาจัดฉลากให้อยู่กลางกรอบและสแกนใหม่";
+    voiceMessage = "ชื่อยาไทยหรืออังกฤษยังไม่ชัด กรุณาสแกนใหม่";
+  } else if (nameClarityScore < NAME_CLARITY_MIN_SCORE) {
+    blockingIssue = "name_unclear";
+    statusMessage = "ระบบยังอ่านชื่อยาไม่ชัด กรุณาค้างกล้องให้นิ่งและสแกนใหม่";
+    voiceMessage = "ชื่อยายังไม่ชัด กรุณาสแกนใหม่";
+  }
+
+  return {
+    quality,
+    hasEnglishName,
+    hasThaiName,
+    nameClarityScore,
+    overallScore,
+    blockingIssue,
+    statusMessage,
+    voiceMessage,
+  };
+};
 
 const periodToThai = (period: DayPeriod) => {
   switch (period) {
@@ -341,6 +563,8 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const stableCandidateCountRef = useRef(0);
   const lastCandidateFingerprintRef = useRef("");
   const bestCandidateRef = useRef<ScanCandidate | null>(null);
+  const lastSafetyIssueRef = useRef<ScanSafetyIssue | null>(null);
+  const lastSafetyWarningAtRef = useRef(0);
 
   const [status, setStatus] = useState("พร้อมสแกน");
   const [guidance, setGuidance] = useState<ScanGuidanceState>("move_closer");
@@ -356,6 +580,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const [isOcrLoading, setIsOcrLoading] = useState(false);
   const [ocrProgress, setOcrProgress] = useState<number | null>(null);
   const [scanCompletion, setScanCompletion] = useState(0);
+  const [scanSafety, setScanSafety] = useState<ScanSafetyResult | null>(null);
   const [parsedDetails, setParsedDetails] = useState<ParsedMedicationDetails | null>(null);
   const [isCreatingPlan, setIsCreatingPlan] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -397,6 +622,31 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       lastSpokenAtRef.current = now;
       lastGuidanceRef.current = nextGuidance;
       speakThai(guidanceToThaiSpeech(nextGuidance), 1.02);
+    },
+    [voiceEnabled],
+  );
+
+  const announceSafetyIssue = useCallback(
+    (result: ScanSafetyResult) => {
+      if (!result.blockingIssue) {
+        lastSafetyIssueRef.current = null;
+        return;
+      }
+
+      setStatus(result.statusMessage);
+      const now = Date.now();
+      const canSpeak =
+        voiceEnabled &&
+        Boolean(result.voiceMessage) &&
+        (lastSafetyIssueRef.current !== result.blockingIssue ||
+          now - lastSafetyWarningAtRef.current >= SAFETY_WARNING_COOLDOWN_MS);
+
+      if (canSpeak && result.voiceMessage) {
+        speakThai(result.voiceMessage, 1);
+        lastSafetyWarningAtRef.current = now;
+      }
+
+      lastSafetyIssueRef.current = result.blockingIssue;
     },
     [voiceEnabled],
   );
@@ -457,6 +707,9 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     stableCandidateCountRef.current = 0;
     lastCandidateFingerprintRef.current = "";
     bestCandidateRef.current = null;
+    lastSafetyIssueRef.current = null;
+    lastSafetyWarningAtRef.current = 0;
+    setScanSafety(null);
   }, []);
 
   const ensureOcrWorker = useCallback(async () => {
@@ -704,13 +957,21 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       const nextGuidance = frame ? computeScanGuidance(frame) : "move_closer";
       updateGuidance(nextGuidance);
 
-      if (!ocr.text || ocr.text.length < OCR_MIN_TEXT_LENGTH) {
+      const normalizedText = ocr.text.trim();
+      const safety = evaluateScanSafety(canvas, normalizedText);
+      setScanSafety(safety);
+      if (safety.blockingIssue) {
+        announceSafetyIssue(safety);
+        return;
+      }
+
+      if (!normalizedText || normalizedText.length < OCR_MIN_TEXT_LENGTH) {
         setStatus("อ่านข้อความจากรูปยังไม่ครบ ลองอัปโหลดรูปที่ชัดขึ้น");
         return;
       }
 
-      setOcrText(ocr.text);
-      await submitOcrText(ocr.text, false);
+      setOcrText(normalizedText);
+      await submitOcrText(normalizedText, false);
       setStatus("อ่านฉลากจากรูปเสร็จแล้ว กรุณาตรวจสอบข้อมูลและกดยืนยัน");
       if (voiceEnabled) {
         speakThai("อ่านฉลากจากรูปสำเร็จ กรุณากดยืนยัน");
@@ -1004,11 +1265,18 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
         updateGuidance(nextGuidance);
 
         const normalizedText = ocr.text.trim();
+        const safety = evaluateScanSafety(capture.canvas, normalizedText);
+        setScanSafety(safety);
+
         let completion = 0;
-        completion += nextGuidance === "hold_steady" ? 45 : 20;
+        completion += nextGuidance === "hold_steady" ? 40 : 18;
         completion += Math.min(25, Math.round((Math.min(normalizedText.length, 90) / 90) * 25));
-        completion += Math.min(30, Math.round((Math.min(ocr.confidence, 1) / 1) * 30));
-        const boundedCompletion = Math.min(99, completion);
+        completion += Math.min(26, Math.round((Math.min(ocr.confidence, 1) / 1) * 26));
+        completion += Math.round(safety.overallScore * 22);
+        const boundedCompletionRaw = Math.min(99, completion);
+        const boundedCompletion = safety.blockingIssue
+          ? Math.min(AUTO_FINALIZE_MIN_COMPLETION - 1, boundedCompletionRaw)
+          : boundedCompletionRaw;
         setScanCompletion((previous) => {
           const smoothed = Math.round(previous * 0.5 + boundedCompletion * 0.5);
           return Math.max(previous > 85 ? previous - 1 : 0, smoothed);
@@ -1017,9 +1285,16 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
         const currentCandidate: ScanCandidate = {
           text: normalizedText,
           previewDataUrl: capture.previewDataUrl,
-          completion: boundedCompletion,
+          completion: boundedCompletionRaw,
           confidence: ocr.confidence,
         };
+
+        if (safety.blockingIssue) {
+          stableCandidateCountRef.current = 0;
+          lastCandidateFingerprintRef.current = "";
+          announceSafetyIssue(safety);
+          return;
+        }
 
         const best = bestCandidateRef.current;
         if (
@@ -1034,7 +1309,9 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
         const canAutoFinalize =
           normalizedText.length >= AUTO_FINALIZE_MIN_TEXT_LENGTH &&
           ocr.confidence >= AUTO_FINALIZE_MIN_CONFIDENCE &&
-          boundedCompletion >= AUTO_FINALIZE_MIN_COMPLETION;
+          boundedCompletionRaw >= AUTO_FINALIZE_MIN_COMPLETION &&
+          safety.nameClarityScore >= NAME_CLARITY_MIN_SCORE &&
+          (safety.hasEnglishName || safety.hasThaiName);
 
         if (canAutoFinalize) {
           const fingerprint = normalizeComparableText(normalizedText).slice(0, 180);
@@ -1049,12 +1326,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
           lastCandidateFingerprintRef.current = "";
         }
 
-        if (
-          (nextGuidance === "hold_steady" &&
-            normalizedText.length >= OCR_MIN_TEXT_LENGTH &&
-            ocr.confidence >= OCR_SUCCESS_MIN_CONFIDENCE) ||
-          stableCandidateCountRef.current >= AUTO_FINALIZE_STABLE_FRAMES
-        ) {
+        if (canAutoFinalize && stableCandidateCountRef.current >= AUTO_FINALIZE_STABLE_FRAMES) {
           const finalCandidate = bestCandidateRef.current ?? currentCandidate;
           void finalizeScanAndAnalyze(finalCandidate);
           return;
@@ -1087,6 +1359,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       }
     };
   }, [
+    announceSafetyIssue,
     captureFrameForOcr,
     finalizeScanAndAnalyze,
     isScanning,
@@ -1165,6 +1438,18 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                 <Badge variant={scanCompletion === 100 ? "default" : "outline"}>
                   ความครบถ้วน {scanCompletion}%
                 </Badge>
+              ) : null}
+              {scanSafety ? (
+                <>
+                  <Badge variant="outline">แสง {Math.round(scanSafety.quality.brightness * 100)}%</Badge>
+                  <Badge variant="outline">คมชัด {Math.round(scanSafety.quality.sharpness * 100)}%</Badge>
+                  <Badge variant="outline">
+                    ชื่อยาไทย/EN {Math.round(scanSafety.nameClarityScore * 100)}%
+                  </Badge>
+                  {scanSafety.blockingIssue ? (
+                    <Badge variant="destructive">ภาพหรือชื่อยาไม่ชัด กรุณาสแกนใหม่</Badge>
+                  ) : null}
+                </>
               ) : null}
             </div>
           </AlertDescription>
