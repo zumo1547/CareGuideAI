@@ -1,8 +1,8 @@
-import { format } from "date-fns";
 import { Activity, BellRing, Pill, UserRoundCheck } from "lucide-react";
 
 import { MedicationPlanForm } from "@/components/patient/medication-plan-form";
 import { MedicationScanner } from "@/components/patient/medication-scanner";
+import { ReminderEventsTable } from "@/components/patient/reminder-events-table";
 import { VoiceReminderListener } from "@/components/patient/voice-reminder-listener";
 import { AppointmentForm } from "@/components/shared/appointment-form";
 import { DoctorMessageForm } from "@/components/shared/doctor-message-form";
@@ -11,9 +11,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-
-const formatDateTime = (dateValue: string | null) =>
-  dateValue ? format(new Date(dateValue), "dd/MM/yyyy HH:mm") : "-";
 
 export default async function PatientDashboardPage() {
   const session = await requireRole(["patient", "admin"]);
@@ -44,10 +41,10 @@ export default async function PatientDashboardPage() {
         : Promise.resolve({ data: [] as { plan_id: string; label: string; time_of_day: string }[] }),
       supabase
         .from("reminder_events")
-        .select("id, due_at, channel, status")
+        .select("id, due_at, channel, status, cancelled_at")
         .eq("patient_id", session.userId)
-        .order("due_at", { ascending: true })
-        .limit(15),
+        .order("due_at", { ascending: false })
+        .limit(20),
       supabase
         .from("patient_doctor_links")
         .select("doctor_id")
@@ -170,32 +167,15 @@ export default async function PatientDashboardPage() {
             <CardDescription>ข้อมูลจากระบบแจ้งเตือน (SMS/Voice)</CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Due Time</TableHead>
-                  <TableHead>Channel</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(reminderEvents ?? []).length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
-                      ยังไม่มี reminder event
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  reminderEvents?.map((event) => (
-                    <TableRow key={event.id}>
-                      <TableCell>{formatDateTime(event.due_at)}</TableCell>
-                      <TableCell>{event.channel}</TableCell>
-                      <TableCell>{event.status}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+            <ReminderEventsTable
+              initialEvents={(reminderEvents ?? []).map((event) => ({
+                id: event.id,
+                dueAt: event.due_at,
+                channel: event.channel,
+                status: event.status,
+                cancelledAt: event.cancelled_at,
+              }))}
+            />
           </CardContent>
         </Card>
       </section>
