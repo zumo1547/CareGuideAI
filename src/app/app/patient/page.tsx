@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/session";
+import { getBmiTrend } from "@/lib/onboarding";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function PatientDashboardPage() {
@@ -25,7 +26,13 @@ export default async function PatientDashboardPage() {
 
   const medicineIds = (plans ?? []).map((plan) => plan.medicine_id).filter(Boolean);
 
-  const [{ data: medicines }, { data: schedules }, { data: reminderEvents }, { data: links }] =
+  const [
+    { data: medicines },
+    { data: schedules },
+    { data: reminderEvents },
+    { data: links },
+    { data: onboardingProfile },
+  ] =
     await Promise.all([
       medicineIds.length
         ? supabase
@@ -50,10 +57,20 @@ export default async function PatientDashboardPage() {
         .select("doctor_id")
         .eq("patient_id", session.userId)
         .limit(1),
+      supabase
+        .from("user_onboarding_profiles")
+        .select("biological_sex, bmi")
+        .eq("user_id", session.userId)
+        .maybeSingle(),
     ]);
 
   const medicineMap = new Map((medicines ?? []).map((item) => [item.id, item]));
   const firstDoctorId = links?.[0]?.doctor_id ?? "";
+  const bmiValue = Number(onboardingProfile?.bmi ?? 0);
+  const bmiTrend =
+    onboardingProfile?.biological_sex && Number.isFinite(bmiValue) && bmiValue > 0
+      ? getBmiTrend(bmiValue, onboardingProfile.biological_sex)
+      : null;
 
   return (
     <div className="space-y-6">
@@ -96,6 +113,39 @@ export default async function PatientDashboardPage() {
           </CardHeader>
         </Card>
       </section>
+
+      {bmiTrend ? (
+        <section>
+          <Card className="border-cyan-200/80 bg-gradient-to-br from-cyan-50 to-sky-50">
+            <CardHeader>
+              <CardTitle>แนวโน้ม BMI และผลต่อความดันในอนาคต</CardTitle>
+              <CardDescription>
+                วิเคราะห์จาก BMI ล่าสุดและเพศ ({bmiTrend.sexLabel}) เพื่อใช้เป็นฐานกับระบบความดันอัตโนมัติในอนาคต
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-2 text-sm md:grid-cols-2">
+              <p>
+                BMI ล่าสุด: <span className="font-semibold">{bmiTrend.bmi.toFixed(2)}</span>
+              </p>
+              <p>
+                ช่วงค่า: <span className="font-semibold">{bmiTrend.rangeLabel}</span>
+              </p>
+              <p>
+                ภาวะ: <span className="font-semibold">{bmiTrend.statusLabel}</span>
+              </p>
+              <p>
+                ความเสี่ยงโรค: <span className="font-semibold">{bmiTrend.diseaseRiskLabel}</span>
+              </p>
+              <p className="md:col-span-2">
+                แนวโน้มความดัน: <span className="font-semibold">{bmiTrend.bloodPressureTrendLabel}</span>
+              </p>
+              <p className="md:col-span-2">
+                คำแนะนำ: <span className="font-semibold">{bmiTrend.recommendationLabel}</span>
+              </p>
+            </CardContent>
+          </Card>
+        </section>
+      ) : null}
 
       <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <MedicationScanner patientId={session.userId} />
@@ -196,4 +246,3 @@ export default async function PatientDashboardPage() {
     </div>
   );
 }
-

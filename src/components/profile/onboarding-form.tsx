@@ -2,9 +2,9 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CheckCircle2, Loader2, Stethoscope } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
-import { useRouter } from "next/navigation";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -15,12 +15,16 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  BIOLOGICAL_SEXES,
+  BIOLOGICAL_SEX_LABELS,
   calculateBmi,
   DISABILITY_SEVERITY,
   DISABILITY_SEVERITY_LABELS,
   DISABILITY_TYPES,
   DISABILITY_TYPE_LABELS,
+  getBmiTrend,
   onboardingSchema,
+  type BiologicalSex,
   type OnboardingFormValues,
   type OnboardingProfile,
 } from "@/lib/onboarding";
@@ -36,6 +40,7 @@ const toNumber = (value: unknown, fallback: number) => {
 };
 
 const defaultsFromProfile = (profile: OnboardingProfile | null): OnboardingFormValues => ({
+  biologicalSex: (profile?.biological_sex ?? "female") as BiologicalSex,
   disabilityType: profile?.disability_type ?? "normal",
   disabilityOther: profile?.disability_other ?? "",
   disabilitySeverity: profile?.disability_severity ?? "none",
@@ -69,6 +74,7 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
     defaultValues: defaultsFromProfile(initialProfile),
   });
 
+  const biologicalSex = useWatch({ control, name: "biologicalSex" });
   const weightKg = useWatch({ control, name: "weightKg" });
   const heightCm = useWatch({ control, name: "heightCm" });
   const disabilityType = useWatch({ control, name: "disabilityType" });
@@ -79,6 +85,11 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
     if (!nextWeight || !nextHeight) return 0;
     return calculateBmi(nextWeight, nextHeight);
   }, [heightCm, weightKg]);
+
+  const bmiTrend = useMemo(() => {
+    if (!biologicalSex || !bmiPreview) return null;
+    return getBmiTrend(bmiPreview, biologicalSex);
+  }, [biologicalSex, bmiPreview]);
 
   useEffect(() => {
     if (disabilityType === "normal") {
@@ -111,7 +122,12 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
       return;
     }
 
-    setSuccess(mode === "onboarding" ? "บันทึกข้อมูลเรียบร้อย กำลังพาไปหน้าใช้งานหลัก" : "บันทึกการแก้ไขเรียบร้อย");
+    setSuccess(
+      mode === "onboarding"
+        ? "บันทึกข้อมูลเรียบร้อย กำลังพาไปหน้าใช้งานหลัก"
+        : "บันทึกการแก้ไขเรียบร้อย",
+    );
+
     if (mode === "onboarding") {
       window.setTimeout(() => {
         router.replace("/app");
@@ -128,7 +144,9 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-xl">
           <Stethoscope className="h-5 w-5 text-cyan-700" />
-          {mode === "onboarding" ? "ข้อมูลพื้นฐานก่อนเริ่มใช้งาน" : "แฟ้มข้อมูลสุขภาพและการเข้าถึง"}
+          {mode === "onboarding"
+            ? "ข้อมูลพื้นฐานก่อนเริ่มใช้งาน"
+            : "แฟ้มข้อมูลสุขภาพและการเข้าถึง"}
         </CardTitle>
         <CardDescription>
           {mode === "onboarding"
@@ -136,6 +154,7 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
             : "แก้ไขข้อมูลได้ตลอดเวลา ข้อมูลนี้ใช้ช่วยเตือนยาและปรับประสบการณ์การใช้งาน"}
         </CardDescription>
       </CardHeader>
+
       <CardContent className="space-y-5">
         {error ? (
           <Alert variant="destructive">
@@ -143,6 +162,7 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
+
         {success ? (
           <Alert>
             <CheckCircle2 className="h-4 w-4" />
@@ -153,11 +173,33 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
 
         <form onSubmit={submit} className="space-y-6">
           <section className="space-y-4 rounded-xl border p-4">
-            <h3 className="font-semibold">ประเภทความพิการ</h3>
+            <h3 className="font-semibold">ข้อมูลผู้ใช้และประเภทความพิการ</h3>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>ประเภท</Label>
+                <Label>เพศ</Label>
+                <Controller
+                  name="biologicalSex"
+                  control={control}
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={(value) => field.onChange(value ?? "female")}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BIOLOGICAL_SEXES.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {BIOLOGICAL_SEX_LABELS[value]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>ประเภทความพิการ</Label>
                 <Controller
                   name="disabilityType"
                   control={control}
@@ -177,7 +219,9 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
                   )}
                 />
               </div>
+            </div>
 
+            <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>ระดับความรุนแรง</Label>
                 <Controller
@@ -210,17 +254,17 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
                   <p className="text-sm text-destructive">{errors.disabilitySeverity.message}</p>
                 ) : null}
               </div>
-            </div>
 
-            {disabilityType === "other" ? (
-              <div className="space-y-2">
-                <Label htmlFor="disabilityOther">ระบุประเภทความพิการ</Label>
-                <Input id="disabilityOther" {...register("disabilityOther")} />
-                {errors.disabilityOther ? (
-                  <p className="text-sm text-destructive">{errors.disabilityOther.message}</p>
-                ) : null}
-              </div>
-            ) : null}
+              {disabilityType === "other" ? (
+                <div className="space-y-2">
+                  <Label htmlFor="disabilityOther">ระบุประเภทความพิการ</Label>
+                  <Input id="disabilityOther" {...register("disabilityOther")} />
+                  {errors.disabilityOther ? (
+                    <p className="text-sm text-destructive">{errors.disabilityOther.message}</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </section>
 
           <section className="space-y-4 rounded-xl border p-4">
@@ -270,22 +314,12 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
             <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="weightKg">น้ำหนัก (กก.)</Label>
-                <Input
-                  id="weightKg"
-                  type="number"
-                  step="0.1"
-                  {...register("weightKg", { valueAsNumber: true })}
-                />
+                <Input id="weightKg" type="number" step="0.1" {...register("weightKg", { valueAsNumber: true })} />
                 {errors.weightKg ? <p className="text-sm text-destructive">{errors.weightKg.message}</p> : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="heightCm">ส่วนสูง (ซม.)</Label>
-                <Input
-                  id="heightCm"
-                  type="number"
-                  step="0.1"
-                  {...register("heightCm", { valueAsNumber: true })}
-                />
+                <Input id="heightCm" type="number" step="0.1" {...register("heightCm", { valueAsNumber: true })} />
                 {errors.heightCm ? <p className="text-sm text-destructive">{errors.heightCm.message}</p> : null}
               </div>
               <div className="rounded-lg border bg-muted/50 p-3">
@@ -293,6 +327,29 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
                 <p className="text-2xl font-semibold">{bmiPreview ? bmiPreview.toFixed(2) : "-"}</p>
               </div>
             </div>
+
+            {bmiTrend ? (
+              <div className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-4">
+                <p className="text-sm font-semibold text-cyan-900">แนวโน้ม BMI ตามเพศ ({bmiTrend.sexLabel})</p>
+                <div className="mt-2 grid gap-1 text-sm text-cyan-950">
+                  <p>
+                    ช่วงค่า: <span className="font-medium">{bmiTrend.rangeLabel}</span>
+                  </p>
+                  <p>
+                    ภาวะ: <span className="font-medium">{bmiTrend.statusLabel}</span>
+                  </p>
+                  <p>
+                    ความเสี่ยงโรค: <span className="font-medium">{bmiTrend.diseaseRiskLabel}</span>
+                  </p>
+                  <p>
+                    แนวโน้มความดันอนาคต: <span className="font-medium">{bmiTrend.bloodPressureTrendLabel}</span>
+                  </p>
+                  <p>
+                    คำแนะนำ: <span className="font-medium">{bmiTrend.recommendationLabel}</span>
+                  </p>
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <section className="space-y-4 rounded-xl border p-4">
@@ -303,10 +360,7 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
                   name="needTts"
                   control={control}
                   render={({ field }) => (
-                    <Checkbox
-                      checked={Boolean(field.value)}
-                      onCheckedChange={(checked) => field.onChange(Boolean(checked))}
-                    />
+                    <Checkbox checked={Boolean(field.value)} onCheckedChange={(checked) => field.onChange(Boolean(checked))} />
                   )}
                 />
                 ต้องการเสียงอ่าน (Text-to-Speech)
@@ -317,10 +371,7 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
                   name="needLargeText"
                   control={control}
                   render={({ field }) => (
-                    <Checkbox
-                      checked={Boolean(field.value)}
-                      onCheckedChange={(checked) => field.onChange(Boolean(checked))}
-                    />
+                    <Checkbox checked={Boolean(field.value)} onCheckedChange={(checked) => field.onChange(Boolean(checked))} />
                   )}
                 />
                 ต้องการตัวอักษรใหญ่
@@ -331,10 +382,7 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
                   name="needLargeButtons"
                   control={control}
                   render={({ field }) => (
-                    <Checkbox
-                      checked={Boolean(field.value)}
-                      onCheckedChange={(checked) => field.onChange(Boolean(checked))}
-                    />
+                    <Checkbox checked={Boolean(field.value)} onCheckedChange={(checked) => field.onChange(Boolean(checked))} />
                   )}
                 />
                 ต้องการปุ่มใหญ่ / ใช้ง่าย
@@ -345,10 +393,7 @@ export const OnboardingForm = ({ initialProfile, mode }: OnboardingFormProps) =>
                   name="needNavigationGuidance"
                   control={control}
                   render={({ field }) => (
-                    <Checkbox
-                      checked={Boolean(field.value)}
-                      onCheckedChange={(checked) => field.onChange(Boolean(checked))}
-                    />
+                    <Checkbox checked={Boolean(field.value)} onCheckedChange={(checked) => field.onChange(Boolean(checked))} />
                   )}
                 />
                 ต้องการระบบนำทาง (บอกซ้าย-ขวา/ระยะกล้อง)

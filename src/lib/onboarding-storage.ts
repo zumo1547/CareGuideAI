@@ -1,8 +1,10 @@
 import type { User } from "@supabase/supabase-js";
 
 import {
+  BIOLOGICAL_SEXES,
   DISABILITY_SEVERITY,
   DISABILITY_TYPES,
+  type BiologicalSex,
   type OnboardingFormValues,
   type OnboardingProfile,
 } from "@/lib/onboarding";
@@ -42,10 +44,14 @@ const isDisabilitySeverity = (
 ): value is (typeof DISABILITY_SEVERITY)[number] =>
   (DISABILITY_SEVERITY as readonly string[]).includes(value);
 
+const isBiologicalSex = (value: string): value is BiologicalSex =>
+  (BIOLOGICAL_SEXES as readonly string[]).includes(value);
+
 export const ONBOARDING_PROFILE_METADATA_KEY = "onboarding_profile_v1";
 
 export const ONBOARDING_PROFILE_SELECT_COLUMNS = `
   user_id,
+  biological_sex,
   disability_type,
   disability_other,
   disability_severity,
@@ -88,6 +94,7 @@ export const buildPersistedOnboardingProfile = (
 
   return {
     user_id: userId,
+    biological_sex: payload.biologicalSex,
     disability_type: payload.disabilityType,
     disability_other:
       payload.disabilityType === "other" ? payload.disabilityOther.trim() : null,
@@ -118,6 +125,8 @@ export const readOnboardingProfileFromMetadata = (
   const raw = user.user_metadata[ONBOARDING_PROFILE_METADATA_KEY];
   if (!isObject(raw)) return null;
 
+  const biologicalSexRaw = asString(raw.biological_sex);
+  const biologicalSex = biologicalSexRaw && isBiologicalSex(biologicalSexRaw) ? biologicalSexRaw : null;
   const disabilityTypeRaw = asString(raw.disability_type);
   const disabilitySeverityRaw = asString(raw.disability_severity);
 
@@ -161,6 +170,7 @@ export const readOnboardingProfileFromMetadata = (
   const disabilityOther = raw.disability_other;
   return {
     user_id: user.id,
+    biological_sex: biologicalSex,
     disability_type: disabilityTypeRaw,
     disability_other: typeof disabilityOther === "string" ? disabilityOther : null,
     disability_severity: disabilitySeverityRaw,
