@@ -2,8 +2,8 @@
 
 import { format } from "date-fns";
 import { Loader2, XCircle } from "lucide-react";
-import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ type ReminderEventRow = {
   dueAt: string;
   channel: string;
   status: string;
+  provider?: string | null;
   cancelledAt: string | null;
 };
 
@@ -37,6 +38,13 @@ const statusVariant = (status: string): "default" | "secondary" | "destructive" 
   if (status === "sent") return "default";
   if (status === "failed") return "destructive";
   return "outline";
+};
+
+const getDisplayStatus = (event: ReminderEventRow) => {
+  if (event.status === "failed" && event.provider === "user-cancelled") {
+    return "cancelled";
+  }
+  return event.status;
 };
 
 export const ReminderEventsTable = ({ initialEvents }: ReminderEventsTableProps) => {
@@ -71,7 +79,7 @@ export const ReminderEventsTable = ({ initialEvents }: ReminderEventsTableProps)
       setEvents((current) =>
         current.map((event) =>
           event.id === eventId
-            ? { ...event, status: "cancelled", cancelledAt }
+            ? { ...event, status: "cancelled", provider: "user-cancelled", cancelledAt }
             : event,
         ),
       );
@@ -92,6 +100,7 @@ export const ReminderEventsTable = ({ initialEvents }: ReminderEventsTableProps)
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
+
       {success ? (
         <Alert>
           <AlertTitle>Done</AlertTitle>
@@ -116,41 +125,49 @@ export const ReminderEventsTable = ({ initialEvents }: ReminderEventsTableProps)
               </TableCell>
             </TableRow>
           ) : (
-            events.map((event) => (
-              <TableRow key={event.id}>
-                <TableCell>{formatDateTime(event.dueAt)}</TableCell>
-                <TableCell>{event.channel}</TableCell>
-                <TableCell>
-                  <Badge variant={statusVariant(event.status)}>{statusLabelMap[event.status] ?? event.status}</Badge>
-                </TableCell>
-                <TableCell>
-                  {event.status === "pending" ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={isCancellingId === event.id}
-                      onClick={() => cancelReminder(event.id)}
-                    >
-                      {isCancellingId === event.id ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Cancelling...
-                        </>
-                      ) : (
-                        <>
-                          <XCircle className="h-4 w-4" />
-                          Cancel
-                        </>
-                      )}
-                    </Button>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">
-                      {event.status === "cancelled" ? `Cancelled ${formatDateTime(event.cancelledAt)}` : "-"}
-                    </span>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))
+            events.map((event) => {
+              const displayStatus = getDisplayStatus(event);
+
+              return (
+                <TableRow key={event.id}>
+                  <TableCell>{formatDateTime(event.dueAt)}</TableCell>
+                  <TableCell>{event.channel}</TableCell>
+                  <TableCell>
+                    <Badge variant={statusVariant(displayStatus)}>
+                      {statusLabelMap[displayStatus] ?? displayStatus}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {displayStatus === "pending" ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isCancellingId === event.id}
+                        onClick={() => cancelReminder(event.id)}
+                      >
+                        {isCancellingId === event.id ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Cancelling...
+                          </>
+                        ) : (
+                          <>
+                            <XCircle className="h-4 w-4" />
+                            Cancel
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">
+                        {displayStatus === "cancelled"
+                          ? `Cancelled ${formatDateTime(event.cancelledAt)}`
+                          : "-"}
+                      </span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })
           )}
         </TableBody>
       </Table>

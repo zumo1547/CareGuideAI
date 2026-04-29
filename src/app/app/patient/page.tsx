@@ -41,7 +41,7 @@ export default async function PatientDashboardPage() {
         : Promise.resolve({ data: [] as { plan_id: string; label: string; time_of_day: string }[] }),
       supabase
         .from("reminder_events")
-        .select("id, due_at, channel, status")
+        .select("id, due_at, channel, status, provider")
         .eq("patient_id", session.userId)
         .order("due_at", { ascending: false })
         .limit(20),
@@ -173,6 +173,7 @@ export default async function PatientDashboardPage() {
                 dueAt: event.due_at,
                 channel: event.channel,
                 status: event.status,
+                provider: event.provider,
                 cancelledAt: null,
               }))}
             />

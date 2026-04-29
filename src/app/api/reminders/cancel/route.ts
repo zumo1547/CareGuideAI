@@ -8,6 +8,15 @@ const schema = z.object({
   eventId: z.uuid(),
 });
 
+const isMissingCancelledAtColumnError = (message: string | undefined) =>
+  (message ?? "").toLowerCase().includes("cancelled_at");
+
+const isStatusConstraintError = (
+  message: string | undefined,
+  code: string | null | undefined,
+) =>
+  code === "23514" || (message ?? "").toLowerCase().includes("reminder_events_status_check");
+
 export async function POST(request: Request) {
   const auth = await getApiAuthContext(["patient", "admin"]);
   if (auth instanceof NextResponse) {
@@ -66,12 +75,32 @@ export async function POST(request: Request) {
     .eq("id", eventId);
 
   // Fallback for projects where PostgREST schema cache has not picked up cancelled_at yet.
-  if (updateError?.message?.toLowerCase().includes("cancelled_at")) {
+  if (isMissingCancelledAtColumnError(updateError?.message)) {
     const fallback = await supabase
       .from("reminder_events")
       .update(baseUpdatePayload)
       .eq("id", eventId);
     updateError = fallback.error;
+  }
+
+  // Fallback for older DB constraint that does not yet allow status='cancelled'.
+  // We persist status='failed' but tag provider='user-cancelled' so UI can render as cancelled.
+  if (isStatusConstraintError(updateError?.message, updateError?.code)) {
+    const legacyPayload = {
+      status: "failed",
+      provider: "user-cancelled",
+      provider_response: {
+        source: "patient-dashboard",
+        cancelledBy: auth.userId,
+        cancelledAt,
+        legacyCancelled: true,
+      },
+    };
+    const legacyFallback = await supabase
+      .from("reminder_events")
+      .update(legacyPayload)
+      .eq("id", eventId);
+    updateError = legacyFallback.error;
   }
 
   if (updateError) {
