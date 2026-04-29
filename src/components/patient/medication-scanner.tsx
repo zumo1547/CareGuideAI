@@ -47,10 +47,13 @@ interface ParsedMedicationDetails {
   medicineNameTh: string | null;
   dosageText: string;
   quantityPerDose: string | null;
+  quantityPerDoseValue: number | null;
   frequencyPerDay: number | null;
   mealTiming: MealTiming;
   periods: DayPeriod[];
   customTimes: string[];
+  totalPillsInPackage: number | null;
+  isDoctorPrescribed: boolean | null;
   confidence: number;
   rawText: string;
 }
@@ -181,6 +184,31 @@ const normalizeComparableText = (text: string) =>
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+const formatDateInput = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const parsePositiveInt = (value: string) => {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const rounded = Math.round(parsed);
+  if (rounded <= 0) return null;
+  return rounded;
+};
+
+const parsePositiveNumber = (value: string) => {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Number(parsed.toFixed(2));
+};
+
+type MedicationTypeChoice = "prescription" | "otc";
 
 const THAI_LINE_REGEX = /[\u0E00-\u0E7F]/u;
 const ENGLISH_LINE_REGEX = /[A-Za-z]/;
@@ -631,6 +659,12 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   const [planError, setPlanError] = useState<string | null>(null);
   const [planSuccess, setPlanSuccess] = useState<string | null>(null);
   const [ocrPreviewDataUrl, setOcrPreviewDataUrl] = useState<string | null>(null);
+  const [medicationType, setMedicationType] = useState<MedicationTypeChoice>("prescription");
+  const [totalPillsInput, setTotalPillsInput] = useState("");
+  const [pillsPerDoseInput, setPillsPerDoseInput] = useState("1");
+  const [otcReminderUntilDate, setOtcReminderUntilDate] = useState(() =>
+    formatDateInput(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+  );
 
   const isCameraSupported =
     typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
@@ -640,6 +674,31 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
   useEffect(() => {
     isScanningRef.current = isScanning;
   }, [isScanning]);
+
+  const applyPlanDefaultsFromParsed = useCallback((details: ParsedMedicationDetails | null) => {
+    if (!details) {
+      setMedicationType("prescription");
+      setTotalPillsInput("");
+      setPillsPerDoseInput("1");
+      setOtcReminderUntilDate(formatDateInput(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)));
+      return;
+    }
+
+    const parsedType: MedicationTypeChoice =
+      details.isDoctorPrescribed === false ? "otc" : "prescription";
+    setMedicationType(parsedType);
+    setTotalPillsInput(
+      details.totalPillsInPackage && details.totalPillsInPackage > 0
+        ? String(details.totalPillsInPackage)
+        : "",
+    );
+    setPillsPerDoseInput(
+      details.quantityPerDoseValue && details.quantityPerDoseValue > 0
+        ? String(details.quantityPerDoseValue)
+        : "1",
+    );
+    setOtcReminderUntilDate(formatDateInput(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)));
+  }, []);
 
   const updateGuidance = useCallback(
     (nextGuidance: ScanGuidanceState, forceSpeak = false) => {
@@ -804,13 +863,14 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       updateGuidance(result.guidance);
       setScanResult(result);
       setParsedDetails(null);
+      applyPlanDefaultsFromParsed(null);
       setOcrValidation(null);
       setPlanError(null);
       setPlanSuccess(null);
 
       return result;
     },
-    [patientId, updateGuidance],
+    [applyPlanDefaultsFromParsed, patientId, updateGuidance],
   );
 
   const submitScannedBarcode = useCallback(
@@ -923,6 +983,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       updateGuidance(result.guidance);
       setScanResult(result);
       setParsedDetails(result.parsedDetails ?? null);
+      applyPlanDefaultsFromParsed(result.parsedDetails ?? null);
       setOcrText(result.ocrText ?? text);
       setPlanError(null);
       setPlanSuccess(null);
@@ -955,7 +1016,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
 
       return result;
     },
-    [patientId, updateGuidance, voiceEnabled],
+    [applyPlanDefaultsFromParsed, patientId, updateGuidance, voiceEnabled],
   );
 
   const finalizeScanAndAnalyze = useCallback(
@@ -1094,6 +1155,24 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
 
     const dosage = buildDosageFromParsed(parsedDetails);
     const schedule = scheduleFromParsed(parsedDetails);
+    const parsedPillsPerDose =
+      parsePositiveNumber(pillsPerDoseInput) ?? parsedDetails.quantityPerDoseValue ?? 1;
+    const parsedTotalPills = parsePositiveInt(totalPillsInput) ?? parsedDetails.totalPillsInPackage;
+
+    if (!parsedPillsPerDose || parsedPillsPerDose <= 0) {
+      setPlanError("กรุณาระบุจำนวนเม็ดที่กินต่อครั้งให้ถูกต้อง");
+      return;
+    }
+
+    if (medicationType === "prescription" && (!parsedTotalPills || parsedTotalPills <= 0)) {
+      setPlanError("ยาตามแพทย์สั่งต้องระบุจำนวนเม็ดยาทั้งหมดในซองก่อนยืนยัน");
+      return;
+    }
+
+    if (medicationType === "otc" && !otcReminderUntilDate) {
+      setPlanError("กรุณาเลือกวันที่สิ้นสุดการแจ้งเตือนสำหรับยาทั่วไป");
+      return;
+    }
 
     setIsCreatingPlan(true);
     setPlanError(null);
@@ -1112,6 +1191,12 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
             parsedDetails.dosageText?.trim() || `OCR confidence: ${(parsedDetails.confidence * 100).toFixed(0)}%`,
           schedule,
           ocrRawText: parsedDetails.rawText || ocrText || undefined,
+          medicationType,
+          doctorOrderedDetected: parsedDetails.isDoctorPrescribed ?? null,
+          totalPills: medicationType === "prescription" ? parsedTotalPills : null,
+          pillsPerDose: parsedPillsPerDose,
+          reminderMode: medicationType === "prescription" ? "until_exhausted" : "until_date",
+          reminderUntilDate: medicationType === "otc" ? otcReminderUntilDate : null,
         }),
       });
 
@@ -1131,7 +1216,19 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     } finally {
       setIsCreatingPlan(false);
     }
-  }, [ocrText, ocrValidation, parsedDetails, patientId, router, scanResult, voiceEnabled]);
+  }, [
+    medicationType,
+    ocrText,
+    ocrValidation,
+    otcReminderUntilDate,
+    parsedDetails,
+    patientId,
+    pillsPerDoseInput,
+    router,
+    scanResult,
+    totalPillsInput,
+    voiceEnabled,
+  ]);
 
   useEffect(() => {
     if (!isScanning || !isCameraSupported) {
@@ -1511,6 +1608,24 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     parsedDetails?.periods.length ? parsedDetails.periods.map(periodToThai).join(", ") : "-";
 
   const parsedMealLabel = parsedDetails ? mealTimingToThai(parsedDetails.mealTiming) : "-";
+  const canSubmitByMedicationType = useMemo(() => {
+    const pillsPerDose = parsePositiveNumber(pillsPerDoseInput) ?? parsedDetails?.quantityPerDoseValue ?? 1;
+    if (!pillsPerDose || pillsPerDose <= 0) return false;
+
+    if (medicationType === "prescription") {
+      const totalPills = parsePositiveInt(totalPillsInput) ?? parsedDetails?.totalPillsInPackage ?? null;
+      return Boolean(totalPills && totalPills > 0);
+    }
+
+    return Boolean(otcReminderUntilDate);
+  }, [
+    medicationType,
+    otcReminderUntilDate,
+    parsedDetails?.quantityPerDoseValue,
+    parsedDetails?.totalPillsInPackage,
+    pillsPerDoseInput,
+    totalPillsInput,
+  ]);
   const externalInfo =
     scanResult && "externalInfo" in scanResult ? scanResult.externalInfo ?? null : null;
 
@@ -1569,6 +1684,10 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                   setPlanSuccess(null);
                   setLastDetectedBarcode(null);
                   setScanCompletion(0);
+                  setMedicationType("prescription");
+                  setTotalPillsInput("");
+                  setPillsPerDoseInput("1");
+                  setOtcReminderUntilDate(formatDateInput(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)));
                   setStatus("กำลังเตรียมกล้องและเริ่มสแกนอัตโนมัติ...");
                   isScanningRef.current = true;
                   warmupSpeechSynthesis();
@@ -1779,9 +1898,23 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                     <strong>{parsedDetails.quantityPerDose || "-"}</strong>
                   </p>
                   <p>
+                    <span className="text-muted-foreground">จำนวนเม็ดในซอง (OCR): </span>
+                    <strong>{parsedDetails.totalPillsInPackage ? `${parsedDetails.totalPillsInPackage} เม็ด` : "-"}</strong>
+                  </p>
+                  <p>
                     <span className="text-muted-foreground">ความถี่ต่อวัน: </span>
                     <strong>
                       {parsedDetails.frequencyPerDay ? `${parsedDetails.frequencyPerDay} ครั้ง` : "-"}
+                    </strong>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">สถานะยาตามแพทย์สั่ง: </span>
+                    <strong>
+                      {parsedDetails.isDoctorPrescribed === true
+                        ? "พบข้อความยาตามแพทย์สั่ง"
+                        : parsedDetails.isDoctorPrescribed === false
+                          ? "ไม่พบข้อความบังคับแพทย์สั่ง"
+                          : "ยังไม่แน่ชัด"}
                     </strong>
                   </p>
                   <p>
@@ -1801,6 +1934,87 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                   <span className="text-muted-foreground">สรุปการใช้ยา: </span>
                   {buildDosageFromParsed(parsedDetails)}
                 </p>
+                <div className="space-y-3 rounded-md border bg-cyan-50/40 p-3">
+                  <p className="text-sm font-semibold">ตั้งค่านโยบายแจ้งเตือนตามชนิดยา</p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="medicationType">ชนิดยา</Label>
+                      <select
+                        id="medicationType"
+                        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                        value={medicationType}
+                        onChange={(event) => setMedicationType(event.target.value as MedicationTypeChoice)}
+                        disabled={isCreatingPlan}
+                      >
+                        <option value="prescription">ยาตามแพทย์สั่ง (เตือนจนยาหมด)</option>
+                        <option value="otc">ยาทั่วไป (กำหนดวันสิ้นสุดเตือนได้)</option>
+                      </select>
+                      <p className="text-xs text-muted-foreground">
+                        ระบบตรวจจับจากฉลาก:{" "}
+                        {parsedDetails.isDoctorPrescribed === true
+                          ? "พบข้อความยาตามแพทย์สั่ง"
+                          : parsedDetails.isDoctorPrescribed === false
+                            ? "ไม่พบข้อความบังคับแพทย์สั่ง"
+                            : "ยังไม่แน่ชัด"}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="pillsPerDoseInput">จำนวนเม็ดต่อครั้ง</Label>
+                      <Input
+                        id="pillsPerDoseInput"
+                        type="number"
+                        min="0.25"
+                        step="0.25"
+                        value={pillsPerDoseInput}
+                        onChange={(event) => setPillsPerDoseInput(event.target.value)}
+                        disabled={isCreatingPlan}
+                        placeholder="เช่น 1"
+                      />
+                    </div>
+                  </div>
+
+                  {medicationType === "prescription" ? (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="totalPillsInput">จำนวนเม็ดยาในซอง</Label>
+                        <Input
+                          id="totalPillsInput"
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={totalPillsInput}
+                          onChange={(event) => setTotalPillsInput(event.target.value)}
+                          disabled={isCreatingPlan}
+                          placeholder="เช่น 180"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          OCR ตรวจพบ:{" "}
+                          {parsedDetails.totalPillsInPackage ? `${parsedDetails.totalPillsInPackage} เม็ด` : "-"}
+                        </p>
+                      </div>
+                      <div className="rounded-md border bg-background/70 p-3 text-xs text-muted-foreground">
+                        เมื่อยืนยันแล้ว ระบบจะสร้างแจ้งเตือนต่อเนื่องตามเวลาในแผนยา จนจำนวนเม็ดคงเหลือเป็น 0
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="otcReminderUntilDate">แจ้งเตือนถึงวันที่</Label>
+                        <Input
+                          id="otcReminderUntilDate"
+                          type="date"
+                          value={otcReminderUntilDate}
+                          onChange={(event) => setOtcReminderUntilDate(event.target.value)}
+                          disabled={isCreatingPlan}
+                        />
+                      </div>
+                      <div className="rounded-md border bg-background/70 p-3 text-xs text-muted-foreground">
+                        ยาทั่วไปไม่จำเป็นต้องเตือนจนยาหมด สามารถกำหนดวันสิ้นสุดการเตือนได้ตามต้องการ
+                      </div>
+                    </div>
+                  )}
+                </div>
                 {externalInfo ? (
                   <div className="space-y-2 rounded-md border bg-cyan-50/60 p-3">
                     <p className="text-sm font-semibold">ข้อมูลยาจริงจากฐานข้อมูลภายนอก</p>
@@ -1838,7 +2052,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                 <div className="flex flex-wrap gap-2 pt-1">
                   <Button
                     onClick={() => void confirmAndCreateMedicationPlan()}
-                    disabled={isCreatingPlan || !ocrValidation?.canConfirm}
+                    disabled={isCreatingPlan || !ocrValidation?.canConfirm || !canSubmitByMedicationType}
                   >
                     {isCreatingPlan ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

@@ -28,9 +28,9 @@ export async function GET() {
   const { data: plans } = planIds.length
     ? await supabase
         .from("medication_plans")
-        .select("id, dosage, medicine_id")
+        .select("id, dosage, medicine_id, is_active")
         .in("id", planIds)
-    : { data: [] as { id: string; dosage: string; medicine_id: string }[] };
+    : { data: [] as { id: string; dosage: string; medicine_id: string; is_active: boolean }[] };
 
   const medicineIds = (plans ?? []).map((plan) => plan.medicine_id).filter(Boolean);
   const { data: medicines } = medicineIds.length
@@ -40,15 +40,23 @@ export async function GET() {
   const planMap = new Map((plans ?? []).map((plan) => [plan.id, plan]));
   const medicineMap = new Map((medicines ?? []).map((medicine) => [medicine.id, medicine.name]));
 
-  const mapped = (events ?? []).map((event) => {
-    const plan = planMap.get(event.plan_id);
-    const medicineName = plan?.medicine_id ? medicineMap.get(plan.medicine_id) ?? "ยา" : "ยา";
-    return {
-      id: event.id,
-      dueAt: event.due_at,
-      message: `ถึงเวลาทานยา ${medicineName} กรุณาทานยาตามแผน`,
-    };
-  });
+  const mapped = (events ?? [])
+    .map((event) => {
+      const plan = planMap.get(event.plan_id);
+      if (plan && plan.is_active === false) {
+        return null;
+      }
+
+      const medicineName = plan?.medicine_id
+        ? medicineMap.get(plan.medicine_id) ?? "ยา"
+        : "ยา";
+      return {
+        id: event.id,
+        dueAt: event.due_at,
+        message: `ถึงเวลาทานยา ${medicineName} กรุณาทานยาตามแผน`,
+      };
+    })
+    .filter((item): item is { id: string; dueAt: string; message: string } => Boolean(item));
 
   return NextResponse.json({ events: mapped });
 }

@@ -7,6 +7,12 @@ import { makeReminderMessage, shouldDispatchNow } from "@/lib/reminders/engine";
 import { getSmsProvider } from "@/lib/reminders/sms-provider";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+const isStatusConstraintError = (
+  message: string | undefined,
+  code: string | null | undefined,
+) =>
+  code === "23514" || (message ?? "").toLowerCase().includes("reminder_events_status_check");
+
 const isCronAuthorized = (request: Request) => {
   if (!env.CRON_SECRET) return true;
   const authHeader = request.headers.get("authorization");
@@ -29,7 +35,7 @@ const dispatch = async (request: Request) => {
   const { data: events, error } = await supabase
     .from("reminder_events")
     .select(
-      "id, patient_id, plan_id, channel, due_at, status, medication_plans(dosage, medicine_id), profiles(phone)",
+      "id, patient_id, plan_id, channel, due_at, status, medication_plans(dosage, medicine_id, is_active), profiles(phone)",
     )
     .eq("status", "pending")
     .gte("due_at", windowStart)
@@ -68,6 +74,7 @@ const dispatch = async (request: Request) => {
   const smsProvider = getSmsProvider();
   let sent = 0;
   let failed = 0;
+  let autoCancelled = 0;
 
   for (const event of events) {
     const plan = Array.isArray(event.medication_plans)
@@ -75,6 +82,47 @@ const dispatch = async (request: Request) => {
       : event.medication_plans;
     const profile = Array.isArray(event.profiles) ? event.profiles[0] : event.profiles;
     const dueAt = new Date(event.due_at);
+
+    if (plan && "is_active" in plan && plan.is_active === false) {
+      const nowIso = new Date().toISOString();
+      let { error: cancelError } = await supabase
+        .from("reminder_events")
+        .update({
+          status: "cancelled",
+          sent_at: nowIso,
+          provider: "plan-inactive",
+          provider_response: {
+            source: "dispatch",
+            reason: "plan-inactive",
+            updatedAt: nowIso,
+          },
+        })
+        .eq("id", event.id);
+
+      if (isStatusConstraintError(cancelError?.message, cancelError?.code)) {
+        const legacyFallback = await supabase
+          .from("reminder_events")
+          .update({
+            status: "failed",
+            sent_at: nowIso,
+            provider: "plan-inactive",
+            provider_response: {
+              source: "dispatch",
+              reason: "plan-inactive",
+              updatedAt: nowIso,
+              legacyCancelled: true,
+            },
+          })
+          .eq("id", event.id);
+        cancelError = legacyFallback.error;
+      }
+
+      if (!cancelError) {
+        autoCancelled += 1;
+      }
+      continue;
+    }
+
     if (!shouldDispatchNow(dueAt, now)) {
       continue;
     }
@@ -123,6 +171,7 @@ const dispatch = async (request: Request) => {
     scanned: events.length,
     sent,
     failed,
+    autoCancelled,
     provider: smsProvider.providerName,
     timestamp: now.toISOString(),
   });

@@ -7,10 +7,13 @@ export interface ParsedMedicationDetails {
   medicineNameTh: string | null;
   dosageText: string;
   quantityPerDose: string | null;
+  quantityPerDoseValue: number | null;
   frequencyPerDay: number | null;
   mealTiming: MealTiming;
   periods: DayPeriod[];
   customTimes: string[];
+  totalPillsInPackage: number | null;
+  isDoctorPrescribed: boolean | null;
   confidence: number;
   rawText: string;
 }
@@ -240,6 +243,92 @@ const extractCustomTimes = (text: string) => {
   );
 };
 
+const extractQuantityPerDoseValue = (quantityPerDose: string | null) => {
+  if (!quantityPerDose) return null;
+  const match = quantityPerDose.match(/([0-9]+(?:[.,][0-9]+)?)/);
+  if (!match?.[1]) return null;
+  const parsed = Number(match[1].replace(",", "."));
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Number(parsed.toFixed(2));
+};
+
+const TOTAL_PILLS_UNIT_REGEX = /(เม็ด|tablet|tablets|tab|capsule|capsules|caplet|caplets|caps?)/i;
+const DOSE_INSTRUCTION_HINT_REGEX =
+  /(ครั้งละ|วันละ|รับประทาน|ก่อนอาหาร|หลังอาหาร|take|dose|times?\s*(per|a)\s*day|before meal|after meal)/i;
+const DOCTOR_PRESCRIBED_REGEX =
+  /(ใช้ตามแพทย์สั่งเท่านั้น|ตามแพทย์สั่ง|แพทย์สั่ง|prescription\s*only|rx\s*only|doctor['\s-]*order)/i;
+const OTC_HINT_REGEX = /(otc|over\s*the\s*counter|ยาสามัญประจำบ้าน|ยาสามัญ)/i;
+
+const normalizeCandidatePillCount = (value: number) => {
+  if (!Number.isFinite(value)) return null;
+  const rounded = Math.round(value);
+  if (rounded <= 0 || rounded > 5000) return null;
+  return rounded;
+};
+
+const extractTotalPillsInPackage = (text: string) => {
+  const lines = normalizeText(text)
+    .split("\n")
+    .map((line) => cleanLine(line))
+    .filter(Boolean);
+
+  const candidates: number[] = [];
+  for (const line of lines) {
+    const hasDoseHint = DOSE_INSTRUCTION_HINT_REGEX.test(line);
+    const hasUnit = TOTAL_PILLS_UNIT_REGEX.test(line);
+    const hasCountMarker = /#\s*\d{1,5}|(จำนวน|qty|quantity|จ่าย|dispense)/i.test(line);
+
+    if (!hasUnit && !hasCountMarker) {
+      continue;
+    }
+
+    const hashMatch = line.match(/#\s*([0-9]{1,5})\s*(?:เม็ด|tablet|tablets|tab|capsule|capsules|caplet|caplets|caps?)?/i);
+    if (hashMatch?.[1]) {
+      const parsed = normalizeCandidatePillCount(Number(hashMatch[1]));
+      if (parsed) {
+        candidates.push(parsed);
+        continue;
+      }
+    }
+
+    const quantityMatch = line.match(
+      /(?:จำนวน|qty|quantity|จ่าย|dispense)\s*[:#]?\s*([0-9]{1,5})\s*(?:เม็ด|tablet|tablets|tab|capsule|capsules|caplet|caplets|caps?)?/i,
+    );
+    if (quantityMatch?.[1]) {
+      const parsed = normalizeCandidatePillCount(Number(quantityMatch[1]));
+      if (parsed) {
+        candidates.push(parsed);
+        continue;
+      }
+    }
+
+    if (hasDoseHint) {
+      continue;
+    }
+
+    const genericMatch = line.match(
+      /([0-9]{1,5})\s*(?:เม็ด|tablet|tablets|tab|capsule|capsules|caplet|caplets|caps?)\b/i,
+    );
+    if (genericMatch?.[1]) {
+      const parsed = normalizeCandidatePillCount(Number(genericMatch[1]));
+      if (parsed) {
+        candidates.push(parsed);
+      }
+    }
+  }
+
+  if (!candidates.length) return null;
+  const uniqueSorted = unique(candidates).sort((a, b) => b - a);
+  return uniqueSorted.find((value) => value >= 4) ?? uniqueSorted[0] ?? null;
+};
+
+const detectDoctorPrescription = (text: string): boolean | null => {
+  if (!text.trim()) return null;
+  if (DOCTOR_PRESCRIBED_REGEX.test(text)) return true;
+  if (OTC_HINT_REGEX.test(text)) return false;
+  return null;
+};
+
 const fallbackPeriodsFromFrequency = (frequencyPerDay: number | null): DayPeriod[] => {
   if (frequencyPerDay === 1) return ["morning"];
   if (frequencyPerDay === 2) return ["morning", "evening"];
@@ -256,6 +345,8 @@ const computeConfidence = (details: Omit<ParsedMedicationDetails, "confidence">)
   if (details.frequencyPerDay) score += 0.2;
   if (details.periods.length || details.customTimes.length) score += 0.1;
   if (details.mealTiming !== "unspecified") score += 0.1;
+  if (details.totalPillsInPackage) score += 0.06;
+  if (details.isDoctorPrescribed !== null) score += 0.03;
   return Math.min(0.98, Number(score.toFixed(2)));
 };
 
@@ -347,6 +438,7 @@ export const parseMedicationDetailsFromText = (inputText: string): ParsedMedicat
   const dosageText = doseLines.join(" ") || lines.slice(0, 6).join(" ");
 
   const quantityPerDose = extractQuantityPerDose(dosageText);
+  const quantityPerDoseValue = extractQuantityPerDoseValue(quantityPerDose);
   const frequencyPerDay = extractFrequencyPerDay(dosageText);
   const mealTiming = extractMealTiming(dosageText);
 
@@ -356,6 +448,8 @@ export const parseMedicationDetailsFromText = (inputText: string): ParsedMedicat
     : fallbackPeriodsFromFrequency(frequencyPerDay);
 
   const customTimes = extractCustomTimes(dosageText);
+  const totalPillsInPackage = extractTotalPillsInPackage(normalizedRaw);
+  const isDoctorPrescribed = detectDoctorPrescription(normalizedRaw);
 
   const medicineQuery =
     medicineNameEn ??
@@ -375,10 +469,13 @@ export const parseMedicationDetailsFromText = (inputText: string): ParsedMedicat
     medicineNameTh,
     dosageText,
     quantityPerDose,
+    quantityPerDoseValue,
     frequencyPerDay,
     mealTiming,
     periods,
     customTimes,
+    totalPillsInPackage,
+    isDoctorPrescribed,
     rawText: normalizedRaw,
   };
 
