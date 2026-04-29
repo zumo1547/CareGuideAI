@@ -1,4 +1,4 @@
-﻿import { Activity, BellRing, Pill, UserRoundCheck } from "lucide-react";
+import { Activity, BellRing, Pill, UserRoundCheck } from "lucide-react";
 
 import { MedicationPlanForm } from "@/components/patient/medication-plan-form";
 import { MedicationScanner } from "@/components/patient/medication-scanner";
@@ -61,7 +61,7 @@ export default async function PatientDashboardPage() {
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>เนเธเธเธขเธฒ Active</CardDescription>
+            <CardDescription>แผนยา Active</CardDescription>
             <CardTitle className="flex items-center gap-2 text-2xl">
               <Pill className="h-5 w-5 text-cyan-700" />
               {plans?.filter((plan) => plan.is_active).length ?? 0}
@@ -70,7 +70,7 @@ export default async function PatientDashboardPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>เนเธเนเธเน€เธ•เธทเธญเธเธ—เธตเนเธเธณเธฅเธฑเธเธฃเธญ</CardDescription>
+            <CardDescription>แจ้งเตือนที่กำลังรอ</CardDescription>
             <CardTitle className="flex items-center gap-2 text-2xl">
               <BellRing className="h-5 w-5 text-amber-600" />
               {reminderEvents?.filter((item) => item.status === "pending").length ?? 0}
@@ -79,7 +79,7 @@ export default async function PatientDashboardPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>เธซเธกเธญเธ”เธนเนเธฅ</CardDescription>
+            <CardDescription>หมอดูแล</CardDescription>
             <CardTitle className="flex items-center gap-2 text-2xl">
               <UserRoundCheck className="h-5 w-5 text-emerald-700" />
               {links?.length ?? 0}
@@ -88,10 +88,10 @@ export default async function PatientDashboardPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>เธชเธ–เธฒเธเธฐเธฃเธฐเธเธ</CardDescription>
+            <CardDescription>สถานะระบบ</CardDescription>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Activity className="h-5 w-5 text-violet-700" />
-              เธเธฃเนเธญเธกเนเธเนเธเธฒเธ
+              พร้อมใช้งาน
             </CardTitle>
           </CardHeader>
         </Card>
@@ -110,26 +110,26 @@ export default async function PatientDashboardPage() {
       <section>
         <Card>
           <CardHeader>
-            <CardTitle>เธ•เธฒเธฃเธฒเธเธขเธฒเนเธฅเธฐเธเธฒเธฃเนเธเนเธเน€เธ•เธทเธญเธเธฅเนเธฒเธชเธธเธ”</CardTitle>
+            <CardTitle>ตารางยาและการแจ้งเตือนล่าสุด</CardTitle>
             <CardDescription>
-              เธ•เธฒเธฃเธฒเธเธ”เนเธฒเธเธฅเนเธฒเธเนเธชเธ”เธเธขเธฒเนเธ•เนเธฅเธฐเธฃเธฒเธขเธเธฒเธฃเธเธฃเนเธญเธกเธเนเธงเธเน€เธงเธฅเธฒเนเธเนเธเน€เธ•เธทเธญเธ
+              ตารางด้านล่างแสดงยาแต่ละรายการพร้อมช่วงเวลาแจ้งเตือน
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>เธเธทเนเธญเธขเธฒ</TableHead>
-                  <TableHead>เธเธเธฒเธ”เธขเธฒ</TableHead>
-                  <TableHead>เน€เธงเธฅเธฒ</TableHead>
-                  <TableHead>เธชเธ–เธฒเธเธฐ</TableHead>
+                  <TableHead>ชื่อยา</TableHead>
+                  <TableHead>ขนาดยา</TableHead>
+                  <TableHead>เวลา</TableHead>
+                  <TableHead>สถานะ</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {(plans ?? []).length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={4} className="text-center text-muted-foreground">
-                      เธขเธฑเธเนเธกเนเธกเธตเนเธเธเธขเธฒ
+                      ยังไม่มีแผนยา
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -142,7 +142,7 @@ export default async function PatientDashboardPage() {
 
                     return (
                       <TableRow key={plan.id}>
-                        <TableCell className="font-medium">{medicine?.name ?? "เนเธกเนเธเธเธเธทเนเธญเธขเธฒ"}</TableCell>
+                        <TableCell className="font-medium">{medicine?.name ?? "ไม่พบชื่อยา"}</TableCell>
                         <TableCell>{plan.dosage}</TableCell>
                         <TableCell>{times || "-"}</TableCell>
                         <TableCell>
@@ -164,7 +164,7 @@ export default async function PatientDashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>Reminder Events</CardTitle>
-            <CardDescription>เธเนเธญเธกเธนเธฅเธเธฒเธเธฃเธฐเธเธเนเธเนเธเน€เธ•เธทเธญเธ (SMS/Voice)</CardDescription>
+            <CardDescription>ข้อมูลจากระบบแจ้งเตือน (SMS/Voice)</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="mb-4 rounded-xl border border-cyan-200/70 bg-gradient-to-br from-cyan-50 to-sky-50 p-4">
