@@ -167,6 +167,10 @@ export default async function PatientDashboardPage() {
             <CardDescription>ข้อมูลจากระบบแจ้งเตือน (SMS/Voice)</CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="mb-3 rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+              <p>รายการที่กดยกเลิก (cancelled) จะถูกลบอัตโนมัติภายใน 30 นาที</p>
+              <p>รายการแจ้งเตือนที่ส่งแล้วจะถูกลบอัตโนมัติทุกสัปดาห์</p>
+            </div>
             <ReminderEventsTable
               initialEvents={(reminderEvents ?? []).map((event) => ({
                 id: event.id,

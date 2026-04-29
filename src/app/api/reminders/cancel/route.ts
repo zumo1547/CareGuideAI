@@ -56,6 +56,7 @@ export async function POST(request: Request) {
   const cancelledAt = new Date().toISOString();
   const baseUpdatePayload = {
     status: "cancelled",
+    sent_at: cancelledAt,
     provider: "user-cancelled",
     provider_response: {
       source: "patient-dashboard",
@@ -88,6 +89,7 @@ export async function POST(request: Request) {
   if (isStatusConstraintError(updateError?.message, updateError?.code)) {
     const legacyPayload = {
       status: "failed",
+      sent_at: cancelledAt,
       provider: "user-cancelled",
       provider_response: {
         source: "patient-dashboard",
