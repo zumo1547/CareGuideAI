@@ -19,8 +19,7 @@ const findRequiredRoles = (pathname: string) => {
 };
 
 export async function proxy(request: NextRequest) {
-  const response = NextResponse.next();
-  const supabase = createSupabaseMiddlewareClient(request, response);
+  const { supabase, getResponse, withResponseState } = createSupabaseMiddlewareClient(request);
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -28,7 +27,7 @@ export async function proxy(request: NextRequest) {
   if (!user) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", request.nextUrl.pathname);
-    return NextResponse.redirect(loginUrl);
+    return withResponseState(NextResponse.redirect(loginUrl));
   }
 
   const { data: profile } = await supabase
@@ -38,7 +37,7 @@ export async function proxy(request: NextRequest) {
     .single();
 
   if (!profile || !isRole(profile.role)) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return withResponseState(NextResponse.redirect(new URL("/login", request.url)));
   }
 
   const isOnboardingRoute = request.nextUrl.pathname.startsWith("/app/onboarding");
@@ -54,19 +53,19 @@ export async function proxy(request: NextRequest) {
   }
 
   if (!hasCompletedOnboarding && !isOnboardingRoute) {
-    return NextResponse.redirect(new URL("/app/onboarding", request.url));
+    return withResponseState(NextResponse.redirect(new URL("/app/onboarding", request.url)));
   }
 
   if (hasCompletedOnboarding && isOnboardingRoute) {
-    return NextResponse.redirect(new URL(ROLE_HOME[profile.role], request.url));
+    return withResponseState(NextResponse.redirect(new URL(ROLE_HOME[profile.role], request.url)));
   }
 
   const requiredRoles = findRequiredRoles(request.nextUrl.pathname);
   if (requiredRoles && !canAccessAnyRole(profile.role, requiredRoles)) {
-    return NextResponse.redirect(new URL(ROLE_HOME[profile.role], request.url));
+    return withResponseState(NextResponse.redirect(new URL(ROLE_HOME[profile.role], request.url)));
   }
 
-  return response;
+  return getResponse();
 }
 
 export const config = {
