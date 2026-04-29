@@ -14,10 +14,21 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type MedicationType = "prescription" | "otc";
 type ReminderMode = "until_exhausted" | "until_date";
+type PostgrestLikeError = { message?: string; code?: string | null } | null | undefined;
 
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_REMINDER_DAYS = 730;
 const MAX_REMINDER_ROWS = 5000;
+const MEDICATION_PLAN_NEW_COLUMNS = [
+  "medication_type",
+  "doctor_ordered_detected",
+  "total_pills",
+  "remaining_pills",
+  "pills_per_dose",
+  "reminder_mode",
+  "reminder_until_date",
+  "exhausted_at",
+] as const;
 
 const schema = z.object({
   patientId: z.uuid().optional(),
@@ -39,6 +50,21 @@ const schema = z.object({
 });
 
 const toDateIso = (date: Date) => format(date, "yyyy-MM-dd");
+
+const isMedicationPlansSchemaCacheError = (error: PostgrestLikeError) => {
+  if (!error?.message) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("medication_plans") &&
+    (message.includes("schema cache") || message.includes("could not find the"))
+  );
+};
+
+const hasMissingMedicationPlanColumn = (error: PostgrestLikeError) => {
+  if (!isMedicationPlansSchemaCacheError(error) || !error?.message) return false;
+  const message = error.message.toLowerCase();
+  return MEDICATION_PLAN_NEW_COLUMNS.some((column) => message.includes(column));
+};
 
 const parseDoseFromDosageText = (dosage: string) => {
   const thaiMatch = dosage.match(/ครั้งละ\s*([0-9]+(?:[.,][0-9]+)?)/i);
@@ -330,28 +356,67 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data: plan, error: planError } = await supabase
-    .from("medication_plans")
-    .insert({
-      patient_id: patientId,
-      medicine_id: medicine.id,
-      prescribed_by: auth.userId,
-      dosage: payload.dosage,
-      notes: payload.notes ?? null,
-      start_date: toDateIso(now),
-      end_date: reminderMode === "until_date" ? reminderUntilDate : null,
-      is_active: true,
-      medication_type: medicationType,
-      doctor_ordered_detected: payload.doctorOrderedDetected ?? null,
-      total_pills: totalPills,
-      remaining_pills: totalPills,
-      pills_per_dose: pillsPerDose,
-      reminder_mode: reminderMode,
-      reminder_until_date: reminderMode === "until_date" ? reminderUntilDate : null,
-      exhausted_at: null,
-    })
-    .select("id")
-    .single();
+  const advancedPlanInsert = {
+    patient_id: patientId,
+    medicine_id: medicine.id,
+    prescribed_by: auth.userId,
+    dosage: payload.dosage,
+    notes: payload.notes ?? null,
+    start_date: toDateIso(now),
+    end_date: reminderMode === "until_date" ? reminderUntilDate : null,
+    is_active: true,
+    medication_type: medicationType,
+    doctor_ordered_detected: payload.doctorOrderedDetected ?? null,
+    total_pills: totalPills,
+    remaining_pills: totalPills,
+    pills_per_dose: pillsPerDose,
+    reminder_mode: reminderMode,
+    reminder_until_date: reminderMode === "until_date" ? reminderUntilDate : null,
+    exhausted_at: null,
+  };
+
+  const fallbackEndDate =
+    reminderMode === "until_date"
+      ? reminderUntilDate
+      : dueSlots.length
+        ? toDateIso(dueSlots[dueSlots.length - 1] as Date)
+        : null;
+
+  const legacyPlanInsert = {
+    patient_id: patientId,
+    medicine_id: medicine.id,
+    prescribed_by: auth.userId,
+    dosage: payload.dosage,
+    notes: payload.notes ?? null,
+    start_date: toDateIso(now),
+    end_date: fallbackEndDate,
+    is_active: true,
+  };
+
+  let usedLegacySchemaFallback = false;
+  let plan: { id: string } | null = null;
+  let planError: { message?: string; code?: string | null } | null = null;
+
+  {
+    const firstAttempt = await supabase
+      .from("medication_plans")
+      .insert(advancedPlanInsert)
+      .select("id")
+      .single();
+    plan = firstAttempt.data;
+    planError = firstAttempt.error;
+  }
+
+  if ((planError || !plan) && hasMissingMedicationPlanColumn(planError)) {
+    const secondAttempt = await supabase
+      .from("medication_plans")
+      .insert(legacyPlanInsert)
+      .select("id")
+      .single();
+    plan = secondAttempt.data;
+    planError = secondAttempt.error;
+    usedLegacySchemaFallback = !secondAttempt.error;
+  }
 
   if (planError || !plan) {
     return NextResponse.json({ error: planError?.message ?? "Cannot create medication plan" }, { status: 400 });
@@ -402,5 +467,9 @@ export async function POST(request: Request) {
     totalPills,
     pillsPerDose,
     reminderUntilDate,
+    schemaFallback: usedLegacySchemaFallback,
+    warning: usedLegacySchemaFallback
+      ? "Supabase schema cache is not updated yet for new medication columns. Plan was saved in compatibility mode."
+      : null,
   });
 }

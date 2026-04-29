@@ -11,6 +11,15 @@ const schema = z.object({
   notes: z.string().max(500).optional(),
 });
 
+const isMedicationPlansSchemaCacheError = (message: string | undefined) => {
+  const lowered = (message ?? "").toLowerCase();
+  return (
+    lowered.includes("medication_plans") &&
+    lowered.includes("schema cache") &&
+    lowered.includes("could not find the")
+  );
+};
+
 const isStatusConstraintError = (message: string | undefined, code: string | null | undefined) =>
   code === "23514" || (message ?? "").toLowerCase().includes("reminder_events_status_check");
 
@@ -33,11 +42,67 @@ export async function POST(request: Request) {
 
   const supabase = await createSupabaseServerClient();
 
-  const { data: plan } = await supabase
+  let plan: {
+    id: string;
+    patient_id: string;
+    is_active: boolean;
+    remaining_pills: number | null;
+    pills_per_dose: number | null;
+    reminder_mode: string | null;
+  } | null = null;
+
+  let legacyPlanSchemaMode = false;
+
+  const fullPlanResponse = await supabase
     .from("medication_plans")
     .select("id, patient_id, remaining_pills, pills_per_dose, reminder_mode, is_active")
     .eq("id", payload.planId)
-    .single();
+    .maybeSingle();
+
+  if (fullPlanResponse.error && isMedicationPlansSchemaCacheError(fullPlanResponse.error.message)) {
+    const fallbackPlanResponse = await supabase
+      .from("medication_plans")
+      .select("id, patient_id, is_active")
+      .eq("id", payload.planId)
+      .maybeSingle();
+
+    if (fallbackPlanResponse.error) {
+      return NextResponse.json({ error: fallbackPlanResponse.error.message }, { status: 400 });
+    }
+
+    if (fallbackPlanResponse.data) {
+      plan = {
+        id: fallbackPlanResponse.data.id,
+        patient_id: fallbackPlanResponse.data.patient_id,
+        is_active: Boolean(fallbackPlanResponse.data.is_active),
+        remaining_pills: null,
+        pills_per_dose: null,
+        reminder_mode: null,
+      };
+      legacyPlanSchemaMode = true;
+    }
+  } else {
+    if (fullPlanResponse.error) {
+      return NextResponse.json({ error: fullPlanResponse.error.message }, { status: 400 });
+    }
+
+    if (fullPlanResponse.data) {
+      plan = {
+        id: fullPlanResponse.data.id,
+        patient_id: fullPlanResponse.data.patient_id,
+        is_active: Boolean(fullPlanResponse.data.is_active),
+        remaining_pills:
+          fullPlanResponse.data.remaining_pills === null
+            ? null
+            : Number(fullPlanResponse.data.remaining_pills),
+        pills_per_dose:
+          fullPlanResponse.data.pills_per_dose === null
+            ? null
+            : Number(fullPlanResponse.data.pills_per_dose),
+        reminder_mode: fullPlanResponse.data.reminder_mode,
+      };
+    }
+  }
 
   if (!plan) {
     return NextResponse.json({ error: "Plan not found" }, { status: 404 });
@@ -73,7 +138,7 @@ export async function POST(request: Request) {
 
   const shouldDecrementInventory = payload.status === "taken" && existingLog?.status !== "taken";
 
-  if (shouldDecrementInventory && plan.remaining_pills !== null) {
+  if (!legacyPlanSchemaMode && shouldDecrementInventory && plan.remaining_pills !== null) {
     const pillsPerDoseRaw = Number(plan.pills_per_dose ?? 1);
     const pillsPerDose = Number.isFinite(pillsPerDoseRaw) && pillsPerDoseRaw > 0 ? pillsPerDoseRaw : 1;
     const currentRemaining = Number(plan.remaining_pills ?? 0);
