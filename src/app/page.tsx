@@ -10,20 +10,21 @@ import {
 import Link from "next/link";
 
 import { BrandLogo } from "@/components/layout/brand-logo";
+import { hasAuthenticatedUser } from "@/lib/auth/session";
 
 const featureCards = [
   {
     title: "สแกนฉลากยาแบบใช้งานจริง",
-    desc: "ยกมือถือขึ้นส่องซองยาได้ทันที รองรับ OCR ไทย/อังกฤษ พร้อมโหมดช่วยนำทางการวางกล้อง",
+    desc: "ยกกล้องมือถือไปที่ซองยาได้ทันที รองรับ OCR ไทย/อังกฤษ พร้อมเสียงแนะนำการวางกล้อง",
     icon: Camera,
   },
   {
     title: "เตือนกินยาด้วย SMS + เสียง",
-    desc: "แจ้งเตือนตามเวลาเช้า กลางวัน เย็น และเวลาพิเศษ พร้อมติดตามว่ากินยาครบหรือไม่",
+    desc: "แจ้งเตือนตามเวลาเช้า กลางวัน เย็น และเวลาเฉพาะ พร้อมติดตามว่ากินยาครบหรือไม่",
     icon: BellRing,
   },
   {
-    title: "เชื่อมต่อแพทย์และติดตามผล",
+    title: "เชื่อมต่อคุณหมอและติดตามผล",
     desc: "ส่งอาการ ข้อความ และนัดหมายกับแพทย์ได้ในระบบเดียว ให้หมอเห็นแผนยาและผลการกินยา",
     icon: Stethoscope,
   },
@@ -40,13 +41,20 @@ const supportPoints = [
   "ออกแบบให้กดง่ายบนมือถือด้วยปุ่มขนาดชัดเจน",
 ];
 
-export default function Home() {
+export default async function Home() {
+  const isAuthenticated = await hasAuthenticatedUser();
+
+  const primaryHref = isAuthenticated ? "/app" : "/register";
+  const primaryLabel = isAuthenticated ? "ไปที่แดชบอร์ด" : "เริ่มใช้งาน";
+  const secondaryHref = isAuthenticated ? "/app/scan" : "/login";
+  const secondaryLabel = isAuthenticated ? "สแกนยาทันที" : "เข้าสู่ระบบ";
+
   return (
     <div className="min-h-screen bg-[linear-gradient(140deg,#e0f2fe_0%,#ecfeff_38%,#f8fafc_70%,#ffffff_100%)]">
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-4 py-12 md:px-8 md:py-20">
         <section className="reveal-up grid gap-8 rounded-3xl border bg-white/90 p-8 shadow-sm md:grid-cols-[1.15fr_0.85fr] md:p-12">
           <div className="space-y-5">
-            <BrandLogo href="/" imageClassName="h-14" priority />
+            <BrandLogo href={isAuthenticated ? "/app" : "/"} imageClassName="h-14" priority />
             <h1 className="text-4xl font-bold leading-tight text-slate-900 md:text-5xl">
               CareGuideAI
               <br />
@@ -68,17 +76,17 @@ export default function Home() {
 
             <div className="flex flex-wrap gap-3 pt-1">
               <Link
-                href="/register"
+                href={primaryHref}
                 className="inline-flex items-center gap-2 rounded-full bg-cyan-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-800"
               >
-                เริ่มใช้งาน
+                {primaryLabel}
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <Link
-                href="/login"
+                href={secondaryHref}
                 className="inline-flex items-center gap-2 rounded-full border border-cyan-700 px-5 py-2.5 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-50"
               >
-                เข้าสู่ระบบ
+                {secondaryLabel}
               </Link>
             </div>
           </div>
@@ -120,4 +128,3 @@ export default function Home() {
     </div>
   );
 }
-

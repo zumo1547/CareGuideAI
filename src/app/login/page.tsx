@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { LoginForm } from "@/components/auth/login-form";
 import { BrandLogo } from "@/components/layout/brand-logo";
+import { hasAuthenticatedUser } from "@/lib/auth/session";
 
 interface LoginPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -11,6 +13,10 @@ const toSingle = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
+  if (await hasAuthenticatedUser()) {
+    redirect("/app");
+  }
+
   const resolvedSearchParams = await searchParams;
   const nextPath = toSingle(resolvedSearchParams.next) ?? "/app";
 

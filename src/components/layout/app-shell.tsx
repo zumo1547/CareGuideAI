@@ -30,7 +30,7 @@ export const AppShell = ({ role, fullName, children }: AppShellProps) => (
     <header className="border-b bg-background/80 backdrop-blur">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
         <div className="space-y-2">
-          <BrandLogo href="/" imageClassName="h-11" />
+          <BrandLogo href="/app" imageClassName="h-11" />
           <h1 className="text-lg font-semibold">{fullName}</h1>
         </div>
         <div className="flex items-center gap-3">

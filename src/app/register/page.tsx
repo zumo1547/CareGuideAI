@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { RegisterForm } from "@/components/auth/register-form";
 import { BrandLogo } from "@/components/layout/brand-logo";
+import { hasAuthenticatedUser } from "@/lib/auth/session";
 
 interface RegisterPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -11,6 +13,10 @@ const toSingle = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
 export default async function RegisterPage({ searchParams }: RegisterPageProps) {
+  if (await hasAuthenticatedUser()) {
+    redirect("/app");
+  }
+
   const resolvedSearchParams = await searchParams;
   const inviteToken = toSingle(resolvedSearchParams.invite) ?? "";
 
@@ -26,7 +32,7 @@ export default async function RegisterPage({ searchParams }: RegisterPageProps) 
               เพื่อจัดการยาอย่างมั่นใจ
             </h1>
             <p className="text-slate-600">
-              ผู้พิการสมัครได้ทันที ส่วนบัญชีหมอใช้ระบบ invite โดยแอดมินในหน้า back office
+              ผู้พิการสมัครได้ทันที ส่วนบัญชีหมอใช้ระบบเชิญจากแอดมิน
             </p>
             <p className="text-sm text-muted-foreground">
               มีบัญชีแล้ว? <Link href="/login">เข้าสู่ระบบ</Link>
