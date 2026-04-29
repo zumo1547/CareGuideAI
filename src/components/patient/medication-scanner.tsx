@@ -2,6 +2,7 @@
 
 import type { IScannerControls } from "@zxing/browser";
 import { Camera, CheckCircle2, Loader2, ScanLine, Upload } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -586,6 +587,7 @@ const createCanvasFromFile = (file: File) =>
   });
 
 export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
+  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectorRef = useRef<BarcodeDetector | null>(null);
@@ -1120,6 +1122,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
 
       setPlanSuccess("ยืนยันผลสแกนแล้ว และสร้างตารางยา/แจ้งเตือน SMS สำเร็จ");
       setStatus("บันทึกแผนยาเรียบร้อยแล้ว");
+      router.refresh();
       if (voiceEnabled) {
         speakThai("บันทึกแผนยาเรียบร้อยแล้ว ระบบเตือนพร้อมใช้งาน");
       }
@@ -1128,7 +1131,7 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     } finally {
       setIsCreatingPlan(false);
     }
-  }, [ocrText, ocrValidation, parsedDetails, patientId, scanResult, voiceEnabled]);
+  }, [ocrText, ocrValidation, parsedDetails, patientId, router, scanResult, voiceEnabled]);
 
   useEffect(() => {
     if (!isScanning || !isCameraSupported) {

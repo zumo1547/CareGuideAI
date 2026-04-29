@@ -190,12 +190,26 @@ export async function POST(request: Request) {
     })
     .sort((a, b) => a.due_at.localeCompare(b.due_at));
 
-  await supabase.from("reminder_events").insert(reminderRows);
+  const { error: reminderInsertError } = await supabase.from("reminder_events").insert(reminderRows);
+  if (reminderInsertError) {
+    return NextResponse.json(
+      {
+        error: `Failed to create reminder events: ${reminderInsertError.message}`,
+        details: {
+          code: reminderInsertError.code ?? null,
+          planId: plan.id,
+          reminderRows: reminderRows.length,
+        },
+      },
+      { status: 400 },
+    );
+  }
 
   return NextResponse.json({
     success: true,
     planId: plan.id,
     medicine,
     scheduleTimes,
+    reminderEventsCreated: reminderRows.length,
   });
 }

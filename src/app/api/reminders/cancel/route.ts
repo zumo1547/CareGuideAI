@@ -45,19 +45,34 @@ export async function POST(request: Request) {
   }
 
   const cancelledAt = new Date().toISOString();
-  const { error: updateError } = await supabase
+  const baseUpdatePayload = {
+    status: "cancelled",
+    provider: "user-cancelled",
+    provider_response: {
+      source: "patient-dashboard",
+      cancelledBy: auth.userId,
+      cancelledAt,
+    },
+  };
+
+  const withCancelledAtPayload = {
+    ...baseUpdatePayload,
+    cancelled_at: cancelledAt,
+  };
+
+  let { error: updateError } = await supabase
     .from("reminder_events")
-    .update({
-      status: "cancelled",
-      cancelled_at: cancelledAt,
-      provider: "user-cancelled",
-      provider_response: {
-        source: "patient-dashboard",
-        cancelledBy: auth.userId,
-        cancelledAt,
-      },
-    })
+    .update(withCancelledAtPayload)
     .eq("id", eventId);
+
+  // Fallback for projects where PostgREST schema cache has not picked up cancelled_at yet.
+  if (updateError?.message?.toLowerCase().includes("cancelled_at")) {
+    const fallback = await supabase
+      .from("reminder_events")
+      .update(baseUpdatePayload)
+      .eq("id", eventId);
+    updateError = fallback.error;
+  }
 
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 400 });
@@ -70,4 +85,3 @@ export async function POST(request: Request) {
     cancelledAt,
   });
 }
-
