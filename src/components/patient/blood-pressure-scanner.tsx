@@ -84,14 +84,14 @@ type CameraState = "idle" | "requesting" | "streaming" | "error";
 type OcrSource = "ocr_camera" | "ocr_upload" | "manual";
 type OcrMode = "quick" | "aggressive";
 
-const AUTO_SCAN_INTERVAL_MS = 420;
-const AUTO_FINALIZE_MIN_COMPLETION = 66;
-const AUTO_FINALIZE_MIN_CONFIDENCE = 0.6;
-const OCR_MIN_TEXT_LENGTH = 5;
-const SPEAK_COOLDOWN_MS = 2200;
-const SAFETY_SPEAK_COOLDOWN_MS = 2800;
-const CAMERA_CAPTURE_MAX_EDGE = 1280;
-const CAMERA_AGGRESSIVE_RETRY_COOLDOWN_MS = 2300;
+const AUTO_SCAN_INTERVAL_MS = 900;
+const AUTO_FINALIZE_MIN_COMPLETION = 65;
+const AUTO_FINALIZE_MIN_CONFIDENCE = 0.62;
+const OCR_MIN_TEXT_LENGTH = 6;
+const SPEAK_COOLDOWN_MS = 2000;
+const SAFETY_SPEAK_COOLDOWN_MS = 2600;
+const CAMERA_CAPTURE_MAX_EDGE = 1440;
+const CAMERA_AGGRESSIVE_RETRY_COOLDOWN_MS = 2800;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -299,18 +299,17 @@ const buildVariants = (canvas: HTMLCanvasElement, mode: OcrMode) => {
   if (mode === "quick") {
     return [
       {
+        id: "full-original",
+        canvas,
+        params: {
+          tessedit_pageseg_mode: "6",
+        },
+      },
+      {
         id: "display-threshold",
         canvas: enhanceCanvas({ source: displayCrop, contrast: 2.4, threshold: 145 }),
         params: {
           tessedit_pageseg_mode: "11",
-          tessedit_char_whitelist: "0123456789SYSDIAPULSEBPHR/:- ",
-        },
-      },
-      {
-        id: "center-threshold",
-        canvas: enhanceCanvas({ source: centerCrop, contrast: 2.2, threshold: 150 }),
-        params: {
-          tessedit_pageseg_mode: "6",
           tessedit_char_whitelist: "0123456789SYSDIAPULSEBPHR/:- ",
         },
       },
@@ -768,7 +767,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
           stableCountRef.current = 1;
         }
 
-        const requiredStableCount = combinedConfidence >= 0.78 ? 1 : 2;
+        const requiredStableCount = combinedConfidence >= 0.84 ? 1 : 2;
         const isStableEnough = stableCountRef.current >= requiredStableCount;
         if (
           completion >= AUTO_FINALIZE_MIN_COMPLETION &&
@@ -1021,13 +1020,13 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
     const tick = async () => {
       if (cancelled || !isScanningRef.current) return;
       if (isBusyRef.current) {
-        scheduleNext(220);
+        scheduleNext(380);
         return;
       }
 
       const frame = captureFrame();
       if (!frame) {
-        scheduleNext(260);
+        scheduleNext(480);
         return;
       }
 
@@ -1051,7 +1050,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
       }
     };
 
-    scheduleNext(120);
+    scheduleNext(200);
     return () => {
       cancelled = true;
       clearTimer();
@@ -1114,7 +1113,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
             ) : (
               <Camera className="mr-2 h-4 w-4" />
             )}
-            {cameraState === "requesting" ? "กำลังขอกล้อง..." : "เริ่มสแกนความดัน"}
+            {cameraState === "requesting" ? "กำลังขอสิทธิ์กล้อง..." : "เริ่มสแกนด้วยกล้อง"}
           </Button>
           <Button
             type="button"
@@ -1162,34 +1161,43 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
           />
         </div>
 
-        <div className="relative overflow-hidden rounded-2xl border border-cyan-100 bg-slate-50">
-          <video
-            ref={videoRef}
-            className={`aspect-[16/10] w-full object-cover ${showCameraPreview ? "block" : "invisible"}`}
-            autoPlay
-            muted
-            playsInline
-          />
-          {!showCameraPreview ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-muted/40 p-6 text-center">
-              <div className="space-y-2 text-muted-foreground">
-                {cameraState === "requesting" ? (
-                  <Loader2 className="mx-auto h-8 w-8 animate-spin text-cyan-700" />
-                ) : cameraState === "error" ? (
-                  <VideoOff className="mx-auto h-8 w-8 text-red-600" />
-                ) : (
-                  <ScanLine className="mx-auto h-8 w-8 text-cyan-700" />
-                )}
-                <p className="text-sm">
-                  {cameraState === "requesting"
-                    ? "กำลังขอสิทธิ์กล้อง..."
-                    : cameraState === "error"
-                      ? "เปิดกล้องไม่สำเร็จ ลองกดเริ่มสแกนอีกครั้ง"
-                      : "กดปุ่ม \"เริ่มสแกนความดัน\" เพื่อขอสิทธิ์กล้อง"}
-                </p>
-              </div>
+        <div className="mx-auto w-full max-w-3xl">
+          {isScanning ? (
+            <div className="relative overflow-hidden rounded-xl border bg-black">
+              <video
+                ref={videoRef}
+                className={`h-72 w-full object-cover transition-opacity duration-200 md:h-[22rem] ${
+                  showCameraPreview ? "opacity-100" : "opacity-0"
+                }`}
+                autoPlay
+                muted
+                playsInline
+              />
+              {!showCameraPreview ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-muted/40 p-6 text-center">
+                  <div className="space-y-2 text-muted-foreground">
+                    <Loader2 className="mx-auto h-8 w-8 animate-spin text-cyan-700" />
+                    <p className="text-sm">กำลังเชื่อมต่อภาพจากกล้อง...</p>
+                  </div>
+                </div>
+              ) : null}
             </div>
-          ) : null}
+          ) : (
+            <div className="rounded-xl border border-dashed bg-muted/40 p-8 text-center text-sm text-muted-foreground">
+              {cameraState === "requesting" ? (
+                <Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin text-cyan-700" />
+              ) : cameraState === "error" ? (
+                <VideoOff className="mx-auto mb-2 h-6 w-6 text-red-600" />
+              ) : (
+                <ScanLine className="mx-auto mb-2 h-6 w-6 text-cyan-700" />
+              )}
+              {cameraState === "requesting"
+                ? "กำลังขอสิทธิ์กล้อง..."
+                : cameraState === "error"
+                  ? "เปิดกล้องไม่สำเร็จ ลองกดปุ่ม \"เริ่มสแกนด้วยกล้อง\" อีกครั้ง"
+                  : "แนะนำให้กดปุ่ม \"เริ่มสแกนด้วยกล้อง\" เฉพาะตอนต้องการใช้งาน"}
+            </div>
+          )}
         </div>
 
         {previewDataUrl ? (
