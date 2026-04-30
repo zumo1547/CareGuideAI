@@ -813,15 +813,16 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
       },
     ];
 
+    let lastError: unknown = null;
     for (const constraint of requested) {
       try {
         return await navigator.mediaDevices.getUserMedia(constraint);
-      } catch {
-        // try next constraint
+      } catch (error) {
+        lastError = error;
       }
     }
 
-    throw new Error("Cannot open camera stream");
+    throw lastError ?? new Error("Cannot open camera stream");
   }, []);
 
   const startCameraScan = useCallback(async () => {
@@ -840,7 +841,11 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
       const stream = await openCameraStream();
       streamRef.current = stream;
 
-      const video = videoRef.current;
+      let video = videoRef.current;
+      if (!video) {
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+        video = videoRef.current;
+      }
       if (!video) {
         throw new Error("Video element not ready");
       }
@@ -1162,42 +1167,37 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
         </div>
 
         <div className="mx-auto w-full max-w-3xl">
-          {isScanning ? (
-            <div className="relative overflow-hidden rounded-xl border bg-black">
-              <video
-                ref={videoRef}
-                className={`h-72 w-full object-cover transition-opacity duration-200 md:h-[22rem] ${
-                  showCameraPreview ? "opacity-100" : "opacity-0"
-                }`}
-                autoPlay
-                muted
-                playsInline
-              />
-              {!showCameraPreview ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-muted/40 p-6 text-center">
-                  <div className="space-y-2 text-muted-foreground">
+          <div className="relative overflow-hidden rounded-xl border bg-black">
+            <video
+              ref={videoRef}
+              className={`h-72 w-full object-cover transition-opacity duration-200 md:h-[22rem] ${
+                showCameraPreview ? "opacity-100" : "opacity-0"
+              }`}
+              autoPlay
+              muted
+              playsInline
+            />
+            {!showCameraPreview ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/40 p-6 text-center">
+                <div className="space-y-2 text-muted-foreground">
+                  {cameraState === "requesting" ? (
                     <Loader2 className="mx-auto h-8 w-8 animate-spin text-cyan-700" />
-                    <p className="text-sm">กำลังเชื่อมต่อภาพจากกล้อง...</p>
-                  </div>
+                  ) : cameraState === "error" ? (
+                    <VideoOff className="mx-auto h-8 w-8 text-red-600" />
+                  ) : (
+                    <ScanLine className="mx-auto h-8 w-8 text-cyan-700" />
+                  )}
+                  <p className="text-sm">
+                    {cameraState === "requesting"
+                      ? "Requesting camera permission..."
+                      : cameraState === "error"
+                        ? "Unable to open camera. Tap \\\"Start camera scan\\\" again."
+                        : "Tap \\\"Start camera scan\\\" when you want to use the camera."}
+                  </p>
                 </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="rounded-xl border border-dashed bg-muted/40 p-8 text-center text-sm text-muted-foreground">
-              {cameraState === "requesting" ? (
-                <Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin text-cyan-700" />
-              ) : cameraState === "error" ? (
-                <VideoOff className="mx-auto mb-2 h-6 w-6 text-red-600" />
-              ) : (
-                <ScanLine className="mx-auto mb-2 h-6 w-6 text-cyan-700" />
-              )}
-              {cameraState === "requesting"
-                ? "กำลังขอสิทธิ์กล้อง..."
-                : cameraState === "error"
-                  ? "เปิดกล้องไม่สำเร็จ ลองกดปุ่ม \"เริ่มสแกนด้วยกล้อง\" อีกครั้ง"
-                  : "แนะนำให้กดปุ่ม \"เริ่มสแกนด้วยกล้อง\" เฉพาะตอนต้องการใช้งาน"}
-            </div>
-          )}
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {previewDataUrl ? (
