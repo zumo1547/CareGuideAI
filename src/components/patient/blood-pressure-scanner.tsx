@@ -84,12 +84,14 @@ type CameraState = "idle" | "requesting" | "streaming" | "error";
 type OcrSource = "ocr_camera" | "ocr_upload" | "manual";
 type OcrMode = "quick" | "aggressive";
 
-const AUTO_SCAN_INTERVAL_MS = 1500;
-const AUTO_FINALIZE_MIN_COMPLETION = 62;
+const AUTO_SCAN_INTERVAL_MS = 420;
+const AUTO_FINALIZE_MIN_COMPLETION = 66;
 const AUTO_FINALIZE_MIN_CONFIDENCE = 0.6;
 const OCR_MIN_TEXT_LENGTH = 5;
 const SPEAK_COOLDOWN_MS = 2200;
 const SAFETY_SPEAK_COOLDOWN_MS = 2800;
+const CAMERA_CAPTURE_MAX_EDGE = 1280;
+const CAMERA_AGGRESSIVE_RETRY_COOLDOWN_MS = 2300;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -112,6 +114,20 @@ const createCanvas = (width: number, height: number) => {
   canvas.width = Math.max(1, width);
   canvas.height = Math.max(1, height);
   return canvas;
+};
+
+const resizeCanvasForOcr = (source: HTMLCanvasElement, maxEdge: number) => {
+  const { width, height } = source;
+  if (!width || !height) return source;
+
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
+  if (scale >= 0.995) return source;
+
+  const resized = createCanvas(Math.max(1, Math.floor(width * scale)), Math.max(1, Math.floor(height * scale)));
+  const context = resized.getContext("2d");
+  if (!context) return source;
+  context.drawImage(source, 0, 0, resized.width, resized.height);
+  return resized;
 };
 
 const analyzeFrameQuality = (canvas: HTMLCanvasElement): FrameQuality | null => {
@@ -272,13 +288,6 @@ const buildVariants = (canvas: HTMLCanvasElement, mode: OcrMode) => {
     Math.floor(width * 0.7),
     Math.floor(height * 0.7),
   );
-  const rightCrop = cropCanvas(
-    canvas,
-    Math.floor(width * 0.35),
-    Math.floor(height * 0.1),
-    Math.floor(width * 0.6),
-    Math.floor(height * 0.78),
-  );
   const displayCrop = cropCanvas(
     canvas,
     Math.floor(width * 0.2),
@@ -287,7 +296,36 @@ const buildVariants = (canvas: HTMLCanvasElement, mode: OcrMode) => {
     Math.floor(height * 0.55),
   );
 
-  const baseVariants = [
+  if (mode === "quick") {
+    return [
+      {
+        id: "display-threshold",
+        canvas: enhanceCanvas({ source: displayCrop, contrast: 2.4, threshold: 145 }),
+        params: {
+          tessedit_pageseg_mode: "11",
+          tessedit_char_whitelist: "0123456789SYSDIAPULSEBPHR/:- ",
+        },
+      },
+      {
+        id: "center-threshold",
+        canvas: enhanceCanvas({ source: centerCrop, contrast: 2.2, threshold: 150 }),
+        params: {
+          tessedit_pageseg_mode: "6",
+          tessedit_char_whitelist: "0123456789SYSDIAPULSEBPHR/:- ",
+        },
+      },
+    ];
+  }
+
+  const rightCrop = cropCanvas(
+    canvas,
+    Math.floor(width * 0.35),
+    Math.floor(height * 0.1),
+    Math.floor(width * 0.6),
+    Math.floor(height * 0.78),
+  );
+
+  return [
     {
       id: "full-original",
       canvas,
@@ -303,14 +341,6 @@ const buildVariants = (canvas: HTMLCanvasElement, mode: OcrMode) => {
       },
     },
     {
-      id: "center-threshold",
-      canvas: enhanceCanvas({ source: centerCrop, contrast: 2.2, threshold: 150 }),
-      params: {
-        tessedit_pageseg_mode: "6",
-        tessedit_char_whitelist: "0123456789SYSDIAPULSEBPHR/:- ",
-      },
-    },
-    {
       id: "display-threshold",
       canvas: enhanceCanvas({ source: displayCrop, contrast: 2.4, threshold: 145 }),
       params: {
@@ -318,14 +348,14 @@ const buildVariants = (canvas: HTMLCanvasElement, mode: OcrMode) => {
         tessedit_char_whitelist: "0123456789SYSDIAPULSEBPHR/:- ",
       },
     },
-  ];
-
-  if (mode === "quick") {
-    return baseVariants.slice(0, 2);
-  }
-
-  return [
-    ...baseVariants,
+    {
+      id: "center-threshold",
+      canvas: enhanceCanvas({ source: centerCrop, contrast: 2.2, threshold: 150 }),
+      params: {
+        tessedit_pageseg_mode: "6",
+        tessedit_char_whitelist: "0123456789SYSDIAPULSEBPHR/:- ",
+      },
+    },
     {
       id: "right-threshold",
       canvas: enhanceCanvas({ source: rightCrop, contrast: 2.3, threshold: 150 }),
@@ -374,6 +404,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const stableKeyRef = useRef<string>("");
   const stableCountRef = useRef(0);
+  const lastAggressiveFallbackAtRef = useRef(0);
   const finalizedRef = useRef(false);
 
   const [isCameraSupported] = useState(
@@ -488,6 +519,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
   const resetResult = useCallback(() => {
     stableCountRef.current = 0;
     stableKeyRef.current = "";
+    lastAggressiveFallbackAtRef.current = 0;
     finalizedRef.current = false;
     setParsedReading(null);
     setSystolicInput("");
@@ -534,7 +566,11 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
     if (!video || !video.videoWidth || !video.videoHeight) {
       return null;
     }
-    const canvas = createCanvas(video.videoWidth, video.videoHeight);
+    const scale = Math.min(1, CAMERA_CAPTURE_MAX_EDGE / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = createCanvas(
+      Math.max(480, Math.floor(video.videoWidth * scale)),
+      Math.max(320, Math.floor(video.videoHeight * scale)),
+    );
     const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) return null;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -549,6 +585,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
       let bestText = "";
       let bestConfidence = 0;
       let bestReading: ParsedBloodPressureReading | null = null;
+      let bestParsedScore = -1;
 
       for (const variant of variants) {
         const params: Record<string, string> = {
@@ -574,14 +611,16 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
 
         if (parsed) {
           const parsedScore = parsed.confidence * 0.7 + ocrConfidence * 0.3;
-          const currentBestScore = bestReading ? bestReading.confidence * 0.7 + bestConfidence * 0.3 : -1;
-          if (!bestReading || parsedScore > currentBestScore) {
+          if (!bestReading || parsedScore > bestParsedScore) {
+            bestParsedScore = parsedScore;
             bestReading = parsed;
             bestText = text;
             bestConfidence = ocrConfidence;
           }
 
-          if (parsed.confidence >= 0.9 && parsed.source === "labeled") {
+          const quickReady = mode === "quick" && parsedScore >= 0.82;
+          const highConfidenceLabeled = parsed.confidence >= 0.9 && parsed.source === "labeled";
+          if (quickReady || highConfidenceLabeled) {
             break;
           }
         }
@@ -646,7 +685,9 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
       },
     ) => {
       const mode = options?.mode ?? (source === "ocr_upload" ? "aggressive" : "quick");
-      const safety = evaluateFrameSafety(canvas, scanText);
+      const ocrCanvas =
+        source === "ocr_camera" ? resizeCanvasForOcr(canvas, CAMERA_CAPTURE_MAX_EDGE) : canvas;
+      const safety = evaluateFrameSafety(ocrCanvas, scanText);
       setStatus(safety.message);
 
       if (!safety.canProceed) {
@@ -660,33 +701,45 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
         return;
       }
 
-      const recognized = await recognizeBestReading(canvas, mode);
+      const recognized = await recognizeBestReading(ocrCanvas, mode);
       const text = recognized.text;
       const reading = recognized.reading;
       const confidence = recognized.confidence;
+      const combinedConfidence = reading ? Math.max(reading.confidence, confidence) : confidence;
 
       const qualityScore = clamp(
         safety.quality.brightness * 0.2 + safety.quality.contrast * 0.35 + safety.quality.sharpness * 0.45,
         0,
         1,
       );
-      let completion = Math.round(Math.min(20, (text.length / 30) * 20));
-      completion += Math.round(qualityScore * 30);
-      completion += reading ? Math.round(Math.max(reading.confidence, confidence) * 50) : 0;
+      let completion = Math.round(Math.min(20, (text.length / 24) * 20));
+      completion += Math.round(qualityScore * 28);
+      if (reading) {
+        completion = Math.max(completion, Math.round(48 + qualityScore * 18 + combinedConfidence * 34));
+      } else if (confidence > 0) {
+        completion += Math.round(confidence * 18);
+      }
       completion = clamp(completion, 0, 100);
       setScanCompletion(completion);
       setScanText(text);
 
       if (!reading || text.length < OCR_MIN_TEXT_LENGTH) {
-        if (mode === "quick") {
-          const retry = await recognizeBestReading(canvas, "aggressive");
+        const shouldRetryAggressive =
+          source === "ocr_camera" &&
+          mode === "quick" &&
+          (completion >= 58 || text.length >= 12) &&
+          Date.now() - lastAggressiveFallbackAtRef.current >= CAMERA_AGGRESSIVE_RETRY_COOLDOWN_MS;
+
+        if (shouldRetryAggressive) {
+          lastAggressiveFallbackAtRef.current = Date.now();
+          const retry = await recognizeBestReading(ocrCanvas, "aggressive");
           if (retry.reading) {
             setResultFromReading({
               reading: retry.reading,
               text: retry.text,
               previewDataUrl: source === "ocr_camera" ? canvas.toDataURL("image/jpeg", 0.92) : null,
               source,
-              completion,
+              completion: Math.max(completion, 70),
             });
             return;
           }
@@ -715,10 +768,11 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
           stableCountRef.current = 1;
         }
 
-        const isStableEnough = stableCountRef.current >= 2;
+        const requiredStableCount = combinedConfidence >= 0.78 ? 1 : 2;
+        const isStableEnough = stableCountRef.current >= requiredStableCount;
         if (
           completion >= AUTO_FINALIZE_MIN_COMPLETION &&
-          Math.max(reading.confidence, confidence) >= AUTO_FINALIZE_MIN_CONFIDENCE &&
+          combinedConfidence >= AUTO_FINALIZE_MIN_CONFIDENCE &&
           isStableEnough
         ) {
           setResultFromReading({
@@ -967,13 +1021,13 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
     const tick = async () => {
       if (cancelled || !isScanningRef.current) return;
       if (isBusyRef.current) {
-        scheduleNext(380);
+        scheduleNext(220);
         return;
       }
 
       const frame = captureFrame();
       if (!frame) {
-        scheduleNext(480);
+        scheduleNext(260);
         return;
       }
 
@@ -997,7 +1051,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
       }
     };
 
-    scheduleNext(200);
+    scheduleNext(120);
     return () => {
       cancelled = true;
       clearTimer();
