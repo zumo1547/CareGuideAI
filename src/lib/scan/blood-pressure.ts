@@ -7,7 +7,12 @@ export type BloodPressureCategory =
   | "high_stage_2"
   | "hypertensive_crisis";
 
-export type ReadingSource = "labeled" | "ratio" | "triple" | "pair";
+export type ReadingSource =
+  | "labeled"
+  | "ratio"
+  | "line_pair"
+  | "triple"
+  | "pair";
 
 export interface ParsedBloodPressureReading {
   systolic: number;
@@ -49,120 +54,291 @@ const THAI_DIGIT_MAP: Record<string, string> = {
   "๙": "9",
 };
 
-const normalizeDigits = (value: string) =>
-  value
-    .replace(/[๐-๙]/g, (digit) => THAI_DIGIT_MAP[digit] ?? digit)
-    .replace(/(?<=\d)[oO](?=\d)/g, "0")
-    .replace(/(?<=\d)[lI](?=\d)/g, "1")
-    .replace(/(?<=\d)s(?=\d)/gi, "5");
-
-const normalizeOcrText = (value: string) =>
-  normalizeDigits(value)
-    .replace(/[|]/g, "/")
-    .replace(/[^\S\r\n]+/g, " ")
-    .trim();
-
-const parseInRange = (value: string | undefined, min: number, max: number) => {
-  if (!value) return null;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return null;
-  const rounded = Math.round(parsed);
-  return rounded >= min && rounded <= max ? rounded : null;
+const AMBIGUOUS_DIGIT_MAP: Record<string, string> = {
+  O: "0",
+  o: "0",
+  D: "0",
+  Q: "0",
+  I: "1",
+  l: "1",
+  "|": "1",
+  Z: "2",
+  z: "2",
+  A: "4",
+  S: "5",
+  s: "5",
+  B: "8",
+  G: "6",
+  q: "9",
+  g: "9",
 };
 
 const hasPlausiblePair = (systolic: number, diastolic: number) =>
   systolic > diastolic && systolic - diastolic >= 8 && systolic - diastolic <= 130;
 
-const parseLabeled = (normalizedText: string) => {
-  const systolic =
-    parseInRange(
-      normalizedText.match(
-        /(?:sys|sbp|systolic|ค่าบน|ความดันบน|ตัวบน|บน)\D{0,10}(\d{2,3})/iu,
-      )?.[1],
-      SYS_MIN,
-      SYS_MAX,
-    ) ??
-    parseInRange(normalizedText.match(/(?:bp|b\/p)\D{0,8}(\d{2,3})/iu)?.[1], SYS_MIN, SYS_MAX);
-
-  const diastolic = parseInRange(
-    normalizedText.match(
-      /(?:dia|dbp|diastolic|ค่าล่าง|ความดันล่าง|ตัวล่าง|ล่าง)\D{0,10}(\d{2,3})/iu,
-    )?.[1],
-    DIA_MIN,
-    DIA_MAX,
-  );
-
-  if (!systolic || !diastolic || !hasPlausiblePair(systolic, diastolic)) {
-    return null;
-  }
-
-  const pulse = parseInRange(
-    normalizedText.match(/(?:pul|pulse|pr|hr|bpm|ชีพจร|หัวใจ)\D{0,10}(\d{2,3})/iu)?.[1],
-    PULSE_MIN,
-    PULSE_MAX,
-  );
-
-  const hasKeyword = /(mmhg|sys|dia|systolic|diastolic|ความดัน|ชีพจร|pulse|bpm)/iu.test(
-    normalizedText,
-  );
-
-  const confidence = clamp(0.7 + (pulse ? 0.08 : 0) + (hasKeyword ? 0.08 : 0), 0.45, 0.99);
-  return { systolic, diastolic, pulse, confidence, source: "labeled" as const };
+const normalizeNumericToken = (raw: string) => {
+  const token = raw.replace(/[๐-๙]/g, (digit) => THAI_DIGIT_MAP[digit] ?? digit);
+  return token
+    .split("")
+    .map((char) => AMBIGUOUS_DIGIT_MAP[char] ?? char)
+    .join("")
+    .replace(/[^\d]/g, "");
 };
 
-const parseRatio = (normalizedText: string) => {
-  const ratioMatches = [...normalizedText.matchAll(/(\d{2,3})\s*(?:\/|\\|-)\s*(\d{2,3})/g)];
-  for (const match of ratioMatches) {
-    const systolic = parseInRange(match[1], SYS_MIN, SYS_MAX);
-    const diastolic = parseInRange(match[2], DIA_MIN, DIA_MAX);
-    if (!systolic || !diastolic || !hasPlausiblePair(systolic, diastolic)) continue;
+const parseRawDigits = (raw: string | undefined) => {
+  if (!raw) return null;
+  const normalized = normalizeNumericToken(raw);
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 
-    const pulse =
-      parseInRange(
-        normalizedText.match(/(?:pul|pulse|pr|hr|bpm|ชีพจร|หัวใจ)\D{0,10}(\d{2,3})/iu)?.[1],
-        PULSE_MIN,
-        PULSE_MAX,
-      ) ??
-      parseInRange(match.input?.slice(match.index + match[0].length).match(/(\d{2,3})/)?.[1], PULSE_MIN, PULSE_MAX);
+const parsePulse = (raw: string | undefined) => {
+  const parsed = parseRawDigits(raw);
+  if (parsed === null) return null;
+  return parsed >= PULSE_MIN && parsed <= PULSE_MAX ? parsed : null;
+};
 
-    const confidence = clamp(0.62 + (pulse ? 0.06 : 0), 0.4, 0.95);
-    return { systolic, diastolic, pulse, confidence, source: "ratio" as const };
+const expandSystolicCandidates = (value: number | null) => {
+  if (value === null) return [] as Array<{ value: number; penalty: number }>;
+  const candidates = [{ value, penalty: 0 }];
+  if (value >= 10 && value <= 99) {
+    candidates.push({ value: value + 100, penalty: 0.08 });
   }
+  return candidates.filter((candidate) => candidate.value >= SYS_MIN && candidate.value <= SYS_MAX);
+};
+
+const expandDiastolicCandidates = (value: number | null) => {
+  if (value === null) return [] as Array<{ value: number; penalty: number }>;
+  const candidates = [{ value, penalty: 0 }];
+  if (value >= 10 && value <= 39) {
+    candidates.push({ value: value + 40, penalty: 0.09 });
+    candidates.push({ value: value + 50, penalty: 0.11 });
+    candidates.push({ value: value + 60, penalty: 0.13 });
+  }
+  return candidates.filter((candidate) => candidate.value >= DIA_MIN && candidate.value <= DIA_MAX);
+};
+
+const resolvePair = (rawSys: string | undefined, rawDia: string | undefined) => {
+  const sysRaw = parseRawDigits(rawSys);
+  const diaRaw = parseRawDigits(rawDia);
+  if (sysRaw === null || diaRaw === null) return null;
+
+  const sysCandidates = expandSystolicCandidates(sysRaw);
+  const diaCandidates = expandDiastolicCandidates(diaRaw);
+  let best: { systolic: number; diastolic: number; penalty: number } | null = null;
+
+  for (const sys of sysCandidates) {
+    for (const dia of diaCandidates) {
+      if (!hasPlausiblePair(sys.value, dia.value)) continue;
+      const penalty = sys.penalty + dia.penalty;
+      if (!best || penalty < best.penalty) {
+        best = {
+          systolic: sys.value,
+          diastolic: dia.value,
+          penalty,
+        };
+      }
+    }
+  }
+
+  return best;
+};
+
+const normalizeOcrText = (value: string) =>
+  value
+    .replace(/[๐-๙]/g, (digit) => THAI_DIGIT_MAP[digit] ?? digit)
+    .replace(/[|]/g, "/")
+    .replace(/[^\S\r\n]+/g, " ")
+    .trim();
+
+const scoreConfidence = ({
+  source,
+  adjustmentPenalty,
+  pulse,
+  normalizedText,
+}: {
+  source: ReadingSource;
+  adjustmentPenalty: number;
+  pulse: number | null;
+  normalizedText: string;
+}) => {
+  const sourceBase: Record<ReadingSource, number> = {
+    labeled: 0.82,
+    ratio: 0.74,
+    line_pair: 0.7,
+    triple: 0.67,
+    pair: 0.62,
+  };
+  const hasKeywords = /(sys|dia|pulse|mmhg|bp|systolic|diastolic|ค่าบน|ค่าล่าง|ความดัน)/iu.test(
+    normalizedText,
+  );
+  const score =
+    sourceBase[source] + (pulse ? 0.05 : 0) + (hasKeywords ? 0.04 : 0) - adjustmentPenalty;
+  return Number(clamp(score, 0.35, 0.99).toFixed(2));
+};
+
+const parseLabeled = (normalizedText: string) => {
+  const patterns: Array<{
+    source: ReadingSource;
+    regex: RegExp;
+    sysIndex: number;
+    diaIndex: number;
+  }> = [
+    {
+      source: "labeled",
+      regex:
+        /(?:sys|sbp|systolic|ค่าบน|ความดันบน|ตัวบน|บน)\D{0,40}([0-9A-Za-z|]{2,4})[\s\S]{0,70}?(?:dia|dbp|diastolic|ค่าล่าง|ความดันล่าง|ตัวล่าง|ล่าง)\D{0,40}([0-9A-Za-z|]{2,4})/iu,
+      sysIndex: 1,
+      diaIndex: 2,
+    },
+    {
+      source: "labeled",
+      regex:
+        /(?:dia|dbp|diastolic|ค่าล่าง|ความดันล่าง|ตัวล่าง|ล่าง)\D{0,40}([0-9A-Za-z|]{2,4})[\s\S]{0,70}?(?:sys|sbp|systolic|ค่าบน|ความดันบน|ตัวบน|บน)\D{0,40}([0-9A-Za-z|]{2,4})/iu,
+      sysIndex: 2,
+      diaIndex: 1,
+    },
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalizedText.match(pattern.regex);
+    if (!match) continue;
+    const resolved = resolvePair(match[pattern.sysIndex], match[pattern.diaIndex]);
+    if (!resolved) continue;
+
+    const pulse = parsePulse(
+      normalizedText.match(
+        /(?:pul|pulse|pr|hr|bpm|ชีพจร|หัวใจ)\D{0,24}([0-9A-Za-z|]{2,4})/iu,
+      )?.[1],
+    );
+
+    return {
+      systolic: resolved.systolic,
+      diastolic: resolved.diastolic,
+      pulse,
+      confidence: scoreConfidence({
+        source: pattern.source,
+        adjustmentPenalty: resolved.penalty,
+        pulse,
+        normalizedText,
+      }),
+      source: pattern.source,
+    };
+  }
+
   return null;
 };
 
+const parseRatio = (normalizedText: string) => {
+  const matches = [...normalizedText.matchAll(/([0-9A-Za-z|]{2,4})\s*(?:\/|\\|-|_|—)\s*([0-9A-Za-z|]{2,4})/g)];
+  for (const match of matches) {
+    const resolved = resolvePair(match[1], match[2]);
+    if (!resolved) continue;
+
+    const pulse =
+      parsePulse(
+        normalizedText.match(
+          /(?:pul|pulse|pr|hr|bpm|ชีพจร|หัวใจ)\D{0,24}([0-9A-Za-z|]{2,4})/iu,
+        )?.[1],
+      ) ??
+      parsePulse(match.input?.slice(match.index + match[0].length).match(/([0-9A-Za-z|]{2,4})/)?.[1]);
+
+    return {
+      systolic: resolved.systolic,
+      diastolic: resolved.diastolic,
+      pulse,
+      confidence: scoreConfidence({
+        source: "ratio",
+        adjustmentPenalty: resolved.penalty,
+        pulse,
+        normalizedText,
+      }),
+      source: "ratio" as const,
+    };
+  }
+
+  return null;
+};
+
+const parseByLabelLines = (normalizedText: string) => {
+  const lines = normalizedText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const findNearNumber = (startIndex: number) => {
+    for (let offset = 0; offset <= 2; offset += 1) {
+      const line = lines[startIndex + offset];
+      if (!line) continue;
+      const match = line.match(/([0-9A-Za-z|]{2,4})/);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+    return undefined;
+  };
+
+  let sysToken: string | undefined;
+  let diaToken: string | undefined;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!sysToken && /(sys|systolic|sbp|ค่าบน|ตัวบน)/iu.test(line)) {
+      sysToken = line.match(/([0-9A-Za-z|]{2,4})/)?.[1] ?? findNearNumber(index);
+    }
+    if (!diaToken && /(dia|diastolic|dbp|ค่าล่าง|ตัวล่าง)/iu.test(line)) {
+      diaToken = line.match(/([0-9A-Za-z|]{2,4})/)?.[1] ?? findNearNumber(index);
+    }
+  }
+
+  const resolved = resolvePair(sysToken, diaToken);
+  if (!resolved) return null;
+
+  const pulse = parsePulse(
+    normalizedText.match(/(?:pul|pulse|pr|hr|bpm|ชีพจร|หัวใจ)\D{0,24}([0-9A-Za-z|]{2,4})/iu)?.[1],
+  );
+
+  return {
+    systolic: resolved.systolic,
+    diastolic: resolved.diastolic,
+    pulse,
+    confidence: scoreConfidence({
+      source: "line_pair",
+      adjustmentPenalty: resolved.penalty,
+      pulse,
+      normalizedText,
+    }),
+    source: "line_pair" as const,
+  };
+};
+
 const parseFromNumberSequence = (normalizedText: string) => {
-  const numbers = [...normalizedText.matchAll(/\b\d{2,3}\b/g)]
-    .map((match) => Number(match[0]))
-    .filter((value) => Number.isFinite(value) && value <= SYS_MAX);
+  const numbers = [...normalizedText.matchAll(/\b[0-9A-Za-z|]{2,4}\b/g)]
+    .map((match) => parseRawDigits(match[0]))
+    .filter((value): value is number => Number.isFinite(value))
+    .filter((value) => value <= SYS_MAX + 100);
 
   if (numbers.length < 2) return null;
 
-  for (let index = 0; index <= numbers.length - 2; index += 1) {
-    const systolicCandidate = numbers[index];
-    const diastolicCandidate = numbers[index + 1];
-    if (
-      systolicCandidate < SYS_MIN ||
-      systolicCandidate > SYS_MAX ||
-      diastolicCandidate < DIA_MIN ||
-      diastolicCandidate > DIA_MAX ||
-      !hasPlausiblePair(systolicCandidate, diastolicCandidate)
-    ) {
-      continue;
-    }
+  const toToken = (value: number) => String(value);
 
-    const pulseCandidate = numbers[index + 2];
-    const pulse =
-      pulseCandidate && pulseCandidate >= PULSE_MIN && pulseCandidate <= PULSE_MAX
-        ? pulseCandidate
-        : null;
-    const confidence = clamp(pulse ? 0.58 : 0.53, 0.38, 0.9);
+  for (let index = 0; index <= numbers.length - 2; index += 1) {
+    const resolved = resolvePair(toToken(numbers[index]), toToken(numbers[index + 1]));
+    if (!resolved) continue;
+
+    const third = numbers[index + 2];
+    const pulse = third && third >= PULSE_MIN && third <= PULSE_MAX ? third : null;
 
     return {
-      systolic: systolicCandidate,
-      diastolic: diastolicCandidate,
+      systolic: resolved.systolic,
+      diastolic: resolved.diastolic,
       pulse,
-      confidence,
+      confidence: scoreConfidence({
+        source: pulse ? "triple" : "pair",
+        adjustmentPenalty: resolved.penalty,
+        pulse,
+        normalizedText,
+      }),
       source: pulse ? ("triple" as const) : ("pair" as const),
     };
   }
@@ -170,20 +346,24 @@ const parseFromNumberSequence = (normalizedText: string) => {
   return null;
 };
 
-export const parseBloodPressureFromText = (
-  rawText: string,
-): ParsedBloodPressureReading | null => {
+export const parseBloodPressureFromText = (rawText: string): ParsedBloodPressureReading | null => {
   const normalizedText = normalizeOcrText(rawText);
   if (!normalizedText) return null;
 
   const candidate =
     parseLabeled(normalizedText) ??
     parseRatio(normalizedText) ??
+    parseByLabelLines(normalizedText) ??
     parseFromNumberSequence(normalizedText);
+
   if (!candidate) return null;
 
   return {
-    ...candidate,
+    systolic: candidate.systolic,
+    diastolic: candidate.diastolic,
+    pulse: candidate.pulse,
+    confidence: candidate.confidence,
+    source: candidate.source,
     rawText,
     normalizedText,
   };

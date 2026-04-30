@@ -1,8 +1,18 @@
 "use client";
 
-import { Activity, Camera, CheckCircle2, Loader2, Upload, Volume2, VolumeX } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Activity,
+  Camera,
+  CheckCircle2,
+  Loader2,
+  ScanLine,
+  Upload,
+  VideoOff,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -42,21 +52,6 @@ interface OcrWorkerLike {
   terminate: () => Promise<unknown>;
 }
 
-interface FrameQuality {
-  brightness: number;
-  contrast: number;
-  sharpness: number;
-}
-
-type FrameIssue = "too_dark" | "too_bright" | "too_blurry" | "low_contrast";
-
-interface FrameSafetyResult {
-  metrics: FrameQuality;
-  blockingIssue: FrameIssue | null;
-  statusMessage: string;
-  voiceMessage: string | null;
-}
-
 interface SavedReading {
   id: string;
   measuredAt: string;
@@ -72,25 +67,51 @@ interface SavedReading {
   ocrConfidence: number | null;
 }
 
-const AUTO_SCAN_INTERVAL_MS = 1700;
-const OCR_MIN_TEXT_LENGTH = 6;
-const AUTO_FINALIZE_MIN_COMPLETION = 65;
-const AUTO_FINALIZE_MIN_CONFIDENCE = 0.55;
-const SPEAK_COOLDOWN_MS = 2000;
-const SAFETY_SPEAK_COOLDOWN_MS = 2600;
+interface FrameQuality {
+  brightness: number;
+  contrast: number;
+  sharpness: number;
+}
+
+interface SafetyResult {
+  quality: FrameQuality;
+  canProceed: boolean;
+  message: string;
+  voiceMessage: string | null;
+}
+
+type CameraState = "idle" | "requesting" | "streaming" | "error";
+type OcrSource = "ocr_camera" | "ocr_upload" | "manual";
+type OcrMode = "quick" | "aggressive";
+
+const AUTO_SCAN_INTERVAL_MS = 1500;
+const AUTO_FINALIZE_MIN_COMPLETION = 62;
+const AUTO_FINALIZE_MIN_CONFIDENCE = 0.6;
+const OCR_MIN_TEXT_LENGTH = 5;
+const SPEAK_COOLDOWN_MS = 2200;
+const SAFETY_SPEAK_COOLDOWN_MS = 2800;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-const qualityToScore = (quality: FrameQuality) => {
-  const brightnessScore =
-    quality.brightness < 0.15
-      ? clamp(quality.brightness / 0.15, 0, 1)
-      : quality.brightness > 0.95
-        ? clamp((1 - quality.brightness) / 0.05, 0, 1)
-        : 1;
-  const contrastScore = clamp(quality.contrast / 0.055, 0, 1);
-  const sharpnessScore = clamp(quality.sharpness / 0.03, 0, 1);
-  return Number(clamp(brightnessScore * 0.25 + contrastScore * 0.35 + sharpnessScore * 0.4, 0, 1).toFixed(2));
+const formatDateTimeTh = (iso: string) =>
+  new Intl.DateTimeFormat("th-TH", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(iso));
+
+const toNullableNumber = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed);
+};
+
+const createCanvas = (width: number, height: number) => {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, width);
+  canvas.height = Math.max(1, height);
+  return canvas;
 };
 
 const analyzeFrameQuality = (canvas: HTMLCanvasElement): FrameQuality | null => {
@@ -103,9 +124,7 @@ const analyzeFrameQuality = (canvas: HTMLCanvasElement): FrameQuality | null => 
   const sampleWidth = Math.max(80, Math.floor(width * scale));
   const sampleHeight = Math.max(80, Math.floor(height * scale));
 
-  const sampleCanvas = document.createElement("canvas");
-  sampleCanvas.width = sampleWidth;
-  sampleCanvas.height = sampleHeight;
+  const sampleCanvas = createCanvas(sampleWidth, sampleHeight);
   const context = sampleCanvas.getContext("2d", { willReadFrequently: true });
   if (!context) return null;
 
@@ -133,7 +152,6 @@ const analyzeFrameQuality = (canvas: HTMLCanvasElement): FrameQuality | null => 
       const center = gray[offset];
       const diff = center - mean;
       variance += diff * diff;
-
       const laplace =
         4 * center -
         gray[offset - 1] -
@@ -151,97 +169,196 @@ const analyzeFrameQuality = (canvas: HTMLCanvasElement): FrameQuality | null => 
   return { brightness, contrast, sharpness };
 };
 
-const evaluateFrameSafety = (canvas: HTMLCanvasElement, text: string): FrameSafetyResult => {
-  const metrics =
+const evaluateFrameSafety = (canvas: HTMLCanvasElement, text: string): SafetyResult => {
+  const quality =
     analyzeFrameQuality(canvas) ??
     ({
       brightness: 0.5,
       contrast: 0.2,
       sharpness: 0.2,
     } satisfies FrameQuality);
-  const hasValuePattern = /(?:\d{2,3}\s*[\/\\-]\s*\d{2,3}|sys|dia|mmhg|ความดัน|ชีพจร|pulse|bpm)/iu.test(text);
 
-  if (metrics.brightness < 0.11) {
+  const hasValueSignal = /(?:\d{2,3}\s*[\/\\-]\s*\d{2,3}|sys|dia|pulse|mmhg|bp)/iu.test(text);
+
+  if (quality.brightness < 0.1) {
     return {
-      metrics,
-      blockingIssue: "too_dark",
-      statusMessage: "ภาพมืดเกินไป เพิ่มแสงแล้วสแกนใหม่",
+      quality,
+      canProceed: false,
+      message: "ภาพมืดเกินไป กรุณาเพิ่มแสง",
       voiceMessage: "ภาพมืดเกินไป กรุณาเพิ่มแสงแล้วสแกนใหม่",
     };
   }
-
-  if (metrics.brightness > 0.97) {
+  if (quality.brightness > 0.98) {
     return {
-      metrics,
-      blockingIssue: "too_bright",
-      statusMessage: "ภาพสว่างจ้าหรือสะท้อนแสง ปรับมุมกล้องใหม่",
-      voiceMessage: "ภาพสว่างเกินไป กรุณาปรับมุมกล้องใหม่",
+      quality,
+      canProceed: false,
+      message: "ภาพสว่างจ้า/สะท้อนแสงเกินไป กรุณาปรับมุมกล้อง",
+      voiceMessage: "ภาพสว่างเกินไป กรุณาปรับมุมกล้อง",
     };
   }
-
-  if (metrics.sharpness < 0.022 && !hasValuePattern) {
+  if (quality.sharpness < 0.02 && !hasValueSignal) {
     return {
-      metrics,
-      blockingIssue: "too_blurry",
-      statusMessage: "ภาพยังเบลอ กรุณาค้างกล้องนิ่งขึ้นเล็กน้อย",
-      voiceMessage: "ภาพเบลอ กรุณาค้างกล้องให้นิ่งขึ้น",
+      quality,
+      canProceed: false,
+      message: "ภาพยังเบลอ กรุณาค้างกล้องให้นิ่ง",
+      voiceMessage: "ภาพเบลอ กรุณาค้างกล้องให้นิ่ง",
     };
   }
-
-  if (metrics.contrast < 0.038 && !hasValuePattern) {
+  if (quality.contrast < 0.034 && !hasValueSignal) {
     return {
-      metrics,
-      blockingIssue: "low_contrast",
-      statusMessage: "คอนทราสต์ต่ำเกินไป ลองขยับกล้องให้ชัดขึ้น",
-      voiceMessage: "ตัวเลขไม่ชัด กรุณาปรับแสงหรือระยะกล้อง",
+      quality,
+      canProceed: false,
+      message: "ตัวเลขยังไม่ชัด ลองปรับระยะหรือแสง",
+      voiceMessage: "ตัวเลขไม่ชัด กรุณาปรับแสงหรือระยะ",
     };
   }
 
   return {
-    metrics,
-    blockingIssue: null,
-    statusMessage: "ภาพพร้อมอ่านค่า",
+    quality,
+    canProceed: true,
+    message: "ภาพพร้อมอ่านค่า",
     voiceMessage: null,
   };
+};
+
+const cropCanvas = (source: HTMLCanvasElement, x: number, y: number, width: number, height: number) => {
+  const canvas = createCanvas(width, height);
+  const context = canvas.getContext("2d");
+  if (!context) return canvas;
+  context.drawImage(source, x, y, width, height, 0, 0, width, height);
+  return canvas;
+};
+
+const enhanceCanvas = ({
+  source,
+  contrast,
+  threshold,
+}: {
+  source: HTMLCanvasElement;
+  contrast: number;
+  threshold?: number | null;
+}) => {
+  const canvas = createCanvas(source.width, source.height);
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return canvas;
+
+  context.drawImage(source, 0, 0);
+  const frame = context.getImageData(0, 0, canvas.width, canvas.height);
+  const pixels = frame.data;
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    const luminance = pixels[index] * 0.299 + pixels[index + 1] * 0.587 + pixels[index + 2] * 0.114;
+    let value = (luminance - 128) * contrast + 128;
+    if (threshold !== null && threshold !== undefined) {
+      value = value >= threshold ? 255 : 0;
+    }
+    const clamped = Math.max(0, Math.min(255, value));
+    pixels[index] = clamped;
+    pixels[index + 1] = clamped;
+    pixels[index + 2] = clamped;
+  }
+
+  context.putImageData(frame, 0, 0);
+  return canvas;
+};
+
+const buildVariants = (canvas: HTMLCanvasElement, mode: OcrMode) => {
+  const width = canvas.width;
+  const height = canvas.height;
+  const centerCrop = cropCanvas(
+    canvas,
+    Math.floor(width * 0.15),
+    Math.floor(height * 0.15),
+    Math.floor(width * 0.7),
+    Math.floor(height * 0.7),
+  );
+  const rightCrop = cropCanvas(
+    canvas,
+    Math.floor(width * 0.35),
+    Math.floor(height * 0.1),
+    Math.floor(width * 0.6),
+    Math.floor(height * 0.78),
+  );
+  const displayCrop = cropCanvas(
+    canvas,
+    Math.floor(width * 0.2),
+    Math.floor(height * 0.2),
+    Math.floor(width * 0.62),
+    Math.floor(height * 0.55),
+  );
+
+  const baseVariants = [
+    {
+      id: "full-original",
+      canvas,
+      params: {
+        tessedit_pageseg_mode: "6",
+      },
+    },
+    {
+      id: "full-enhanced",
+      canvas: enhanceCanvas({ source: canvas, contrast: 1.8, threshold: null }),
+      params: {
+        tessedit_pageseg_mode: "11",
+      },
+    },
+    {
+      id: "center-threshold",
+      canvas: enhanceCanvas({ source: centerCrop, contrast: 2.2, threshold: 150 }),
+      params: {
+        tessedit_pageseg_mode: "6",
+        tessedit_char_whitelist: "0123456789SYSDIAPULSEBPHR/:- ",
+      },
+    },
+    {
+      id: "display-threshold",
+      canvas: enhanceCanvas({ source: displayCrop, contrast: 2.4, threshold: 145 }),
+      params: {
+        tessedit_pageseg_mode: "11",
+        tessedit_char_whitelist: "0123456789SYSDIAPULSEBPHR/:- ",
+      },
+    },
+  ];
+
+  if (mode === "quick") {
+    return baseVariants.slice(0, 2);
+  }
+
+  return [
+    ...baseVariants,
+    {
+      id: "right-threshold",
+      canvas: enhanceCanvas({ source: rightCrop, contrast: 2.3, threshold: 150 }),
+      params: {
+        tessedit_pageseg_mode: "6",
+        tessedit_char_whitelist: "0123456789SYSDIAPULSEBPHR/:- ",
+      },
+    },
+  ];
 };
 
 const createCanvasFromFile = (file: File) =>
   new Promise<HTMLCanvasElement>((resolve, reject) => {
     const image = new Image();
-
     image.onload = () => {
-      const maxWidth = 1500;
+      const maxWidth = 1700;
       const scale = Math.min(1, maxWidth / image.width);
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(300, Math.floor(image.width * scale));
-      canvas.height = Math.max(300, Math.floor(image.height * scale));
+      const canvas = createCanvas(
+        Math.max(320, Math.floor(image.width * scale)),
+        Math.max(320, Math.floor(image.height * scale)),
+      );
       const context = canvas.getContext("2d");
       if (!context) {
-        reject(new Error("ไม่สามารถเตรียมภาพสำหรับ OCR ได้"));
+        reject(new Error("Cannot prepare image for OCR"));
         return;
       }
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(image.src);
       resolve(canvas);
     };
-
-    image.onerror = () => reject(new Error("ไม่สามารถอ่านไฟล์รูปได้"));
+    image.onerror = () => reject(new Error("Cannot read uploaded image"));
     image.src = URL.createObjectURL(file);
   });
-
-const formatDateTimeTh = (iso: string) =>
-  new Intl.DateTimeFormat("th-TH", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(iso));
-
-const toNullableNumber = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed)) return null;
-  return Math.round(parsed);
-};
 
 export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPressureScannerProps) => {
   const router = useRouter();
@@ -255,6 +372,8 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
   const lastSafetySpeakAtRef = useRef(0);
   const resultRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const stableKeyRef = useRef<string>("");
+  const stableCountRef = useRef(0);
   const finalizedRef = useRef(false);
 
   const [isCameraSupported] = useState(
@@ -263,6 +382,8 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
       !!navigator.mediaDevices &&
       typeof navigator.mediaDevices.getUserMedia === "function",
   );
+  const [cameraState, setCameraState] = useState<CameraState>("idle");
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [status, setStatus] = useState("พร้อมสแกนค่าความดันจากกล้องหรือรูปภาพ");
@@ -271,8 +392,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
   const [ocrProgress, setOcrProgress] = useState<number | null>(null);
   const [scanText, setScanText] = useState("");
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
-  const [lastSafetyMessage, setLastSafetyMessage] = useState<string | null>(null);
-  const [resultSource, setResultSource] = useState<"ocr_camera" | "ocr_upload" | "manual">("ocr_camera");
+  const [resultSource, setResultSource] = useState<OcrSource>("ocr_camera");
   const [parsedReading, setParsedReading] = useState<ParsedBloodPressureReading | null>(null);
   const [systolicInput, setSystolicInput] = useState("");
   const [diastolicInput, setDiastolicInput] = useState("");
@@ -281,7 +401,9 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmSuccess, setConfirmSuccess] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyStorage, setHistoryStorage] = useState<"blood_pressure_readings" | "scan_sessions_fallback" | null>(null);
+  const [historyStorage, setHistoryStorage] = useState<"blood_pressure_readings" | "scan_sessions_fallback" | null>(
+    null,
+  );
   const [historyRows, setHistoryRows] = useState<SavedReading[]>([]);
 
   const bmiTrend: BmiTrend | null = useMemo(() => {
@@ -342,21 +464,31 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
   }, []);
 
   const stopScanning = useCallback(
-    (message?: string) => {
+    (nextStatus?: string) => {
       isScanningRef.current = false;
       setIsScanning(false);
       setIsAnalyzing(false);
       clearTimer();
       stopCamera();
-      if (message) {
-        setStatus(message);
+      setCameraState("idle");
+      if (nextStatus) {
+        setStatus(nextStatus);
       }
       stopThaiSpeech();
     },
     [clearTimer, stopCamera],
   );
 
+  const moveToResult = useCallback(() => {
+    window.setTimeout(() => {
+      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+  }, []);
+
   const resetResult = useCallback(() => {
+    stableCountRef.current = 0;
+    stableKeyRef.current = "";
+    finalizedRef.current = false;
     setParsedReading(null);
     setSystolicInput("");
     setDiastolicInput("");
@@ -366,20 +498,14 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
     setScanCompletion(0);
     setConfirmError(null);
     setConfirmSuccess(null);
-    setLastSafetyMessage(null);
-  }, []);
-
-  const moveToResult = useCallback(() => {
-    window.setTimeout(() => {
-      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 120);
+    setCameraError(null);
   }, []);
 
   const ensureOcrWorker = useCallback(async () => {
     if (ocrWorkerRef.current) return ocrWorkerRef.current;
 
     const { createWorker } = await import("tesseract.js");
-    const worker = (await createWorker(["tha", "eng"], 1, {
+    const worker = (await createWorker(["eng", "tha"], 1, {
       logger: (message: { status?: string; progress?: number }) => {
         if (message?.status === "recognizing text" && typeof message.progress === "number") {
           setOcrProgress(Math.round(message.progress * 100));
@@ -403,57 +529,106 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
     await worker.terminate().catch(() => undefined);
   }, []);
 
-  const recognizeText = useCallback(
-    async (canvas: HTMLCanvasElement) => {
-      const worker = await ensureOcrWorker();
-      const result = await worker.recognize(canvas);
-      const text = (result?.data?.text ?? "").replace(/\r/g, "").trim();
-      const confidenceRaw = Number(result?.data?.confidence ?? 0);
-      const confidence = Number.isFinite(confidenceRaw)
-        ? Math.max(0, Math.min(1, confidenceRaw / 100))
-        : 0;
-      return { text, confidence };
-    },
-    [ensureOcrWorker],
-  );
-
   const captureFrame = useCallback(() => {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) {
       return null;
     }
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    const canvas = createCanvas(video.videoWidth, video.videoHeight);
     const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) return null;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     return canvas;
   }, []);
 
+  const recognizeBestReading = useCallback(
+    async (canvas: HTMLCanvasElement, mode: OcrMode) => {
+      const worker = await ensureOcrWorker();
+      const variants = buildVariants(canvas, mode);
+
+      let bestText = "";
+      let bestConfidence = 0;
+      let bestReading: ParsedBloodPressureReading | null = null;
+
+      for (const variant of variants) {
+        const params: Record<string, string> = {
+          preserve_interword_spaces: "1",
+          tessedit_pageseg_mode: variant.params.tessedit_pageseg_mode,
+        };
+        if (variant.params.tessedit_char_whitelist) {
+          params.tessedit_char_whitelist = variant.params.tessedit_char_whitelist;
+        }
+        await worker.setParameters?.(params);
+
+        const result = await worker.recognize(variant.canvas);
+        const text = (result?.data?.text ?? "").replace(/\r/g, "").trim();
+        const ocrConfidence = Number.isFinite(Number(result?.data?.confidence))
+          ? Math.max(0, Math.min(1, Number(result?.data?.confidence) / 100))
+          : 0;
+        const parsed = parseBloodPressureFromText(text);
+
+        if (text.length > bestText.length) {
+          bestText = text;
+          bestConfidence = Math.max(bestConfidence, ocrConfidence);
+        }
+
+        if (parsed) {
+          const parsedScore = parsed.confidence * 0.7 + ocrConfidence * 0.3;
+          const currentBestScore = bestReading ? bestReading.confidence * 0.7 + bestConfidence * 0.3 : -1;
+          if (!bestReading || parsedScore > currentBestScore) {
+            bestReading = parsed;
+            bestText = text;
+            bestConfidence = ocrConfidence;
+          }
+
+          if (parsed.confidence >= 0.9 && parsed.source === "labeled") {
+            break;
+          }
+        }
+      }
+
+      return {
+        text: bestText,
+        confidence: bestConfidence,
+        reading: bestReading,
+      };
+    },
+    [ensureOcrWorker],
+  );
+
   const setResultFromReading = useCallback(
-    (
-      reading: ParsedBloodPressureReading,
-      nextText: string,
-      nextPreviewDataUrl: string | null,
-      source: "ocr_camera" | "ocr_upload" | "manual",
-      completionScore: number,
-    ) => {
+    ({
+      reading,
+      text,
+      previewDataUrl,
+      source,
+      completion,
+    }: {
+      reading: ParsedBloodPressureReading;
+      text: string;
+      previewDataUrl: string | null;
+      source: OcrSource;
+      completion: number;
+    }) => {
       finalizedRef.current = true;
       setParsedReading(reading);
       setSystolicInput(String(reading.systolic));
       setDiastolicInput(String(reading.diastolic));
       setPulseInput(reading.pulse ? String(reading.pulse) : "");
-      setScanText(nextText);
-      setPreviewDataUrl(nextPreviewDataUrl);
+      setScanText(text);
+      setPreviewDataUrl(previewDataUrl);
       setResultSource(source);
-      setScanCompletion(Math.max(completionScore, 100));
+      setScanCompletion(Math.max(completion, 100));
       setConfirmError(null);
       setConfirmSuccess(null);
 
       const assessment = assessBloodPressure(reading.systolic, reading.diastolic);
-      const speech = buildBloodPressureSpeech({ reading, assessment, bmiTrend });
-      setStatus("อ่านค่าความดันได้แล้ว เลื่อนลงไปยืนยันผล");
+      const speech = buildBloodPressureSpeech({
+        reading,
+        assessment,
+        bmiTrend,
+      });
+
       stopScanning("สแกนเสร็จสิ้นแล้ว เลื่อนลงไปยืนยันผลได้เลย");
       moveToResult();
       speakWithCooldown(speech, true);
@@ -464,61 +639,213 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
   const analyzeCanvas = useCallback(
     async (
       canvas: HTMLCanvasElement,
-      source: "ocr_camera" | "ocr_upload",
-      opts?: { autoFinalizeFromCamera?: boolean },
+      source: OcrSource,
+      options?: {
+        autoFinalizeFromCamera?: boolean;
+        mode?: OcrMode;
+      },
     ) => {
-      const ocr = await recognizeText(canvas);
-      const safety = evaluateFrameSafety(canvas, ocr.text);
-      setLastSafetyMessage(safety.blockingIssue ? safety.statusMessage : null);
+      const mode = options?.mode ?? (source === "ocr_upload" ? "aggressive" : "quick");
+      const safety = evaluateFrameSafety(canvas, scanText);
+      setStatus(safety.message);
 
-      if (safety.blockingIssue) {
-        const now = Date.now();
-        if (
-          voiceEnabled &&
-          safety.voiceMessage &&
-          now - lastSafetySpeakAtRef.current >= SAFETY_SPEAK_COOLDOWN_MS
-        ) {
-          lastSafetySpeakAtRef.current = now;
-          speakThai(safety.voiceMessage);
+      if (!safety.canProceed) {
+        if (voiceEnabled && safety.voiceMessage) {
+          const now = Date.now();
+          if (now - lastSafetySpeakAtRef.current >= SAFETY_SPEAK_COOLDOWN_MS) {
+            lastSafetySpeakAtRef.current = now;
+            speakThai(safety.voiceMessage);
+          }
         }
+        return;
       }
 
-      const parsed = parseBloodPressureFromText(ocr.text);
-      const qualityScore = qualityToScore(safety.metrics);
-      let completion = Math.round(Math.min(24, (ocr.text.length / 36) * 24));
+      const recognized = await recognizeBestReading(canvas, mode);
+      const text = recognized.text;
+      const reading = recognized.reading;
+      const confidence = recognized.confidence;
+
+      const qualityScore = clamp(
+        safety.quality.brightness * 0.2 + safety.quality.contrast * 0.35 + safety.quality.sharpness * 0.45,
+        0,
+        1,
+      );
+      let completion = Math.round(Math.min(20, (text.length / 30) * 20));
       completion += Math.round(qualityScore * 30);
-      completion += parsed ? Math.round(Math.max(parsed.confidence, ocr.confidence) * 46) : 0;
+      completion += reading ? Math.round(Math.max(reading.confidence, confidence) * 50) : 0;
       completion = clamp(completion, 0, 100);
-
       setScanCompletion(completion);
-      setStatus(safety.statusMessage);
+      setScanText(text);
 
-      if (parsed && source === "ocr_upload") {
-        setResultFromReading(parsed, ocr.text, canvas.toDataURL("image/jpeg", 0.9), source, completion);
-        return;
-      }
-
-      if (!parsed || ocr.text.length < OCR_MIN_TEXT_LENGTH) {
-        if (source === "ocr_camera") {
-          setStatus("ยังอ่านค่าไม่ครบ กรุณาค้างกล้องให้นิ่งและเห็นตัวเลขชัด");
+      if (!reading || text.length < OCR_MIN_TEXT_LENGTH) {
+        if (mode === "quick") {
+          const retry = await recognizeBestReading(canvas, "aggressive");
+          if (retry.reading) {
+            setResultFromReading({
+              reading: retry.reading,
+              text: retry.text,
+              previewDataUrl: source === "ocr_camera" ? canvas.toDataURL("image/jpeg", 0.92) : null,
+              source,
+              completion,
+            });
+            return;
+          }
         }
+        setStatus("ยังอ่านค่าไม่ครบ กรุณาค้างกล้องให้นิ่งและเห็นตัวเลขชัดเจน");
         return;
       }
 
-      if (
-        source === "ocr_camera" &&
-        opts?.autoFinalizeFromCamera &&
-        !safety.blockingIssue &&
-        completion >= AUTO_FINALIZE_MIN_COMPLETION &&
-        Math.max(parsed.confidence, ocr.confidence) >= AUTO_FINALIZE_MIN_CONFIDENCE &&
-        !finalizedRef.current
-      ) {
-        setResultFromReading(parsed, ocr.text, canvas.toDataURL("image/jpeg", 0.9), source, completion);
-      } else {
-        setStatus("พบค่าความดันแล้ว กำลังรอความชัดเพิ่มอีกเล็กน้อย");
+      if (source === "ocr_upload") {
+        setResultFromReading({
+          reading,
+          text,
+          previewDataUrl: canvas.toDataURL("image/jpeg", 0.92),
+          source,
+          completion,
+        });
+        return;
+      }
+
+      if (options?.autoFinalizeFromCamera && !finalizedRef.current) {
+        const readingKey = `${reading.systolic}-${reading.diastolic}-${reading.pulse ?? "na"}`;
+        if (stableKeyRef.current === readingKey) {
+          stableCountRef.current += 1;
+        } else {
+          stableKeyRef.current = readingKey;
+          stableCountRef.current = 1;
+        }
+
+        const isStableEnough = stableCountRef.current >= 2;
+        if (
+          completion >= AUTO_FINALIZE_MIN_COMPLETION &&
+          Math.max(reading.confidence, confidence) >= AUTO_FINALIZE_MIN_CONFIDENCE &&
+          isStableEnough
+        ) {
+          setResultFromReading({
+            reading,
+            text,
+            previewDataUrl: canvas.toDataURL("image/jpeg", 0.92),
+            source,
+            completion,
+          });
+          return;
+        }
+      }
+
+      setStatus("พบค่าความดันแล้ว กำลังตรวจความชัดเพื่อยืนยันอัตโนมัติ");
+    },
+    [recognizeBestReading, scanText, setResultFromReading, voiceEnabled],
+  );
+
+  const openCameraStream = useCallback(async () => {
+    const requested: MediaStreamConstraints[] = [
+      {
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+        audio: false,
+      },
+      {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      },
+      {
+        video: true,
+        audio: false,
+      },
+    ];
+
+    for (const constraint of requested) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraint);
+      } catch {
+        // try next constraint
+      }
+    }
+
+    throw new Error("Cannot open camera stream");
+  }, []);
+
+  const startCameraScan = useCallback(async () => {
+    if (!isCameraSupported) {
+      setStatus("อุปกรณ์นี้ไม่รองรับกล้อง");
+      return;
+    }
+
+    resetResult();
+    warmupSpeechSynthesis();
+    setCameraState("requesting");
+    setCameraError(null);
+    setStatus("กำลังขอสิทธิ์กล้อง กรุณากดยอมรับในเบราว์เซอร์");
+
+    try {
+      const stream = await openCameraStream();
+      streamRef.current = stream;
+
+      const video = videoRef.current;
+      if (!video) {
+        throw new Error("Video element not ready");
+      }
+
+      video.setAttribute("playsinline", "true");
+      video.muted = true;
+      video.autoplay = true;
+      video.srcObject = stream;
+
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          reject(new Error("Camera stream timeout"));
+        }, 4500);
+        const onReady = () => {
+          window.clearTimeout(timeout);
+          resolve();
+        };
+        video.onloadedmetadata = onReady;
+      });
+
+      await video.play();
+      if (!video.videoWidth || !video.videoHeight) {
+        throw new Error("Camera feed is not visible");
+      }
+
+      setCameraState("streaming");
+      isScanningRef.current = true;
+      setIsScanning(true);
+      setStatus("เปิดกล้องแล้ว กำลังสแกนความดันอัตโนมัติ");
+      speakWithCooldown("เริ่มสแกนความดันอัตโนมัติแล้ว", true);
+    } catch {
+      stopCamera();
+      setCameraState("error");
+      setCameraError("ไม่สามารถเปิดกล้องได้ กรุณากดยอมรับสิทธิ์กล้องหรือปิดโปรแกรมที่ใช้กล้องอยู่");
+      setStatus("เปิดกล้องไม่สำเร็จ กรุณาลองใหม่");
+    }
+  }, [isCameraSupported, openCameraStream, resetResult, speakWithCooldown, stopCamera]);
+
+  const runUploadScan = useCallback(
+    async (file: File) => {
+      resetResult();
+      setStatus("กำลังอ่านค่าความดันจากรูปภาพ");
+      setIsAnalyzing(true);
+      isBusyRef.current = true;
+      setOcrProgress(0);
+
+      try {
+        const canvas = await createCanvasFromFile(file);
+        await analyzeCanvas(canvas, "ocr_upload", { mode: "aggressive" });
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "อ่านค่าจากรูปไม่สำเร็จ");
+      } finally {
+        setIsAnalyzing(false);
+        isBusyRef.current = false;
+        setOcrProgress(null);
       }
     },
-    [recognizeText, setResultFromReading, voiceEnabled],
+    [analyzeCanvas, resetResult],
   );
 
   const loadHistory = useCallback(async () => {
@@ -535,7 +862,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
       };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? "โหลดประวัติความดันไม่สำเร็จ");
+        throw new Error(payload.error ?? "Cannot load blood pressure history");
       }
 
       setHistoryRows(payload.readings ?? []);
@@ -543,72 +870,11 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
     } catch (error) {
       setHistoryRows([]);
       setHistoryStorage(null);
-      setConfirmError(error instanceof Error ? error.message : "โหลดประวัติความดันไม่สำเร็จ");
+      setConfirmError(error instanceof Error ? error.message : "Cannot load blood pressure history");
     } finally {
       setHistoryLoading(false);
     }
   }, [patientId]);
-
-  const startCameraScan = useCallback(async () => {
-    if (!isCameraSupported) {
-      setStatus("อุปกรณ์นี้ไม่รองรับกล้อง");
-      return;
-    }
-
-    finalizedRef.current = false;
-    resetResult();
-    warmupSpeechSynthesis();
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      });
-      streamRef.current = stream;
-
-      const video = videoRef.current;
-      if (!video) {
-        throw new Error("ไม่พบส่วนแสดงกล้อง");
-      }
-      video.srcObject = stream;
-      video.setAttribute("playsinline", "true");
-      await video.play();
-
-      isScanningRef.current = true;
-      setIsScanning(true);
-      setStatus("เปิดกล้องแล้ว กำลังสแกนค่าความดันอัตโนมัติ");
-      speakWithCooldown("เริ่มสแกนความดันอัตโนมัติแล้ว", true);
-    } catch {
-      stopScanning("ไม่สามารถเปิดกล้องได้ กรุณาอนุญาตสิทธิ์กล้องแล้วลองใหม่");
-    }
-  }, [isCameraSupported, resetResult, speakWithCooldown, stopScanning]);
-
-  const runUploadScan = useCallback(
-    async (file: File) => {
-      finalizedRef.current = false;
-      resetResult();
-      setStatus("กำลังอ่านค่าความดันจากรูปภาพ");
-      setIsAnalyzing(true);
-      isBusyRef.current = true;
-      setOcrProgress(0);
-
-      try {
-        const canvas = await createCanvasFromFile(file);
-        await analyzeCanvas(canvas, "ocr_upload");
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : "อ่านค่าจากรูปไม่สำเร็จ");
-      } finally {
-        setIsAnalyzing(false);
-        isBusyRef.current = false;
-        setOcrProgress(null);
-      }
-    },
-    [analyzeCanvas, resetResult],
-  );
 
   const confirmReading = useCallback(async () => {
     if (!currentReading || !currentAssessment) {
@@ -642,7 +908,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
       };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? "ยืนยันค่าความดันไม่สำเร็จ");
+        throw new Error(payload.error ?? "Cannot save blood pressure reading");
       }
 
       setConfirmSuccess("บันทึกค่าความดันเรียบร้อยแล้ว");
@@ -659,7 +925,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
       );
       router.refresh();
     } catch (error) {
-      setConfirmError(error instanceof Error ? error.message : "ยืนยันค่าความดันไม่สำเร็จ");
+      setConfirmError(error instanceof Error ? error.message : "Cannot save blood pressure reading");
     } finally {
       setConfirmLoading(false);
     }
@@ -701,22 +967,24 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
     const tick = async () => {
       if (cancelled || !isScanningRef.current) return;
       if (isBusyRef.current) {
-        scheduleNext(420);
+        scheduleNext(380);
         return;
       }
 
       const frame = captureFrame();
       if (!frame) {
-        scheduleNext(520);
+        scheduleNext(480);
         return;
       }
 
       isBusyRef.current = true;
       setIsAnalyzing(true);
       setOcrProgress(0);
-
       try {
-        await analyzeCanvas(frame, "ocr_camera", { autoFinalizeFromCamera: true });
+        await analyzeCanvas(frame, "ocr_camera", {
+          autoFinalizeFromCamera: true,
+          mode: "quick",
+        });
       } catch {
         setStatus("วิเคราะห์ค่าความดันอัตโนมัติไม่สำเร็จ");
       } finally {
@@ -743,6 +1011,8 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
     };
   }, [stopScanning, terminateOcrWorker]);
 
+  const showCameraPreview = cameraState === "streaming" && isScanning;
+
   return (
     <Card className="border-cyan-200/80">
       <CardHeader>
@@ -751,7 +1021,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
           สแกนค่าความดันอัตโนมัติ
         </CardTitle>
         <CardDescription>
-          รองรับหน้าจอเครื่องวัดความดันหลายรูปแบบ และกระดาษจดค่า เมื่ออ่านได้ระบบจะหยุดสแกนแล้วเลื่อนไปส่วนยืนยันทันที
+          รองรับหน้าจอเครื่องวัดหลายรูปแบบและกระดาษจดค่า เมื่ออ่านค่าได้ ระบบจะหยุดสแกนและเลื่อนไปส่วนยืนยันอัตโนมัติ
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -773,19 +1043,31 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
           ) : null}
         </div>
 
-        {lastSafetyMessage ? (
+        {cameraError ? (
           <Alert variant="destructive">
-            <AlertTitle>คุณภาพภาพยังไม่พอ</AlertTitle>
-            <AlertDescription>{lastSafetyMessage}</AlertDescription>
+            <AlertTitle>เปิดกล้องไม่สำเร็จ</AlertTitle>
+            <AlertDescription>{cameraError}</AlertDescription>
           </Alert>
         ) : null}
 
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => void startCameraScan()} disabled={!isCameraSupported || isScanning}>
-            <Camera className="mr-2 h-4 w-4" />
-            เริ่มสแกนความดัน
+          <Button
+            onClick={() => void startCameraScan()}
+            disabled={!isCameraSupported || isScanning || cameraState === "requesting"}
+          >
+            {cameraState === "requesting" ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Camera className="mr-2 h-4 w-4" />
+            )}
+            {cameraState === "requesting" ? "กำลังขอกล้อง..." : "เริ่มสแกนความดัน"}
           </Button>
-          <Button type="button" variant="outline" onClick={() => stopScanning("หยุดสแกนแล้ว")} disabled={!isScanning}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => stopScanning("หยุดสแกนแล้ว")}
+            disabled={!isScanning}
+          >
             หยุดสแกน
           </Button>
           <Button
@@ -826,26 +1108,53 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
           />
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-cyan-100 bg-slate-950/95">
-          <video ref={videoRef} className="aspect-[16/10] w-full object-cover" autoPlay muted playsInline />
+        <div className="relative overflow-hidden rounded-2xl border border-cyan-100 bg-slate-50">
+          <video
+            ref={videoRef}
+            className={`aspect-[16/10] w-full object-cover ${showCameraPreview ? "block" : "invisible"}`}
+            autoPlay
+            muted
+            playsInline
+          />
+          {!showCameraPreview ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-muted/40 p-6 text-center">
+              <div className="space-y-2 text-muted-foreground">
+                {cameraState === "requesting" ? (
+                  <Loader2 className="mx-auto h-8 w-8 animate-spin text-cyan-700" />
+                ) : cameraState === "error" ? (
+                  <VideoOff className="mx-auto h-8 w-8 text-red-600" />
+                ) : (
+                  <ScanLine className="mx-auto h-8 w-8 text-cyan-700" />
+                )}
+                <p className="text-sm">
+                  {cameraState === "requesting"
+                    ? "กำลังขอสิทธิ์กล้อง..."
+                    : cameraState === "error"
+                      ? "เปิดกล้องไม่สำเร็จ ลองกดเริ่มสแกนอีกครั้ง"
+                      : "กดปุ่ม \"เริ่มสแกนความดัน\" เพื่อขอสิทธิ์กล้อง"}
+                </p>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {previewDataUrl ? (
           <div className="overflow-hidden rounded-2xl border border-cyan-100">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={previewDataUrl} alt="ภาพที่ใช้วิเคราะห์ความดัน" className="w-full object-cover" />
+            <img src={previewDataUrl} alt="ภาพที่ใช้วิเคราะห์ความดัน" className="h-auto w-full object-cover" />
           </div>
         ) : null}
 
         <section ref={resultRef} className="space-y-3 rounded-2xl border border-cyan-100 bg-cyan-50/60 p-4">
           <h3 className="text-lg font-semibold text-cyan-950">ผลสแกนความดัน</h3>
-
           {parsedReading ? (
             <p className="text-sm text-cyan-900">
               อ่านจาก OCR สำเร็จ ({Math.round(parsedReading.confidence * 100)}%)
             </p>
           ) : (
-            <p className="text-sm text-cyan-900">เมื่อระบบอ่านค่าได้ จะหยุดสแกนและแสดงผลที่ส่วนนี้ทันที</p>
+            <p className="text-sm text-cyan-900">
+              เมื่อระบบอ่านค่าได้ จะหยุดสแกนและเลื่อนมาที่ส่วนยืนยันนี้อัตโนมัติ
+            </p>
           )}
 
           <div className="grid gap-3 md:grid-cols-3">
@@ -887,9 +1196,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
                 <Badge className="bg-cyan-700 hover:bg-cyan-700">
                   ระดับ: {currentAssessment.categoryLabelTh}
                 </Badge>
-                {parsedReading ? (
-                  <Badge variant="secondary">แหล่งที่มา OCR: {parsedReading.source}</Badge>
-                ) : null}
+                {parsedReading ? <Badge variant="secondary">แหล่งที่มา OCR: {parsedReading.source}</Badge> : null}
               </div>
               <p className="mt-2 text-sm text-slate-700">{combinedSummary}</p>
               <p className="mt-1 text-sm text-slate-700">{currentAssessment.actionTh}</p>
@@ -918,7 +1225,11 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
 
           <div className="flex flex-wrap gap-2">
             <Button type="button" onClick={() => void confirmReading()} disabled={confirmLoading || !currentReading}>
-              {confirmLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+              {confirmLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="mr-2 h-4 w-4" />
+              )}
               ยืนยันผลความดัน
             </Button>
             <Button

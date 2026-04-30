@@ -9,7 +9,8 @@ import type { Role } from "@/types/domain";
 const navByRole: Record<Role, { href: string; label: string }[]> = {
   patient: [
     { href: "/app/patient", label: "หน้าแดชบอร์ดผู้พิการ" },
-    { href: "/app/scan", label: "สแกนยา" },
+    { href: "/app/scan/medicine", label: "สแกนยา" },
+    { href: "/app/scan/blood-pressure", label: "สแกนความดัน" },
     { href: "/app/profile", label: "แฟ้มข้อมูลของฉัน" },
   ],
   doctor: [
