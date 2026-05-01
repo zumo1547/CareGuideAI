@@ -2,10 +2,10 @@ import { Activity, BellRing, Pill, UserRoundCheck } from "lucide-react";
 
 import { MedicationPlanForm } from "@/components/patient/medication-plan-form";
 import { MedicationScanner } from "@/components/patient/medication-scanner";
+import { PatientSupportDesk } from "@/components/patient/patient-support-desk";
 import { ReminderEventsTable } from "@/components/patient/reminder-events-table";
 import { VoiceReminderListener } from "@/components/patient/voice-reminder-listener";
 import { AppointmentForm } from "@/components/shared/appointment-form";
-import { DoctorMessageForm } from "@/components/shared/doctor-message-form";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -65,7 +65,20 @@ export default async function PatientDashboardPage() {
     ]);
 
   const medicineMap = new Map((medicines ?? []).map((item) => [item.id, item]));
-  const firstDoctorId = links?.[0]?.doctor_id ?? "";
+  const doctorIds = [...new Set((links ?? []).map((link) => link.doctor_id).filter(Boolean))];
+  const { data: doctorProfiles } = doctorIds.length
+    ? await supabase
+        .from("profiles")
+        .select("id, full_name, phone")
+        .in("id", doctorIds)
+    : { data: [] as { id: string; full_name: string; phone: string | null }[] };
+
+  const doctorOptions = (doctorProfiles ?? []).map((doctor) => ({
+    id: doctor.id,
+    fullName: doctor.full_name,
+    phone: doctor.phone,
+  }));
+  const firstDoctorId = doctorOptions[0]?.id ?? "";
   const bmiValue = Number(onboardingProfile?.bmi ?? 0);
   const bmiTrend =
     onboardingProfile?.biological_sex && Number.isFinite(bmiValue) && bmiValue > 0
@@ -153,7 +166,7 @@ export default async function PatientDashboardPage() {
       </section>
 
       <section className="grid gap-6 lg:grid-cols-2">
-        <DoctorMessageForm defaultDoctorId={firstDoctorId} />
+        <PatientSupportDesk patientId={session.userId} doctorOptions={doctorOptions} />
         <AppointmentForm defaultDoctorId={firstDoctorId} />
       </section>
 

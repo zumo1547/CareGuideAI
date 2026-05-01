@@ -2,7 +2,7 @@ import { format } from "date-fns";
 import { ClipboardList, MessageSquareText, TrendingUp } from "lucide-react";
 
 import { AdherenceChart } from "@/components/doctor/adherence-chart";
-import { DoctorMessageForm } from "@/components/shared/doctor-message-form";
+import { DoctorSupportDesk } from "@/components/doctor/doctor-support-desk";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -110,7 +110,7 @@ export default async function DoctorDashboardPage() {
             <AdherenceChart data={chartData} />
           </CardContent>
         </Card>
-        <DoctorMessageForm heading="ตอบกลับหรือส่งข้อความถึงผู้ป่วย" />
+        <DoctorSupportDesk doctorId={session.userId} />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">
