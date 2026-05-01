@@ -84,14 +84,20 @@ type CameraState = "idle" | "requesting" | "streaming" | "error";
 type OcrSource = "ocr_camera" | "ocr_upload" | "manual";
 type OcrMode = "quick" | "aggressive";
 
-const AUTO_SCAN_INTERVAL_MS = 900;
+const AUTO_SCAN_INTERVAL_MS = 1200;
+const AUTO_SCAN_BUSY_RETRY_MS = 650;
+const AUTO_SCAN_NO_FRAME_RETRY_MS = 850;
+const AUTO_SCAN_INITIAL_DELAY_MS = 360;
 const AUTO_FINALIZE_MIN_COMPLETION = 65;
+const AUTO_FINALIZE_STABLE_FRAMES = 2;
 const AUTO_FINALIZE_MIN_CONFIDENCE = 0.62;
 const OCR_MIN_TEXT_LENGTH = 6;
 const SPEAK_COOLDOWN_MS = 2000;
 const SAFETY_SPEAK_COOLDOWN_MS = 2600;
 const CAMERA_CAPTURE_MAX_EDGE = 1440;
 const CAMERA_AGGRESSIVE_RETRY_COOLDOWN_MS = 2800;
+const COMPLETION_SMOOTHING_FACTOR = 0.36;
+const COMPLETION_MAX_DROP_PER_TICK = 3;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -719,14 +725,22 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
         completion += Math.round(confidence * 18);
       }
       completion = clamp(completion, 0, 100);
-      setScanCompletion(completion);
+      setScanCompletion((previous) => {
+        const smoothed = Math.round(
+          previous * (1 - COMPLETION_SMOOTHING_FACTOR) + completion * COMPLETION_SMOOTHING_FACTOR,
+        );
+        if (completion >= previous) {
+          return clamp(smoothed, 0, 100);
+        }
+        return clamp(Math.max(smoothed, previous - COMPLETION_MAX_DROP_PER_TICK), 0, 100);
+      });
       setScanText(text);
 
       if (!reading || text.length < OCR_MIN_TEXT_LENGTH) {
         const shouldRetryAggressive =
           source === "ocr_camera" &&
           mode === "quick" &&
-          (completion >= 58 || text.length >= 12) &&
+          (completion >= AUTO_FINALIZE_MIN_COMPLETION || text.length >= 12) &&
           Date.now() - lastAggressiveFallbackAtRef.current >= CAMERA_AGGRESSIVE_RETRY_COOLDOWN_MS;
 
         if (shouldRetryAggressive) {
@@ -767,7 +781,8 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
           stableCountRef.current = 1;
         }
 
-        const requiredStableCount = combinedConfidence >= 0.84 ? 1 : 2;
+        const requiredStableCount =
+          combinedConfidence >= 0.84 ? AUTO_FINALIZE_STABLE_FRAMES : AUTO_FINALIZE_STABLE_FRAMES + 1;
         const isStableEnough = stableCountRef.current >= requiredStableCount;
         if (
           completion >= AUTO_FINALIZE_MIN_COMPLETION &&
@@ -1025,13 +1040,13 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
     const tick = async () => {
       if (cancelled || !isScanningRef.current) return;
       if (isBusyRef.current) {
-        scheduleNext(380);
+        scheduleNext(AUTO_SCAN_BUSY_RETRY_MS);
         return;
       }
 
       const frame = captureFrame();
       if (!frame) {
-        scheduleNext(480);
+        scheduleNext(AUTO_SCAN_NO_FRAME_RETRY_MS);
         return;
       }
 
@@ -1055,7 +1070,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
       }
     };
 
-    scheduleNext(200);
+    scheduleNext(AUTO_SCAN_INITIAL_DELAY_MS);
     return () => {
       cancelled = true;
       clearTimer();
@@ -1167,7 +1182,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
         </div>
 
         <div className="mx-auto w-full max-w-3xl">
-          <div className="relative overflow-hidden rounded-xl border bg-black">
+          <div className={isScanning ? "relative overflow-hidden rounded-xl border bg-black" : "hidden"}>
             <video
               ref={videoRef}
               className={`h-72 w-full object-cover transition-opacity duration-200 md:h-[22rem] ${
@@ -1198,6 +1213,22 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
               </div>
             ) : null}
           </div>
+          {!isScanning ? (
+            <div className="rounded-xl border border-dashed bg-muted/40 p-8 text-center text-sm text-muted-foreground">
+              {cameraState === "requesting" ? (
+                <Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin text-cyan-700" />
+              ) : cameraState === "error" ? (
+                <VideoOff className="mx-auto mb-2 h-6 w-6 text-red-600" />
+              ) : (
+                <Camera className="mx-auto mb-2 h-6 w-6 text-cyan-700" />
+              )}
+              {cameraState === "requesting"
+                ? "กำลังขอสิทธิ์กล้อง..."
+                : cameraState === "error"
+                  ? "เปิดกล้องไม่สำเร็จ ลองกดปุ่ม \"เริ่มสแกนด้วยกล้อง\" อีกครั้ง"
+                  : "แนะนำให้กดปุ่ม \"เริ่มสแกนด้วยกล้อง\" เฉพาะตอนต้องการใช้งาน"}
+            </div>
+          ) : null}
         </div>
 
         {previewDataUrl ? (

@@ -122,12 +122,12 @@ type OcrWorkerLike = {
 const COOL_DOWN_MS = 2500;
 const DETECT_INTERVAL_MS = 1000;
 const SPEAK_COOLDOWN_MS = 1400;
-const AUTO_OCR_INTERVAL_MS = 2000;
+const AUTO_OCR_INTERVAL_MS = 2300;
 const OCR_MIN_TEXT_LENGTH = 12;
-const AUTO_FINALIZE_MIN_COMPLETION = 66;
+const AUTO_FINALIZE_MIN_COMPLETION = 65;
 const AUTO_FINALIZE_MIN_CONFIDENCE = 0.05;
 const AUTO_FINALIZE_MIN_TEXT_LENGTH = 12;
-const AUTO_FINALIZE_STABLE_FRAMES = 1;
+const AUTO_FINALIZE_STABLE_FRAMES = 2;
 const SAFETY_WARNING_COOLDOWN_MS = 2800;
 const QUALITY_MIN_BRIGHTNESS = 0.16;
 const QUALITY_MAX_BRIGHTNESS = 0.94;
@@ -1474,8 +1474,11 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
           ? Math.min(AUTO_FINALIZE_MIN_COMPLETION - 1, boundedCompletionRaw)
           : boundedCompletionRaw;
         setScanCompletion((previous) => {
-          const smoothed = Math.round(previous * 0.5 + boundedCompletion * 0.5);
-          return Math.max(previous > 85 ? previous - 1 : 0, smoothed);
+          const smoothed = Math.round(previous * 0.68 + boundedCompletion * 0.32);
+          if (boundedCompletion >= previous) {
+            return smoothed;
+          }
+          return Math.max(smoothed, previous - 2);
         });
 
         const currentCandidate: ScanCandidate = {
