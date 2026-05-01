@@ -122,12 +122,12 @@ type OcrWorkerLike = {
 const COOL_DOWN_MS = 2500;
 const DETECT_INTERVAL_MS = 1000;
 const SPEAK_COOLDOWN_MS = 1400;
-const AUTO_OCR_INTERVAL_MS = 2300;
+const AUTO_OCR_INTERVAL_MS = 2000;
 const OCR_MIN_TEXT_LENGTH = 12;
-const AUTO_FINALIZE_MIN_COMPLETION = 65;
+const AUTO_FINALIZE_MIN_COMPLETION = 66;
 const AUTO_FINALIZE_MIN_CONFIDENCE = 0.05;
 const AUTO_FINALIZE_MIN_TEXT_LENGTH = 12;
-const AUTO_FINALIZE_STABLE_FRAMES = 2;
+const AUTO_FINALIZE_STABLE_FRAMES = 1;
 const SAFETY_WARNING_COOLDOWN_MS = 2800;
 const QUALITY_MIN_BRIGHTNESS = 0.16;
 const QUALITY_MAX_BRIGHTNESS = 0.94;
@@ -1474,11 +1474,8 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
           ? Math.min(AUTO_FINALIZE_MIN_COMPLETION - 1, boundedCompletionRaw)
           : boundedCompletionRaw;
         setScanCompletion((previous) => {
-          const smoothed = Math.round(previous * 0.68 + boundedCompletion * 0.32);
-          if (boundedCompletion >= previous) {
-            return smoothed;
-          }
-          return Math.max(smoothed, previous - 2);
+          const smoothed = Math.round(previous * 0.5 + boundedCompletion * 0.5);
+          return Math.max(previous > 85 ? previous - 1 : 0, smoothed);
         });
 
         const currentCandidate: ScanCandidate = {
@@ -1505,9 +1502,14 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
           bestCandidateRef.current = currentCandidate;
         }
 
+        const effectiveMinConfidence =
+          boundedCompletionRaw >= 90 && safety.nameClarityScore >= 0.62
+            ? Math.min(AUTO_FINALIZE_MIN_CONFIDENCE, 0.02)
+            : AUTO_FINALIZE_MIN_CONFIDENCE;
+
         const canAutoFinalize =
           normalizedText.length >= AUTO_FINALIZE_MIN_TEXT_LENGTH &&
-          ocr.confidence >= AUTO_FINALIZE_MIN_CONFIDENCE &&
+          ocr.confidence >= effectiveMinConfidence &&
           boundedCompletionRaw >= AUTO_FINALIZE_MIN_COMPLETION &&
           safety.overallScore >= AUTO_FINALIZE_MIN_SAFETY_SCORE &&
           (safety.hasEnglishName || safety.hasThaiName || safety.nameClarityScore >= 0.62);
