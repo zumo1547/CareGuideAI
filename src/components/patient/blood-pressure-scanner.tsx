@@ -1181,7 +1181,7 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
           />
         </div>
 
-        <div className="mx-auto w-full max-w-3xl">
+        <div className={isScanning ? "mx-auto w-full max-w-3xl" : "w-full"}>
           <div className={isScanning ? "relative overflow-hidden rounded-xl border bg-black" : "hidden"}>
             <video
               ref={videoRef}
