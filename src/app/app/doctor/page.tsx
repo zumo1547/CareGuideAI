@@ -1,9 +1,9 @@
 import { format } from "date-fns";
-import { ClipboardList, MessageSquareText, TrendingUp } from "lucide-react";
+import { MessageSquareText, TrendingUp } from "lucide-react";
 
 import { AdherenceChart } from "@/components/doctor/adherence-chart";
+import { DoctorAppointmentDesk } from "@/components/doctor/doctor-appointment-desk";
 import { DoctorSupportDesk } from "@/components/doctor/doctor-support-desk";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/session";
@@ -154,53 +154,9 @@ export default async function DoctorDashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ClipboardList className="h-5 w-5 text-cyan-700" />
-              คำขอนัดหมาย
-            </CardTitle>
-            <CardDescription>สถานะ pending/confirmed/completed</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ผู้ป่วย</TableHead>
-                  <TableHead>เวลา</TableHead>
-                  <TableHead>สถานะ</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(appointments ?? []).length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
-                      ไม่มีคำขอนัดหมาย
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  appointments?.map((appointment) => (
-                    <TableRow key={appointment.id}>
-                      <TableCell>
-                        {patientMap.get(appointment.patient_id)?.full_name ?? appointment.patient_id}
-                      </TableCell>
-                      <TableCell>{fmt(appointment.scheduled_at ?? appointment.created_at)}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={appointment.status === "pending" ? "secondary" : "default"}
-                          className="capitalize"
-                        >
-                          {appointment.status}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <DoctorAppointmentDesk doctorId={session.userId} />
       </section>
     </div>
   );
 }
+

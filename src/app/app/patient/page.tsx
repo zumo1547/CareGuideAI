@@ -78,7 +78,6 @@ export default async function PatientDashboardPage() {
     phone: doctor.phone,
     isLinked: linkedDoctorIds.has(doctor.id),
   }));
-  const firstDoctorId = doctorOptions.find((doctor) => doctor.isLinked)?.id ?? doctorOptions[0]?.id ?? "";
   const bmiValue = Number(onboardingProfile?.bmi ?? 0);
   const bmiTrend =
     onboardingProfile?.biological_sex && Number.isFinite(bmiValue) && bmiValue > 0
@@ -171,7 +170,11 @@ export default async function PatientDashboardPage() {
           doctorOptions={doctorOptions}
           hasLinkedDoctor={linkedDoctorIds.size > 0}
         />
-        <AppointmentForm defaultDoctorId={firstDoctorId} />
+        <AppointmentForm
+          patientId={session.userId}
+          doctorOptions={doctorOptions}
+          hasLinkedDoctor={linkedDoctorIds.size > 0}
+        />
       </section>
 
       <section>
