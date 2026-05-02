@@ -7,6 +7,7 @@ import { DoctorSupportDesk } from "@/components/doctor/doctor-support-desk";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/session";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const fmt = (value: string | null) => (value ? format(new Date(value), "dd/MM/yyyy HH:mm") : "-");
@@ -20,44 +21,58 @@ export default async function DoctorDashboardPage() {
     .select("patient_id")
     .eq("doctor_id", session.userId);
 
-  const patientIds = [...new Set((links ?? []).map((item) => item.patient_id))];
+  const { data: appointments } = await supabase
+    .from("appointments")
+    .select("id, patient_id, status, request_note, scheduled_at, created_at")
+    .eq("doctor_id", session.userId)
+    .order("created_at", { ascending: false })
+    .limit(25);
 
-  const [{ data: patients }, { data: adherenceLogs }, { data: messages }, { data: appointments }] =
-    await Promise.all([
-      patientIds.length
-        ? supabase.from("profiles").select("id, full_name, phone").in("id", patientIds)
-        : Promise.resolve({
-            data: [] as { id: string; full_name: string; phone: string | null }[],
-          }),
-      patientIds.length
-        ? supabase
-            .from("adherence_logs")
-            .select("id, patient_id, status, scheduled_for, taken_at")
-            .in("patient_id", patientIds)
-            .order("scheduled_for", { ascending: false })
-            .limit(120)
-        : Promise.resolve({
-            data: [] as {
-              id: string;
-              patient_id: string;
-              status: string;
-              scheduled_for: string;
-              taken_at: string | null;
-            }[],
-          }),
-      supabase
-        .from("doctor_messages")
-        .select("id, patient_id, subject, message, created_at, sender_id")
-        .eq("doctor_id", session.userId)
-        .order("created_at", { ascending: false })
-        .limit(25),
-      supabase
-        .from("appointments")
-        .select("id, patient_id, status, request_note, scheduled_at, created_at")
-        .eq("doctor_id", session.userId)
-        .order("created_at", { ascending: false })
-        .limit(25),
-    ]);
+  const { data: supportCases, error: supportCasesError } = await supabase
+    .from("support_cases")
+    .select("patient_id")
+    .or(`requested_doctor_id.eq.${session.userId},assigned_doctor_id.eq.${session.userId}`)
+    .limit(300);
+
+  const patientIds = [
+    ...new Set(
+      [
+        ...(links ?? []).map((item) => item.patient_id),
+        ...((appointments ?? []).map((item) => item.patient_id)),
+        ...(supportCasesError ? [] : (supportCases ?? []).map((item) => item.patient_id)),
+      ].filter((value): value is string => typeof value === "string" && value.length > 0),
+    ),
+  ];
+
+  const adminSupabase = createSupabaseAdminClient();
+  const { data: patients } = patientIds.length
+    ? await adminSupabase.from("profiles").select("id, full_name, phone").in("id", patientIds)
+    : { data: [] as { id: string; full_name: string; phone: string | null }[] };
+
+  const [{ data: adherenceLogs }, { data: messages }] = await Promise.all([
+    patientIds.length
+      ? supabase
+          .from("adherence_logs")
+          .select("id, patient_id, status, scheduled_for, taken_at")
+          .in("patient_id", patientIds)
+          .order("scheduled_for", { ascending: false })
+          .limit(120)
+      : Promise.resolve({
+          data: [] as {
+            id: string;
+            patient_id: string;
+            status: string;
+            scheduled_for: string;
+            taken_at: string | null;
+          }[],
+        }),
+    supabase
+      .from("doctor_messages")
+      .select("id, patient_id, subject, message, created_at, sender_id")
+      .eq("doctor_id", session.userId)
+      .order("created_at", { ascending: false })
+      .limit(25),
+  ]);
 
   const patientMap = new Map((patients ?? []).map((patient) => [patient.id, patient]));
 
@@ -154,9 +169,15 @@ export default async function DoctorDashboardPage() {
           </CardContent>
         </Card>
 
-        <DoctorAppointmentDesk doctorId={session.userId} />
+        <DoctorAppointmentDesk
+          doctorId={session.userId}
+          patientOptions={(patients ?? []).map((patient) => ({
+            id: patient.id,
+            fullName: patient.full_name,
+            phone: patient.phone,
+          }))}
+        />
       </section>
     </div>
   );
 }
-

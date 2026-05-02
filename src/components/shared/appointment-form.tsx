@@ -92,13 +92,17 @@ export const AppointmentForm = ({
     supabaseRef.current = createSupabaseBrowserClient();
   }
 
-  const linkedDoctors = useMemo(
-    () => doctorOptions.filter((doctor) => doctor.isLinked),
+  const sortedDoctorOptions = useMemo(
+    () =>
+      [...doctorOptions].sort(
+        (a, b) =>
+          Number(b.isLinked) - Number(a.isLinked) || a.fullName.localeCompare(b.fullName, "th"),
+      ),
     [doctorOptions],
   );
-  const canRequestAppointment = linkedDoctors.length > 0;
+  const canRequestAppointment = sortedDoctorOptions.length > 0;
 
-  const [doctorId, setDoctorId] = useState(linkedDoctors[0]?.id ?? "");
+  const [doctorId, setDoctorId] = useState(sortedDoctorOptions[0]?.id ?? "");
   const [preferredAt, setPreferredAt] = useState("");
   const [requestNote, setRequestNote] = useState("");
   const [appointments, setAppointments] = useState<AppointmentView[]>([]);
@@ -110,11 +114,11 @@ export const AppointmentForm = ({
   const [success, setSuccess] = useState<string | null>(null);
 
   const selectedDoctorId = useMemo(() => {
-    if (doctorId && linkedDoctors.some((doctor) => doctor.id === doctorId)) {
+    if (doctorId && sortedDoctorOptions.some((doctor) => doctor.id === doctorId)) {
       return doctorId;
     }
-    return linkedDoctors[0]?.id ?? "";
-  }, [doctorId, linkedDoctors]);
+    return sortedDoctorOptions[0]?.id ?? "";
+  }, [doctorId, sortedDoctorOptions]);
 
   const refreshAppointments = useCallback(async (silent = false) => {
     if (!silent) {
@@ -171,7 +175,7 @@ export const AppointmentForm = ({
 
   const submitRequest = async () => {
     if (!canRequestAppointment || !selectedDoctorId) {
-      setError("ยังไม่ถูกจับคู่กับคุณหมอโดยแอดมิน จึงยังส่งคำขอนัดหมายไม่ได้");
+      setError("Please select a doctor before sending an appointment request.");
       return;
     }
     if (requestNote.trim().length < 3) {
@@ -298,9 +302,10 @@ export const AppointmentForm = ({
 
         {!hasLinkedDoctor ? (
           <Alert>
-            <AlertTitle>ยังไม่มีหมอดูแลที่จับคู่โดยแอดมิน</AlertTitle>
+            <AlertTitle>No admin-linked doctor yet</AlertTitle>
             <AlertDescription>
-              เพื่อความปลอดภัย คนไข้จะส่งคำขอนัดหมายได้เฉพาะหมอที่แอดมินจับคู่ไว้เท่านั้น
+              You can still send appointment requests directly to a doctor without admin pairing.
+              Admin pairing remains available as a backup workflow.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -316,11 +321,12 @@ export const AppointmentForm = ({
               disabled={!canRequestAppointment || submitting}
               className="flex h-10 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {!linkedDoctors.length ? <option value="">ยังไม่มีหมอที่จับคู่</option> : null}
-              {linkedDoctors.map((doctor) => (
+              {!sortedDoctorOptions.length ? <option value="">No doctors available</option> : null}
+              {sortedDoctorOptions.map((doctor) => (
                 <option key={doctor.id} value={doctor.id}>
                   {doctor.fullName}
                   {doctor.phone ? ` (${doctor.phone})` : ""}
+                  {doctor.isLinked ? " (Admin linked)" : ""}
                 </option>
               ))}
             </select>

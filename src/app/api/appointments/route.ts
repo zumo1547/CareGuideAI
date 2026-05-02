@@ -130,6 +130,9 @@ const createRequestSchema = z.object({
   doctorId: z.uuid(),
   requestNote: z.string().trim().min(3).max(2000),
   preferredAt: z.string().optional().nullable(),
+  scheduledAt: z.string().optional().nullable(),
+  confirmationLink: z.string().url().optional().nullable(),
+  doctorProposedNote: z.string().max(2000).optional().nullable(),
   patientId: z.uuid().optional(),
 });
 
@@ -440,7 +443,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await getApiAuthContext(["patient", "admin"]);
+  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -460,26 +463,29 @@ export async function POST(request: Request) {
   if (payload.preferredAt && !preferredAt) {
     return badRequest("preferredAt is invalid");
   }
+  const scheduledAt = parseDateInput(payload.scheduledAt);
+  if (payload.scheduledAt && !scheduledAt) {
+    return badRequest("scheduledAt is invalid");
+  }
+
+  if (auth.role === "doctor" && payload.doctorId !== auth.userId) {
+    return forbidden("Doctor can create only own appointments");
+  }
+
+  if (auth.role === "doctor") {
+    if (!scheduledAt) {
+      return badRequest("scheduledAt is required for doctor created appointment");
+    }
+    if (!payload.confirmationLink) {
+      return badRequest("confirmationLink is required for doctor created appointment");
+    }
+  }
 
   await tryEnsureAppointmentSchema();
 
   const supabase = await createSupabaseServerClient();
-  if (auth.role !== "admin") {
-    const { data: link, error: linkError } = await supabase
-      .from("patient_doctor_links")
-      .select("id")
-      .eq("patient_id", patientId)
-      .eq("doctor_id", payload.doctorId)
-      .maybeSingle();
-
-    if (linkError) {
-      return NextResponse.json({ error: linkError.message }, { status: 400 });
-    }
-
-    if (!link) {
-      return forbidden("Patient and doctor are not linked by admin");
-    }
-  }
+  const now = new Date().toISOString();
+  const isDoctorCreated = auth.role === "doctor";
 
   const { data, error } = await withAppointmentSchemaRecovery<{ id: string }>(() =>
     supabase
@@ -489,13 +495,16 @@ export async function POST(request: Request) {
         doctor_id: payload.doctorId,
         requested_by: auth.userId,
         request_note: normalizeText(payload.requestNote),
-        patient_preferred_at: preferredAt,
+        patient_preferred_at: preferredAt ?? (isDoctorCreated ? scheduledAt : null),
+        scheduled_at: isDoctorCreated ? scheduledAt : null,
         status: "pending",
         patient_response: "pending",
-        doctor_confirmation_link: null,
-        doctor_confirmation_token: null,
-        doctor_proposed_note: null,
-        doctor_proposed_at: null,
+        doctor_confirmation_link: isDoctorCreated ? payload.confirmationLink : null,
+        doctor_confirmation_token: isDoctorCreated ? randomUUID().replace(/-/g, "") : null,
+        doctor_proposed_note: isDoctorCreated
+          ? normalizeText(payload.doctorProposedNote)
+          : null,
+        doctor_proposed_at: isDoctorCreated ? now : null,
         patient_response_note: null,
         patient_responded_at: null,
       })
@@ -511,8 +520,15 @@ export async function POST(request: Request) {
           patient_id: patientId,
           doctor_id: payload.doctorId,
           requested_by: auth.userId,
-          request_note: normalizeText(payload.requestNote),
-          scheduled_at: preferredAt,
+          request_note: isDoctorCreated
+            ? appendLegacyNote(normalizeText(payload.requestNote), [
+                payload.confirmationLink ? `[Doctor link] ${payload.confirmationLink}` : null,
+                payload.doctorProposedNote
+                  ? `[Doctor note] ${payload.doctorProposedNote}`
+                  : null,
+              ])
+            : normalizeText(payload.requestNote),
+          scheduled_at: isDoctorCreated ? scheduledAt : preferredAt,
           status: "pending",
         })
         .select("id")

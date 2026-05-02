@@ -11,11 +11,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/session";
 import { getBmiTrend } from "@/lib/onboarding";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function PatientDashboardPage() {
   const session = await requireRole(["patient", "admin"]);
   const supabase = await createSupabaseServerClient();
+  const adminSupabase = createSupabaseAdminClient();
 
   const { data: plans } = await supabase
     .from("medication_plans")
@@ -58,7 +60,7 @@ export default async function PatientDashboardPage() {
         .select("doctor_id")
         .eq("patient_id", session.userId)
         .limit(200),
-      supabase
+      adminSupabase
         .from("profiles")
         .select("id, full_name, phone")
         .eq("role", "doctor")

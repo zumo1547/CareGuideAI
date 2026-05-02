@@ -22,6 +22,11 @@ import type { AppointmentView } from "@/types/appointment";
 
 interface DoctorAppointmentDeskProps {
   doctorId: string;
+  patientOptions: {
+    id: string;
+    fullName: string;
+    phone: string | null;
+  }[];
 }
 
 interface ApiPayload {
@@ -64,7 +69,7 @@ const getPatientResponseLabel = (response: AppointmentView["patientResponse"]) =
   return "รอผู้ป่วยตอบรับ";
 };
 
-export const DoctorAppointmentDesk = ({ doctorId }: DoctorAppointmentDeskProps) => {
+export const DoctorAppointmentDesk = ({ doctorId, patientOptions }: DoctorAppointmentDeskProps) => {
   const supabaseRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
   if (supabaseRef.current == null) {
     supabaseRef.current = createSupabaseBrowserClient();
@@ -74,6 +79,12 @@ export const DoctorAppointmentDesk = ({ doctorId }: DoctorAppointmentDeskProps) 
   const [proposalDrafts, setProposalDrafts] = useState<Record<string, ProposalDraft>>({});
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [creatingAppointment, setCreatingAppointment] = useState(false);
+  const [newPatientId, setNewPatientId] = useState(patientOptions[0]?.id ?? "");
+  const [newScheduledAt, setNewScheduledAt] = useState("");
+  const [newConfirmationLink, setNewConfirmationLink] = useState("");
+  const [newRequestNote, setNewRequestNote] = useState("");
+  const [newDoctorNote, setNewDoctorNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -137,6 +148,13 @@ export const DoctorAppointmentDesk = ({ doctorId }: DoctorAppointmentDeskProps) 
     return { pending, confirmed, completed };
   }, [appointments]);
 
+  const selectedNewPatientId = useMemo(() => {
+    if (newPatientId && patientOptions.some((item) => item.id === newPatientId)) {
+      return newPatientId;
+    }
+    return patientOptions[0]?.id ?? "";
+  }, [newPatientId, patientOptions]);
+
   const getDraft = (appointment: AppointmentView): ProposalDraft =>
     proposalDrafts[appointment.id] ?? {
       scheduledAt: toInputDateTimeValue(appointment.scheduledAt ?? appointment.patientPreferredAt),
@@ -152,6 +170,58 @@ export const DoctorAppointmentDesk = ({ doctorId }: DoctorAppointmentDeskProps) 
         ...patch,
       },
     }));
+  };
+
+  const createDoctorInitiatedAppointment = async () => {
+    if (!selectedNewPatientId) {
+      setError("Please select a patient before sending an appointment.");
+      return;
+    }
+    if (!newScheduledAt) {
+      setError("Please select appointment date and time.");
+      return;
+    }
+    if (!newConfirmationLink.trim()) {
+      setError("Please enter a confirmation link.");
+      return;
+    }
+    if (newRequestNote.trim().length < 3) {
+      setError("Please enter at least 3 characters in the note.");
+      return;
+    }
+
+    setCreatingAppointment(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await fetch("/api/appointments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: selectedNewPatientId,
+          doctorId,
+          requestNote: newRequestNote.trim(),
+          scheduledAt: newScheduledAt,
+          confirmationLink: newConfirmationLink.trim(),
+          doctorProposedNote: newDoctorNote.trim() || null,
+        }),
+      });
+      const payload = (await response.json()) as ApiPayload;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to send appointment");
+      }
+
+      setNewScheduledAt("");
+      setNewConfirmationLink("");
+      setNewRequestNote("");
+      setNewDoctorNote("");
+      setSuccess("Appointment link sent to patient successfully.");
+      await refreshAppointments(true);
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Failed to send appointment");
+    } finally {
+      setCreatingAppointment(false);
+    }
   };
 
   const proposeAppointment = async (appointment: AppointmentView) => {
@@ -243,6 +313,89 @@ export const DoctorAppointmentDesk = ({ doctorId }: DoctorAppointmentDeskProps) 
             <AlertDescription>{success}</AlertDescription>
           </Alert>
         ) : null}
+
+        <section className="space-y-3 rounded-xl border p-3">
+          <h3 className="text-sm font-semibold">Send Appointment To Patient</h3>
+          <p className="text-xs text-muted-foreground">
+            Doctors can send appointment date/time and meeting link directly to patients without
+            waiting for admin pairing.
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="doctor-appointment-patient-id">Patient</Label>
+            <select
+              id="doctor-appointment-patient-id"
+              value={selectedNewPatientId}
+              onChange={(event) => setNewPatientId(event.target.value)}
+              disabled={!patientOptions.length || creatingAppointment}
+              className="flex h-10 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {!patientOptions.length ? <option value="">No patients available</option> : null}
+              {patientOptions.map((patient) => (
+                <option key={patient.id} value={patient.id}>
+                  {patient.fullName}
+                  {patient.phone ? ` (${patient.phone})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="doctor-appointment-scheduled-at">Scheduled at</Label>
+            <Input
+              id="doctor-appointment-scheduled-at"
+              type="datetime-local"
+              value={newScheduledAt}
+              onChange={(event) => setNewScheduledAt(event.target.value)}
+              disabled={creatingAppointment}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="doctor-appointment-link">Meeting link (Google Meet / LINE / Zoom)</Label>
+            <Input
+              id="doctor-appointment-link"
+              value={newConfirmationLink}
+              onChange={(event) => setNewConfirmationLink(event.target.value)}
+              placeholder="https://..."
+              disabled={creatingAppointment}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="doctor-appointment-request-note">Reason / symptom summary</Label>
+            <Textarea
+              id="doctor-appointment-request-note"
+              rows={2}
+              value={newRequestNote}
+              onChange={(event) => setNewRequestNote(event.target.value)}
+              placeholder="Follow-up reason for this appointment"
+              disabled={creatingAppointment}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="doctor-appointment-note">Doctor note to patient (optional)</Label>
+            <Textarea
+              id="doctor-appointment-note"
+              rows={2}
+              value={newDoctorNote}
+              onChange={(event) => setNewDoctorNote(event.target.value)}
+              placeholder="Optional instructions before the call"
+              disabled={creatingAppointment}
+            />
+          </div>
+          <Button
+            type="button"
+            onClick={() => void createDoctorInitiatedAppointment()}
+            disabled={
+              creatingAppointment ||
+              !patientOptions.length ||
+              !selectedNewPatientId ||
+              !newScheduledAt ||
+              !newConfirmationLink.trim() ||
+              newRequestNote.trim().length < 3
+            }
+          >
+            {creatingAppointment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {creatingAppointment ? "Sending..." : "Send appointment"}
+          </Button>
+        </section>
 
         <section className="grid gap-3 md:grid-cols-3">
           <div className="rounded-lg border p-3">
