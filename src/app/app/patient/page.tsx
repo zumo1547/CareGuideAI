@@ -31,6 +31,7 @@ export default async function PatientDashboardPage() {
     { data: schedules },
     { data: reminderEvents },
     { data: links },
+    { data: doctorProfiles },
     { data: onboardingProfile },
   ] =
     await Promise.all([
@@ -56,7 +57,12 @@ export default async function PatientDashboardPage() {
         .from("patient_doctor_links")
         .select("doctor_id")
         .eq("patient_id", session.userId)
-        .limit(1),
+        .limit(200),
+      supabase
+        .from("profiles")
+        .select("id, full_name, phone")
+        .eq("role", "doctor")
+        .order("full_name", { ascending: true }),
       supabase
         .from("user_onboarding_profiles")
         .select("biological_sex, bmi")
@@ -65,20 +71,14 @@ export default async function PatientDashboardPage() {
     ]);
 
   const medicineMap = new Map((medicines ?? []).map((item) => [item.id, item]));
-  const doctorIds = [...new Set((links ?? []).map((link) => link.doctor_id).filter(Boolean))];
-  const { data: doctorProfiles } = doctorIds.length
-    ? await supabase
-        .from("profiles")
-        .select("id, full_name, phone")
-        .in("id", doctorIds)
-    : { data: [] as { id: string; full_name: string; phone: string | null }[] };
-
+  const linkedDoctorIds = new Set((links ?? []).map((link) => link.doctor_id).filter(Boolean));
   const doctorOptions = (doctorProfiles ?? []).map((doctor) => ({
     id: doctor.id,
     fullName: doctor.full_name,
     phone: doctor.phone,
+    isLinked: linkedDoctorIds.has(doctor.id),
   }));
-  const firstDoctorId = doctorOptions[0]?.id ?? "";
+  const firstDoctorId = doctorOptions.find((doctor) => doctor.isLinked)?.id ?? doctorOptions[0]?.id ?? "";
   const bmiValue = Number(onboardingProfile?.bmi ?? 0);
   const bmiTrend =
     onboardingProfile?.biological_sex && Number.isFinite(bmiValue) && bmiValue > 0
@@ -166,7 +166,11 @@ export default async function PatientDashboardPage() {
       </section>
 
       <section className="grid gap-6 lg:grid-cols-2">
-        <PatientSupportDesk patientId={session.userId} doctorOptions={doctorOptions} />
+        <PatientSupportDesk
+          patientId={session.userId}
+          doctorOptions={doctorOptions}
+          hasLinkedDoctor={linkedDoctorIds.size > 0}
+        />
         <AppointmentForm defaultDoctorId={firstDoctorId} />
       </section>
 

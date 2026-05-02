@@ -201,6 +201,14 @@ export default async function AdminDashboardPage() {
     id: doctor.id,
     fullName: doctor.full_name,
   }));
+  const existingLinks = links.map((link) => ({
+    id: link.id,
+    patientId: link.patient_id,
+    patientName: userNameMap.get(link.patient_id) ?? link.patient_id,
+    doctorId: link.doctor_id,
+    doctorName: userNameMap.get(link.doctor_id) ?? link.doctor_id,
+    createdAt: link.created_at,
+  }));
 
   return (
     <div className="space-y-6">
@@ -276,7 +284,11 @@ export default async function AdminDashboardPage() {
       <section className="grid gap-6 xl:grid-cols-3">
         <InviteDoctorForm />
         <AssignRoleForm users={userOptions} />
-        <AssignPatientForm patients={patientOptions} doctors={doctorOptions} />
+        <AssignPatientForm
+          patients={patientOptions}
+          doctors={doctorOptions}
+          existingLinks={existingLinks}
+        />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">

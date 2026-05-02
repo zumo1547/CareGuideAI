@@ -21,11 +21,13 @@ interface DoctorOption {
   id: string;
   fullName: string;
   phone: string | null;
+  isLinked: boolean;
 }
 
 interface PatientSupportDeskProps {
   patientId: string;
   doctorOptions: DoctorOption[];
+  hasLinkedDoctor: boolean;
 }
 
 interface SupportApiErrorPayload {
@@ -65,7 +67,11 @@ const chooseDefaultCaseId = (
 const getErrorMessage = (payload: SupportApiErrorPayload | null, fallback: string) =>
   payload?.error ?? fallback;
 
-export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportDeskProps) => {
+export const PatientSupportDesk = ({
+  patientId,
+  doctorOptions,
+  hasLinkedDoctor,
+}: PatientSupportDeskProps) => {
   const supabaseRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
   if (supabaseRef.current == null) {
     supabaseRef.current = createSupabaseBrowserClient();
@@ -74,7 +80,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
   const [cases, setCases] = useState<SupportCaseSummary[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [messages, setMessages] = useState<SupportCaseMessage[]>([]);
-  const [isLoadingCases, setLoadingCases] = useState(doctorOptions.length > 0);
+  const [isLoadingCases, setLoadingCases] = useState(true);
   const [isLoadingMessages, setLoadingMessages] = useState(false);
   const [requestMessage, setRequestMessage] = useState("");
   const [selectedDoctorId, setSelectedDoctorId] = useState(doctorOptions[0]?.id ?? "");
@@ -89,6 +95,13 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
     () => cases.find((item) => item.id === selectedCaseId) ?? null,
     [cases, selectedCaseId],
   );
+  const selectedDoctorIdValue = useMemo(() => {
+    if (!doctorOptions.length) return "";
+    if (selectedDoctorId && doctorOptions.some((doctor) => doctor.id === selectedDoctorId)) {
+      return selectedDoctorId;
+    }
+    return doctorOptions[0].id;
+  }, [doctorOptions, selectedDoctorId]);
 
   const handleSchemaCacheError = useCallback((payload: SupportApiErrorPayload | null) => {
     if (payload?.code === "SUPPORT_SCHEMA_CACHE_NOT_READY") {
@@ -156,7 +169,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
   );
 
   const createCase = async () => {
-    if (!selectedDoctorId || requestMessage.trim().length < 3) {
+    if (!selectedDoctorIdValue || requestMessage.trim().length < 3) {
       setError("กรุณาระบุข้อความอย่างน้อย 3 ตัวอักษร");
       return;
     }
@@ -170,7 +183,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          requestedDoctorId: selectedDoctorId,
+          requestedDoctorId: selectedDoctorIdValue,
           requestMessage: requestMessage.trim(),
         }),
       });
@@ -223,22 +236,13 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
   };
 
   useEffect(() => {
-    if (!doctorOptions.length) {
-      const timer = window.setTimeout(() => {
-        setLoadingCases(false);
-      }, 0);
-      return () => {
-        window.clearTimeout(timer);
-      };
-    }
-
     const timer = window.setTimeout(() => {
       void refreshCases();
     }, 0);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [doctorOptions.length, refreshCases]);
+  }, [refreshCases]);
 
   useEffect(() => {
     if (!selectedCaseId) return;
@@ -251,8 +255,6 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
   }, [refreshMessages, selectedCaseId]);
 
   useEffect(() => {
-    if (!doctorOptions.length) return;
-
     const supabase = supabaseRef.current;
     if (!supabase) return;
 
@@ -275,7 +277,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
     return () => {
       void supabase.removeChannel(casesChannel);
     };
-  }, [doctorOptions.length, patientId, refreshCases]);
+  }, [patientId, refreshCases]);
 
   useEffect(() => {
     const caseId = selectedCaseId;
@@ -339,49 +341,61 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
         {!doctorOptions.length ? (
           <Alert>
             <ShieldAlert className="h-4 w-4" />
-            <AlertTitle>ยังไม่พบคุณหมอที่ดูแล</AlertTitle>
+            <AlertTitle>ยังไม่มีบัญชีคุณหมอในระบบ</AlertTitle>
             <AlertDescription>
-              กรุณาติดต่อแอดมินเพื่อผูกผู้ป่วยกับคุณหมอก่อนใช้งานระบบช่วยเหลือ
+              กรุณาติดต่อแอดมินเพื่อเพิ่มบัญชีคุณหมอ จากนั้นจึงจะส่งคำร้องขอความช่วยเหลือได้
             </AlertDescription>
           </Alert>
         ) : (
-          <section className="space-y-3 rounded-xl border p-3">
-            <div className="grid gap-3 md:grid-cols-[1fr_2fr_auto]">
-              <div className="space-y-2">
-                <Label htmlFor="doctor-select">เลือกคุณหมอ</Label>
-                <select
-                  id="doctor-select"
-                  value={selectedDoctorId}
-                  onChange={(event) => setSelectedDoctorId(event.target.value)}
-                  className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                >
-                  {doctorOptions.map((doctor) => (
-                    <option key={doctor.id} value={doctor.id}>
-                      {doctor.fullName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="request-message">ข้อความร้องขอ</Label>
-                <Textarea
-                  id="request-message"
-                  rows={3}
-                  value={requestMessage}
-                  onChange={(event) => setRequestMessage(event.target.value)}
-                  placeholder="เช่น เวียนหัวหลังทานยา อยากปรึกษาคุณหมอ"
-                />
-              </div>
-              <div className="flex items-end">
-                <Button
-                  type="button"
-                  onClick={() => void createCase()}
-                  disabled={isCreatingCase || requestMessage.trim().length < 3}
-                  className="w-full md:w-auto"
-                >
-                  {isCreatingCase ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  ส่งคำร้อง
-                </Button>
+          <section className="space-y-3">
+            {!hasLinkedDoctor ? (
+              <Alert>
+                <ShieldAlert className="h-4 w-4" />
+                <AlertTitle>ยังไม่ถูกจับคู่กับหมอโดยแอดมิน</AlertTitle>
+                <AlertDescription>
+                  คุณยังส่งคำร้องถึงหมอได้ทันที และแอดมินสามารถจับคู่/ยกเลิกคู่ภายหลังเพื่อจัดการเคสระยะยาว
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            <div className="rounded-xl border p-3">
+              <div className="grid gap-3 md:grid-cols-[1fr_2fr_auto]">
+                <div className="space-y-2">
+                  <Label htmlFor="doctor-select">เลือกคุณหมอ</Label>
+                  <select
+                    id="doctor-select"
+                    value={selectedDoctorIdValue}
+                    onChange={(event) => setSelectedDoctorId(event.target.value)}
+                    className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  >
+                    {doctorOptions.map((doctor) => (
+                      <option key={doctor.id} value={doctor.id}>
+                        {doctor.isLinked ? `แพทย์ประจำ: ${doctor.fullName}` : doctor.fullName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="request-message">ข้อความร้องขอ</Label>
+                  <Textarea
+                    id="request-message"
+                    rows={3}
+                    value={requestMessage}
+                    onChange={(event) => setRequestMessage(event.target.value)}
+                    placeholder="เช่น เวียนหัวหลังทานยา อยากปรึกษาคุณหมอ"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    onClick={() => void createCase()}
+                    disabled={isCreatingCase || requestMessage.trim().length < 3}
+                    className="w-full md:w-auto"
+                  >
+                    {isCreatingCase ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    ส่งคำร้อง
+                  </Button>
+                </div>
               </div>
             </div>
           </section>
@@ -390,7 +404,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
         <section className="space-y-2 rounded-xl border p-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">เคสของฉัน</h3>
-            <Button type="button" variant="outline" size="sm" onClick={() => void refreshCases()} disabled={isLoadingCases || !doctorOptions.length}>
+            <Button type="button" variant="outline" size="sm" onClick={() => void refreshCases()} disabled={isLoadingCases}>
               {isLoadingCases ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
               รีเฟรช
             </Button>

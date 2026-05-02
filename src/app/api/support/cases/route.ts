@@ -84,23 +84,6 @@ export async function POST(request: Request) {
     return badRequest("Requested doctor not found");
   }
 
-  if (auth.role !== "admin") {
-    const { data: link, error: linkError } = await supabase
-      .from("patient_doctor_links")
-      .select("id")
-      .eq("patient_id", patientId)
-      .eq("doctor_id", requestedDoctorId)
-      .maybeSingle();
-
-    if (linkError) {
-      return NextResponse.json({ error: linkError.message }, { status: 400 });
-    }
-
-    if (!link) {
-      return forbidden("Doctor is not linked to this patient");
-    }
-  }
-
   const { data: existingCase, error: existingError } = await supabase
     .from("support_cases")
     .select("id, status")
