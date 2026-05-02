@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
 import {
+  getSupabaseProjectRefFromEnv,
   isSupportCaseSchemaCacheError,
   SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
 } from "@/lib/support-case-errors";
@@ -19,6 +20,14 @@ const caseIdSchema = z.object({
 
 const createMessageSchema = z.object({
   message: z.string().trim().min(1).max(2000),
+});
+
+const buildSchemaCacheErrorPayload = (rawErrorMessage?: string) => ({
+  error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
+  code: "SUPPORT_SCHEMA_CACHE_NOT_READY" as const,
+  schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
+  projectRefHint: getSupabaseProjectRefFromEnv(),
+  rawErrorMessage: rawErrorMessage ?? null,
 });
 
 const canReadCase = (
@@ -61,11 +70,7 @@ export async function GET(
   } catch (error) {
     if (isSupportCaseSchemaCacheError(error instanceof Error ? { message: error.message } : null)) {
       return NextResponse.json(
-        {
-          error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
-          code: "SUPPORT_SCHEMA_CACHE_NOT_READY",
-          schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
-        },
+        buildSchemaCacheErrorPayload(error instanceof Error ? error.message : undefined),
         { status: 503 },
       );
     }
@@ -113,11 +118,7 @@ export async function GET(
   } catch (error) {
     if (isSupportCaseSchemaCacheError(error instanceof Error ? { message: error.message } : null)) {
       return NextResponse.json(
-        {
-          error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
-          code: "SUPPORT_SCHEMA_CACHE_NOT_READY",
-          schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
-        },
+        buildSchemaCacheErrorPayload(error instanceof Error ? error.message : undefined),
         { status: 503 },
       );
     }
@@ -157,11 +158,7 @@ export async function POST(
   } catch (error) {
     if (isSupportCaseSchemaCacheError(error instanceof Error ? { message: error.message } : null)) {
       return NextResponse.json(
-        {
-          error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
-          code: "SUPPORT_SCHEMA_CACHE_NOT_READY",
-          schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
-        },
+        buildSchemaCacheErrorPayload(error instanceof Error ? error.message : undefined),
         { status: 503 },
       );
     }
@@ -198,11 +195,7 @@ export async function POST(
   if (insertError) {
     if (isSupportCaseSchemaCacheError(insertError)) {
       return NextResponse.json(
-        {
-          error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
-          code: "SUPPORT_SCHEMA_CACHE_NOT_READY",
-          schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
-        },
+        buildSchemaCacheErrorPayload(insertError.message),
         { status: 503 },
       );
     }

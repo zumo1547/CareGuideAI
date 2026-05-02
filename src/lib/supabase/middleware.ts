@@ -37,6 +37,9 @@ export const createSupabaseMiddlewareClient = (request: NextRequest) => {
   });
 
   const supabase = createServerClient(url, anonKey, {
+    db: {
+      schema: "public",
+    },
     cookies: {
       getAll() {
         return request.cookies.getAll();

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
 import {
+  getSupabaseProjectRefFromEnv,
   isSupportCaseSchemaCacheError,
   SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
 } from "@/lib/support-case-errors";
@@ -11,6 +12,14 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const caseIdSchema = z.object({
   caseId: z.uuid(),
+});
+
+const buildSchemaCacheErrorPayload = (rawErrorMessage?: string) => ({
+  error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
+  code: "SUPPORT_SCHEMA_CACHE_NOT_READY" as const,
+  schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
+  projectRefHint: getSupabaseProjectRefFromEnv(),
+  rawErrorMessage: rawErrorMessage ?? null,
 });
 
 export async function POST(
@@ -37,11 +46,7 @@ export async function POST(
   } catch (error) {
     if (isSupportCaseSchemaCacheError(error instanceof Error ? { message: error.message } : null)) {
       return NextResponse.json(
-        {
-          error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
-          code: "SUPPORT_SCHEMA_CACHE_NOT_READY",
-          schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
-        },
+        buildSchemaCacheErrorPayload(error instanceof Error ? error.message : undefined),
         { status: 503 },
       );
     }
@@ -94,11 +99,7 @@ export async function POST(
   if (updateError) {
     if (isSupportCaseSchemaCacheError(updateError)) {
       return NextResponse.json(
-        {
-          error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
-          code: "SUPPORT_SCHEMA_CACHE_NOT_READY",
-          schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
-        },
+        buildSchemaCacheErrorPayload(updateError.message),
         { status: 503 },
       );
     }

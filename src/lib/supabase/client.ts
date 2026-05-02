@@ -6,5 +6,9 @@ import { getSupabasePublicEnv } from "@/lib/supabase/shared";
 
 export const createSupabaseBrowserClient = () => {
   const { url, anonKey } = getSupabasePublicEnv();
-  return createBrowserClient(url, anonKey);
+  return createBrowserClient(url, anonKey, {
+    db: {
+      schema: "public",
+    },
+  });
 };

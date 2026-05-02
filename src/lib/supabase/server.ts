@@ -8,6 +8,9 @@ export const createSupabaseServerClient = async () => {
   const { url, anonKey } = getSupabasePublicEnv();
 
   return createServerClient(url, anonKey, {
+    db: {
+      schema: "public",
+    },
     cookies: {
       getAll() {
         return cookieStore.getAll();

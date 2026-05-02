@@ -23,6 +23,8 @@ interface SupportApiErrorPayload {
   error?: string;
   code?: string;
   schemaReloadSql?: string;
+  projectRefHint?: string | null;
+  rawErrorMessage?: string | null;
 }
 
 const statusLabel: Record<SupportCaseStatus, string> = {
@@ -74,6 +76,7 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [schemaReloadSql, setSchemaReloadSql] = useState<string | null>(null);
+  const [schemaDebugMessage, setSchemaDebugMessage] = useState<string | null>(null);
 
   const selectedCase = useMemo(
     () => cases.find((item) => item.id === selectedCaseId) ?? null,
@@ -87,6 +90,11 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
   const handleSchemaCacheError = useCallback((payload: SupportApiErrorPayload | null) => {
     if (payload?.code === "SUPPORT_SCHEMA_CACHE_NOT_READY") {
       setSchemaReloadSql(payload.schemaReloadSql ?? "NOTIFY pgrst, 'reload schema';");
+      if (payload.projectRefHint || payload.rawErrorMessage) {
+        setSchemaDebugMessage(
+          `project=${payload.projectRefHint ?? "-"} | raw=${payload.rawErrorMessage ?? "-"}`,
+        );
+      }
     }
   }, []);
 
@@ -96,6 +104,7 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
         setLoadingCases(true);
       }
       try {
+        setSchemaDebugMessage(null);
         setSchemaReloadSql(null);
         const response = await fetch("/api/support/cases", {
           cache: "no-store",
@@ -124,6 +133,7 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
     async (caseId: string) => {
       setLoadingMessages(true);
       try {
+        setSchemaDebugMessage(null);
         setSchemaReloadSql(null);
         const response = await fetch(`/api/support/cases/${caseId}/messages`, {
           cache: "no-store",
@@ -149,6 +159,7 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
     setAcceptingCaseId(caseId);
     setError(null);
     setSuccess(null);
+    setSchemaDebugMessage(null);
     setSchemaReloadSql(null);
     try {
       const response = await fetch(`/api/support/cases/${caseId}/accept`, {
@@ -173,6 +184,7 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
     setClosingCaseId(caseId);
     setError(null);
     setSuccess(null);
+    setSchemaDebugMessage(null);
     setSchemaReloadSql(null);
     try {
       const response = await fetch(`/api/support/cases/${caseId}/close`, {
@@ -197,6 +209,7 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
     setSendingMessage(true);
     setError(null);
     setSuccess(null);
+    setSchemaDebugMessage(null);
     setSchemaReloadSql(null);
     try {
       const response = await fetch(`/api/support/cases/${selectedCase.id}/messages`, {
@@ -323,8 +336,13 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
             <AlertDescription>
               <p>{error}</p>
               {schemaReloadSql ? (
-                <p className="mt-2 text-xs">
+                <p className="mt-2 text-xs whitespace-pre-wrap">
                   SQL ที่ต้องรันใน Supabase SQL Editor: <code>{schemaReloadSql}</code>
+                </p>
+              ) : null}
+              {schemaDebugMessage ? (
+                <p className="mt-1 text-[11px] opacity-80 whitespace-pre-wrap">
+                  Debug: {schemaDebugMessage}
                 </p>
               ) : null}
             </AlertDescription>
