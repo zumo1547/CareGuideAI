@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Loader2, MessageCircleHeart, RefreshCcw, Send, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -26,6 +26,12 @@ interface DoctorOption {
 interface PatientSupportDeskProps {
   patientId: string;
   doctorOptions: DoctorOption[];
+}
+
+interface SupportApiErrorPayload {
+  error?: string;
+  code?: string;
+  schemaReloadSql?: string;
 }
 
 const statusLabel: Record<SupportCaseStatus, string> = {
@@ -56,6 +62,9 @@ const chooseDefaultCaseId = (
   return cases[0]?.id ?? null;
 };
 
+const getErrorMessage = (payload: SupportApiErrorPayload | null, fallback: string) =>
+  payload?.error ?? fallback;
+
 export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportDeskProps) => {
   const supabaseRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
   if (supabaseRef.current == null) {
@@ -65,7 +74,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
   const [cases, setCases] = useState<SupportCaseSummary[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [messages, setMessages] = useState<SupportCaseMessage[]>([]);
-  const [isLoadingCases, setLoadingCases] = useState(true);
+  const [isLoadingCases, setLoadingCases] = useState(doctorOptions.length > 0);
   const [isLoadingMessages, setLoadingMessages] = useState(false);
   const [requestMessage, setRequestMessage] = useState("");
   const [selectedDoctorId, setSelectedDoctorId] = useState(doctorOptions[0]?.id ?? "");
@@ -74,11 +83,18 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
   const [isSendingMessage, setSendingMessage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [schemaReloadSql, setSchemaReloadSql] = useState<string | null>(null);
 
   const selectedCase = useMemo(
     () => cases.find((item) => item.id === selectedCaseId) ?? null,
     [cases, selectedCaseId],
   );
+
+  const handleSchemaCacheError = useCallback((payload: SupportApiErrorPayload | null) => {
+    if (payload?.code === "SUPPORT_SCHEMA_CACHE_NOT_READY") {
+      setSchemaReloadSql(payload.schemaReloadSql ?? "NOTIFY pgrst, 'reload schema';");
+    }
+  }, []);
 
   const refreshCases = useCallback(
     async (silent = false) => {
@@ -87,16 +103,17 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
       }
 
       try {
+        setSchemaReloadSql(null);
         const response = await fetch("/api/support/cases", {
           cache: "no-store",
         });
-        const payload = (await response.json()) as {
-          error?: string;
+        const payload = (await response.json()) as SupportApiErrorPayload & {
           cases?: SupportCaseSummary[];
         };
 
         if (!response.ok) {
-          throw new Error(payload.error ?? "โหลดเคสไม่สำเร็จ");
+          handleSchemaCacheError(payload);
+          throw new Error(getErrorMessage(payload, "โหลดเคสไม่สำเร็จ"));
         }
 
         const nextCases = payload.cases ?? [];
@@ -108,31 +125,35 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
         setLoadingCases(false);
       }
     },
-    [],
+    [handleSchemaCacheError],
   );
 
-  const refreshMessages = useCallback(async (caseId: string) => {
-    setLoadingMessages(true);
-    try {
-      const response = await fetch(`/api/support/cases/${caseId}/messages`, {
-        cache: "no-store",
-      });
-      const payload = (await response.json()) as {
-        error?: string;
-        messages?: SupportCaseMessage[];
-      };
+  const refreshMessages = useCallback(
+    async (caseId: string) => {
+      setLoadingMessages(true);
+      try {
+        setSchemaReloadSql(null);
+        const response = await fetch(`/api/support/cases/${caseId}/messages`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as SupportApiErrorPayload & {
+          messages?: SupportCaseMessage[];
+        };
 
-      if (!response.ok) {
-        throw new Error(payload.error ?? "โหลดข้อความไม่สำเร็จ");
+        if (!response.ok) {
+          handleSchemaCacheError(payload);
+          throw new Error(getErrorMessage(payload, "โหลดข้อความไม่สำเร็จ"));
+        }
+
+        setMessages(payload.messages ?? []);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : "โหลดข้อความไม่สำเร็จ");
+      } finally {
+        setLoadingMessages(false);
       }
-
-      setMessages(payload.messages ?? []);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "โหลดข้อความไม่สำเร็จ");
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, []);
+    },
+    [handleSchemaCacheError],
+  );
 
   const createCase = async () => {
     if (!selectedDoctorId || requestMessage.trim().length < 3) {
@@ -143,6 +164,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
     setCreatingCase(true);
     setError(null);
     setSuccess(null);
+    setSchemaReloadSql(null);
     try {
       const response = await fetch("/api/support/cases", {
         method: "POST",
@@ -153,12 +175,11 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
         }),
       });
 
-      const payload = (await response.json()) as {
-        error?: string;
-      };
+      const payload = (await response.json()) as SupportApiErrorPayload;
 
       if (!response.ok) {
-        throw new Error(payload.error ?? "ส่งคำร้องไม่สำเร็จ");
+        handleSchemaCacheError(payload);
+        throw new Error(getErrorMessage(payload, "ส่งคำร้องไม่สำเร็จ"));
       }
 
       setRequestMessage("");
@@ -177,6 +198,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
     setSendingMessage(true);
     setError(null);
     setSuccess(null);
+    setSchemaReloadSql(null);
     try {
       const response = await fetch(`/api/support/cases/${selectedCase.id}/messages`, {
         method: "POST",
@@ -185,9 +207,10 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
           message: chatInput.trim(),
         }),
       });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as SupportApiErrorPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "ส่งข้อความไม่สำเร็จ");
+        handleSchemaCacheError(payload);
+        throw new Error(getErrorMessage(payload, "ส่งข้อความไม่สำเร็จ"));
       }
 
       setChatInput("");
@@ -200,13 +223,22 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
   };
 
   useEffect(() => {
+    if (!doctorOptions.length) {
+      const timer = window.setTimeout(() => {
+        setLoadingCases(false);
+      }, 0);
+      return () => {
+        window.clearTimeout(timer);
+      };
+    }
+
     const timer = window.setTimeout(() => {
       void refreshCases();
     }, 0);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [refreshCases]);
+  }, [doctorOptions.length, refreshCases]);
 
   useEffect(() => {
     if (!selectedCaseId) return;
@@ -219,6 +251,8 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
   }, [refreshMessages, selectedCaseId]);
 
   useEffect(() => {
+    if (!doctorOptions.length) return;
+
     const supabase = supabaseRef.current;
     if (!supabase) return;
 
@@ -241,7 +275,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
     return () => {
       void supabase.removeChannel(casesChannel);
     };
-  }, [patientId, refreshCases]);
+  }, [doctorOptions.length, patientId, refreshCases]);
 
   useEffect(() => {
     const caseId = selectedCaseId;
@@ -284,9 +318,17 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
         {error ? (
           <Alert variant="destructive">
             <AlertTitle>เกิดข้อผิดพลาด</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>
+              <p>{error}</p>
+              {schemaReloadSql ? (
+                <p className="mt-2 text-xs">
+                  SQL ที่ต้องรันใน Supabase SQL Editor: <code>{schemaReloadSql}</code>
+                </p>
+              ) : null}
+            </AlertDescription>
           </Alert>
         ) : null}
+
         {success ? (
           <Alert>
             <AlertTitle>สำเร็จ</AlertTitle>
@@ -327,7 +369,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
                   rows={3}
                   value={requestMessage}
                   onChange={(event) => setRequestMessage(event.target.value)}
-                  placeholder="เช่น วิงเวียนหลังทานยา อยากปรึกษาคุณหมอด่วน"
+                  placeholder="เช่น เวียนหัวหลังทานยา อยากปรึกษาคุณหมอ"
                 />
               </div>
               <div className="flex items-end">
@@ -348,7 +390,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
         <section className="space-y-2 rounded-xl border p-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">เคสของฉัน</h3>
-            <Button type="button" variant="outline" size="sm" onClick={() => void refreshCases()} disabled={isLoadingCases}>
+            <Button type="button" variant="outline" size="sm" onClick={() => void refreshCases()} disabled={isLoadingCases || !doctorOptions.length}>
               {isLoadingCases ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
               รีเฟรช
             </Button>
@@ -375,9 +417,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
                     </Badge>
                   </div>
                   <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{item.requestMessage}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    ส่งเมื่อ {formatDateTime(item.requestedAt)}
-                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">ส่งเมื่อ {formatDateTime(item.requestedAt)}</p>
                 </button>
               ))}
             </div>
@@ -395,17 +435,13 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
                   สถานะ: {statusLabel[selectedCase.status]} | อัปเดตล่าสุด {formatDateTime(selectedCase.updatedAt)}
                 </p>
               </div>
-              <Badge variant={selectedCase.status === "active" ? "default" : "outline"}>
-                {statusLabel[selectedCase.status]}
-              </Badge>
+              <Badge variant={selectedCase.status === "active" ? "default" : "outline"}>{statusLabel[selectedCase.status]}</Badge>
             </div>
 
             {selectedCase.status === "pending" ? (
               <Alert>
                 <AlertTitle>รอคุณหมอตอบรับเคส</AlertTitle>
-                <AlertDescription>
-                  ตอนนี้ยังอยู่ในคิวของคุณหมอ เมื่อคุณหมอตอบรับแล้วจะส่งข้อความได้ทันทีแบบเรียลไทม์
-                </AlertDescription>
+                <AlertDescription>เมื่อคุณหมอตอบรับแล้วจะส่งข้อความได้ทันทีแบบเรียลไทม์</AlertDescription>
               </Alert>
             ) : null}
 
@@ -413,9 +449,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
               <div className="rounded-lg bg-white p-3 text-sm shadow-sm">
                 <p className="font-medium">คำร้องเริ่มต้น</p>
                 <p className="mt-1 whitespace-pre-wrap">{selectedCase.requestMessage}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  ส่งเมื่อ {formatDateTime(selectedCase.requestedAt)}
-                </p>
+                <p className="mt-1 text-xs text-muted-foreground">ส่งเมื่อ {formatDateTime(selectedCase.requestedAt)}</p>
               </div>
 
               {isLoadingMessages ? (
@@ -427,18 +461,12 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
                     <div
                       key={message.id}
                       className={`max-w-[90%] rounded-lg px-3 py-2 text-sm shadow-sm ${
-                        isMine
-                          ? "ml-auto bg-cyan-600 text-white"
-                          : "mr-auto bg-white text-slate-900"
+                        isMine ? "ml-auto bg-cyan-600 text-white" : "mr-auto bg-white text-slate-900"
                       }`}
                     >
-                      <p className={`text-xs ${isMine ? "text-cyan-100" : "text-muted-foreground"}`}>
-                        {message.senderName}
-                      </p>
+                      <p className={`text-xs ${isMine ? "text-cyan-100" : "text-muted-foreground"}`}>{message.senderName}</p>
                       <p className="mt-1 whitespace-pre-wrap">{message.message}</p>
-                      <p className={`mt-1 text-[11px] ${isMine ? "text-cyan-100" : "text-muted-foreground"}`}>
-                        {formatDateTime(message.createdAt)}
-                      </p>
+                      <p className={`mt-1 text-[11px] ${isMine ? "text-cyan-100" : "text-muted-foreground"}`}>{formatDateTime(message.createdAt)}</p>
                     </div>
                   );
                 })
@@ -449,11 +477,7 @@ export const PatientSupportDesk = ({ patientId, doctorOptions }: PatientSupportD
               <Input
                 value={chatInput}
                 onChange={(event) => setChatInput(event.target.value)}
-                placeholder={
-                  selectedCase.status === "active"
-                    ? "พิมพ์ข้อความถึงคุณหมอ"
-                    : "ส่งข้อความได้เมื่อคุณหมอตอบรับเคสแล้ว"
-                }
+                placeholder={selectedCase.status === "active" ? "พิมพ์ข้อความถึงคุณหมอ" : "รอคุณหมอตอบรับเคสก่อน"}
                 disabled={selectedCase.status !== "active" || isSendingMessage}
               />
               <Button

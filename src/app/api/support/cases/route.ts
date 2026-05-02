@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import {
+  isSupportCaseSchemaCacheError,
+  SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
+} from "@/lib/support-case-errors";
 import { fetchSupportCaseList } from "@/lib/support-case-service";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -30,6 +34,16 @@ export async function GET() {
       cases,
     });
   } catch (error) {
+    if (isSupportCaseSchemaCacheError(error instanceof Error ? { message: error.message } : null)) {
+      return NextResponse.json(
+        {
+          error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
+          code: "SUPPORT_SCHEMA_CACHE_NOT_READY",
+          schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to load cases" },
       { status: 400 },
@@ -98,6 +112,16 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (existingError) {
+    if (isSupportCaseSchemaCacheError(existingError)) {
+      return NextResponse.json(
+        {
+          error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
+          code: "SUPPORT_SCHEMA_CACHE_NOT_READY",
+          schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ error: existingError.message }, { status: 400 });
   }
 
@@ -124,6 +148,16 @@ export async function POST(request: Request) {
     .single();
 
   if (insertError || !insertedCase) {
+    if (isSupportCaseSchemaCacheError(insertError)) {
+      return NextResponse.json(
+        {
+          error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
+          code: "SUPPORT_SCHEMA_CACHE_NOT_READY",
+          schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json(
       { error: insertError?.message ?? "Unable to create support case" },
       { status: 400 },

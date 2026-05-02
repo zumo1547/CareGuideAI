@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import {
+  isSupportCaseSchemaCacheError,
+  SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
+} from "@/lib/support-case-errors";
 import { fetchSupportCaseById, isSupportCaseStatus } from "@/lib/support-case-service";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -24,10 +28,28 @@ export async function POST(
   }
 
   const supabase = await createSupabaseServerClient();
-  const supportCase = await fetchSupportCaseById({
-    supabase,
-    caseId: params.data.caseId,
-  });
+  let supportCase: Awaited<ReturnType<typeof fetchSupportCaseById>>;
+  try {
+    supportCase = await fetchSupportCaseById({
+      supabase,
+      caseId: params.data.caseId,
+    });
+  } catch (error) {
+    if (isSupportCaseSchemaCacheError(error instanceof Error ? { message: error.message } : null)) {
+      return NextResponse.json(
+        {
+          error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
+          code: "SUPPORT_SCHEMA_CACHE_NOT_READY",
+          schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
+        },
+        { status: 503 },
+      );
+    }
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unable to load case" },
+      { status: 400 },
+    );
+  }
 
   if (!supportCase) {
     return NextResponse.json({ error: "Case not found" }, { status: 404 });
@@ -67,6 +89,16 @@ export async function POST(
     .neq("status", "closed");
 
   if (updateError) {
+    if (isSupportCaseSchemaCacheError(updateError)) {
+      return NextResponse.json(
+        {
+          error: SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
+          code: "SUPPORT_SCHEMA_CACHE_NOT_READY",
+          schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ error: updateError.message }, { status: 400 });
   }
 

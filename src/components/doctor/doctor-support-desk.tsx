@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { CheckCircle2, Loader2, MessageCircle, RefreshCcw, Send, UserRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -17,6 +17,12 @@ import type {
 
 interface DoctorSupportDeskProps {
   doctorId: string;
+}
+
+interface SupportApiErrorPayload {
+  error?: string;
+  code?: string;
+  schemaReloadSql?: string;
 }
 
 const statusLabel: Record<SupportCaseStatus, string> = {
@@ -47,6 +53,9 @@ const chooseDefaultCaseId = (
   return cases[0]?.id ?? null;
 };
 
+const getErrorMessage = (payload: SupportApiErrorPayload | null, fallback: string) =>
+  payload?.error ?? fallback;
+
 export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
   const supabaseRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
   if (supabaseRef.current == null) {
@@ -64,24 +73,22 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
   const [isClosingCaseId, setClosingCaseId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [schemaReloadSql, setSchemaReloadSql] = useState<string | null>(null);
 
   const selectedCase = useMemo(
     () => cases.find((item) => item.id === selectedCaseId) ?? null,
     [cases, selectedCaseId],
   );
 
-  const pendingCases = useMemo(
-    () => cases.filter((item) => item.status === "pending"),
-    [cases],
-  );
-  const activeCases = useMemo(
-    () => cases.filter((item) => item.status === "active"),
-    [cases],
-  );
-  const closedCases = useMemo(
-    () => cases.filter((item) => item.status === "closed"),
-    [cases],
-  );
+  const pendingCases = useMemo(() => cases.filter((item) => item.status === "pending"), [cases]);
+  const activeCases = useMemo(() => cases.filter((item) => item.status === "active"), [cases]);
+  const closedCases = useMemo(() => cases.filter((item) => item.status === "closed"), [cases]);
+
+  const handleSchemaCacheError = useCallback((payload: SupportApiErrorPayload | null) => {
+    if (payload?.code === "SUPPORT_SCHEMA_CACHE_NOT_READY") {
+      setSchemaReloadSql(payload.schemaReloadSql ?? "NOTIFY pgrst, 'reload schema';");
+    }
+  }, []);
 
   const refreshCases = useCallback(
     async (silent = false) => {
@@ -89,15 +96,16 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
         setLoadingCases(true);
       }
       try {
+        setSchemaReloadSql(null);
         const response = await fetch("/api/support/cases", {
           cache: "no-store",
         });
-        const payload = (await response.json()) as {
-          error?: string;
+        const payload = (await response.json()) as SupportApiErrorPayload & {
           cases?: SupportCaseSummary[];
         };
         if (!response.ok) {
-          throw new Error(payload.error ?? "โหลดเคสไม่สำเร็จ");
+          handleSchemaCacheError(payload);
+          throw new Error(getErrorMessage(payload, "โหลดเคสไม่สำเร็จ"));
         }
 
         const nextCases = payload.cases ?? [];
@@ -109,41 +117,47 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
         setLoadingCases(false);
       }
     },
-    [],
+    [handleSchemaCacheError],
   );
 
-  const refreshMessages = useCallback(async (caseId: string) => {
-    setLoadingMessages(true);
-    try {
-      const response = await fetch(`/api/support/cases/${caseId}/messages`, {
-        cache: "no-store",
-      });
-      const payload = (await response.json()) as {
-        error?: string;
-        messages?: SupportCaseMessage[];
-      };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "โหลดข้อความไม่สำเร็จ");
+  const refreshMessages = useCallback(
+    async (caseId: string) => {
+      setLoadingMessages(true);
+      try {
+        setSchemaReloadSql(null);
+        const response = await fetch(`/api/support/cases/${caseId}/messages`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as SupportApiErrorPayload & {
+          messages?: SupportCaseMessage[];
+        };
+        if (!response.ok) {
+          handleSchemaCacheError(payload);
+          throw new Error(getErrorMessage(payload, "โหลดข้อความไม่สำเร็จ"));
+        }
+        setMessages(payload.messages ?? []);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : "โหลดข้อความไม่สำเร็จ");
+      } finally {
+        setLoadingMessages(false);
       }
-      setMessages(payload.messages ?? []);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "โหลดข้อความไม่สำเร็จ");
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, []);
+    },
+    [handleSchemaCacheError],
+  );
 
   const acceptCase = async (caseId: string) => {
     setAcceptingCaseId(caseId);
     setError(null);
     setSuccess(null);
+    setSchemaReloadSql(null);
     try {
       const response = await fetch(`/api/support/cases/${caseId}/accept`, {
         method: "POST",
       });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as SupportApiErrorPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "รับเคสไม่สำเร็จ");
+        handleSchemaCacheError(payload);
+        throw new Error(getErrorMessage(payload, "รับเคสไม่สำเร็จ"));
       }
       setSuccess("รับเคสสำเร็จ สามารถเริ่มแชทกับผู้ป่วยได้ทันที");
       setSelectedCaseId(caseId);
@@ -159,13 +173,15 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
     setClosingCaseId(caseId);
     setError(null);
     setSuccess(null);
+    setSchemaReloadSql(null);
     try {
       const response = await fetch(`/api/support/cases/${caseId}/close`, {
         method: "POST",
       });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as SupportApiErrorPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "ปิดเคสไม่สำเร็จ");
+        handleSchemaCacheError(payload);
+        throw new Error(getErrorMessage(payload, "ปิดเคสไม่สำเร็จ"));
       }
       setSuccess("ปิดเคสเรียบร้อยแล้ว สามารถรับเคสถัดไปได้ทันที");
       await refreshCases(true);
@@ -181,15 +197,17 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
     setSendingMessage(true);
     setError(null);
     setSuccess(null);
+    setSchemaReloadSql(null);
     try {
       const response = await fetch(`/api/support/cases/${selectedCase.id}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: chatInput.trim() }),
       });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as SupportApiErrorPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "ส่งข้อความไม่สำเร็จ");
+        handleSchemaCacheError(payload);
+        throw new Error(getErrorMessage(payload, "ส่งข้อความไม่สำเร็จ"));
       }
       setChatInput("");
       await refreshMessages(selectedCase.id);
@@ -302,7 +320,14 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
         {error ? (
           <Alert variant="destructive">
             <AlertTitle>เกิดข้อผิดพลาด</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>
+              <p>{error}</p>
+              {schemaReloadSql ? (
+                <p className="mt-2 text-xs">
+                  SQL ที่ต้องรันใน Supabase SQL Editor: <code>{schemaReloadSql}</code>
+                </p>
+              ) : null}
+            </AlertDescription>
           </Alert>
         ) : null}
         {success ? (
@@ -349,20 +374,12 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
                   className={`rounded-lg border p-3 ${isSelected ? "border-cyan-500 bg-cyan-50" : ""}`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCaseId(item.id)}
-                      className="text-left"
-                    >
+                    <button type="button" onClick={() => setSelectedCaseId(item.id)} className="text-left">
                       <p className="font-semibold">{item.patient?.fullName ?? item.patientId}</p>
-                      <p className="text-xs text-muted-foreground">
-                        ส่งคำร้อง {formatDateTime(item.requestedAt)}
-                      </p>
+                      <p className="text-xs text-muted-foreground">ส่งคำร้อง {formatDateTime(item.requestedAt)}</p>
                     </button>
                     <div className="flex items-center gap-2">
-                      <Badge variant={item.status === "active" ? "default" : "secondary"}>
-                        {statusLabel[item.status]}
-                      </Badge>
+                      <Badge variant={item.status === "active" ? "default" : "secondary"}>{statusLabel[item.status]}</Badge>
                       {item.status === "pending" ? (
                         <Button
                           type="button"
@@ -370,11 +387,7 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
                           onClick={() => void acceptCase(item.id)}
                           disabled={isAcceptingCaseId === item.id}
                         >
-                          {isAcceptingCaseId === item.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <CheckCircle2 className="h-4 w-4" />
-                          )}
+                          {isAcceptingCaseId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                           รับเคส
                         </Button>
                       ) : null}
@@ -393,41 +406,23 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
               <div className="flex items-start gap-2">
                 <UserRound className="mt-0.5 h-4 w-4 text-cyan-700" />
                 <div>
-                  <p className="text-sm font-semibold">ข้อมูลผู้ป่วยก่อนตอบรับ</p>
-                  <p className="text-xs text-muted-foreground">
-                    สถานะเคส: {statusLabel[selectedCase.status]}
-                  </p>
+                  <p className="text-sm font-semibold">ข้อมูลผู้ป่วยก่อนรับเคส</p>
+                  <p className="text-xs text-muted-foreground">สถานะเคส: {statusLabel[selectedCase.status]}</p>
                 </div>
               </div>
               <div className="space-y-1 text-sm">
-                <p>
-                  ชื่อ: <span className="font-medium">{selectedCase.patient?.fullName ?? "-"}</span>
-                </p>
-                <p>
-                  โทรศัพท์: <span className="font-medium">{selectedCase.patient?.phone ?? "-"}</span>
-                </p>
-                <p>
-                  ประเภทความพิการ: <span className="font-medium">{selectedCase.patient?.disabilityType ?? "-"}</span>
-                </p>
-                <p>
-                  ระดับความรุนแรง: <span className="font-medium">{selectedCase.patient?.disabilitySeverity ?? "-"}</span>
-                </p>
-                <p>
-                  โรคประจำตัว: <span className="font-medium">{selectedCase.patient?.chronicConditions ?? "-"}</span>
-                </p>
-                <p>
-                  แพ้ยา: <span className="font-medium">{selectedCase.patient?.drugAllergies ?? "-"}</span>
-                </p>
-                <p>
-                  BMI: <span className="font-medium">{selectedCase.patient?.bmi ?? "-"}</span>
-                </p>
+                <p>ชื่อ: <span className="font-medium">{selectedCase.patient?.fullName ?? "-"}</span></p>
+                <p>โทรศัพท์: <span className="font-medium">{selectedCase.patient?.phone ?? "-"}</span></p>
+                <p>ประเภทความพิการ: <span className="font-medium">{selectedCase.patient?.disabilityType ?? "-"}</span></p>
+                <p>ระดับความรุนแรง: <span className="font-medium">{selectedCase.patient?.disabilitySeverity ?? "-"}</span></p>
+                <p>โรคประจำตัว: <span className="font-medium">{selectedCase.patient?.chronicConditions ?? "-"}</span></p>
+                <p>แพ้ยา: <span className="font-medium">{selectedCase.patient?.drugAllergies ?? "-"}</span></p>
+                <p>BMI: <span className="font-medium">{selectedCase.patient?.bmi ?? "-"}</span></p>
               </div>
               <div className="rounded-lg bg-white p-3 text-sm">
                 <p className="font-semibold">ข้อความร้องขอเริ่มต้น</p>
                 <p className="mt-1 whitespace-pre-wrap">{selectedCase.requestMessage}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  ส่งเมื่อ {formatDateTime(selectedCase.requestedAt)}
-                </p>
+                <p className="mt-1 text-xs text-muted-foreground">ส่งเมื่อ {formatDateTime(selectedCase.requestedAt)}</p>
               </div>
               {selectedCase.status === "active" ? (
                 <Button
@@ -437,9 +432,7 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
                   disabled={isClosingCaseId === selectedCase.id}
                   className="w-full"
                 >
-                  {isClosingCaseId === selectedCase.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : null}
+                  {isClosingCaseId === selectedCase.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   ปิดเคสนี้
                 </Button>
               ) : null}
@@ -462,13 +455,9 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
                           isMine ? "ml-auto bg-cyan-600 text-white" : "mr-auto bg-white text-slate-900"
                         }`}
                       >
-                        <p className={`text-xs ${isMine ? "text-cyan-100" : "text-muted-foreground"}`}>
-                          {message.senderName}
-                        </p>
+                        <p className={`text-xs ${isMine ? "text-cyan-100" : "text-muted-foreground"}`}>{message.senderName}</p>
                         <p className="mt-1 whitespace-pre-wrap">{message.message}</p>
-                        <p className={`mt-1 text-[11px] ${isMine ? "text-cyan-100" : "text-muted-foreground"}`}>
-                          {formatDateTime(message.createdAt)}
-                        </p>
+                        <p className={`mt-1 text-[11px] ${isMine ? "text-cyan-100" : "text-muted-foreground"}`}>{formatDateTime(message.createdAt)}</p>
                       </div>
                     );
                   })
@@ -479,11 +468,7 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
                   value={chatInput}
                   onChange={(event) => setChatInput(event.target.value)}
                   disabled={selectedCase.status !== "active" || isSendingMessage}
-                  placeholder={
-                    selectedCase.status === "active"
-                      ? "พิมพ์ข้อความตอบผู้ป่วย"
-                      : "ต้องรับเคสให้เป็นสถานะกำลังดูแลก่อน"
-                  }
+                  placeholder={selectedCase.status === "active" ? "พิมพ์ข้อความตอบผู้ป่วย" : "ต้องรับเคสก่อน"}
                 />
                 <Button
                   type="button"
