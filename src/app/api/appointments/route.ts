@@ -43,6 +43,18 @@ type AppointmentRow = {
   updated_at: string;
 };
 
+type AppointmentLegacyRow = {
+  id: string;
+  patient_id: string;
+  doctor_id: string;
+  requested_by: string;
+  request_note: string | null;
+  scheduled_at: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
 type AppointmentActionRow = {
   id: string;
   patient_id: string;
@@ -52,6 +64,15 @@ type AppointmentActionRow = {
   doctor_confirmation_link: string | null;
   doctor_confirmation_token: string | null;
   patient_preferred_at: string | null;
+};
+
+type AppointmentActionLegacyRow = {
+  id: string;
+  patient_id: string;
+  doctor_id: string;
+  status: string;
+  request_note: string | null;
+  scheduled_at: string | null;
 };
 
 const APPOINTMENT_SELECT_COLUMNS = `
@@ -70,6 +91,18 @@ const APPOINTMENT_SELECT_COLUMNS = `
   patient_response,
   patient_response_note,
   patient_responded_at,
+  created_at,
+  updated_at
+`;
+
+const LEGACY_APPOINTMENT_SELECT_COLUMNS = `
+  id,
+  patient_id,
+  doctor_id,
+  requested_by,
+  request_note,
+  scheduled_at,
+  status,
   created_at,
   updated_at
 `;
@@ -168,6 +201,25 @@ const normalizePatientResponse = (
   return "pending";
 };
 
+const hasLegacyDoctorLink = (requestNote: string | null | undefined) =>
+  (requestNote ?? "").includes("[Doctor link]");
+
+const appendLegacyNote = (
+  current: string | null | undefined,
+  lines: Array<string | null | undefined>,
+) => {
+  const sanitized = lines
+    .map((line) => normalizeText(line))
+    .filter((line): line is string => Boolean(line));
+  if (!sanitized.length) {
+    return normalizeText(current);
+  }
+  const merged = [normalizeText(current), ...sanitized]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+  return normalizeText(merged);
+};
+
 const getSupabaseProjectRefFromEnv = () => {
   const url = env.NEXT_PUBLIC_SUPABASE_URL;
   if (!url) return null;
@@ -248,7 +300,27 @@ const selectAppointmentForAction = async (
       .eq("id", appointmentId)
       .maybeSingle(),
   );
-  return { data, error, supabase };
+
+  if (error && isAppointmentSchemaMismatchError(error)) {
+    const legacy = await supabase
+      .from("appointments")
+      .select("id, patient_id, doctor_id, status, request_note, scheduled_at")
+      .eq("id", appointmentId)
+      .maybeSingle();
+    return {
+      data: legacy.data as AppointmentActionLegacyRow | null,
+      error: legacy.error as PostgrestLikeError | null,
+      supabase,
+      legacyMode: true as const,
+    };
+  }
+
+  return {
+    data: data as AppointmentActionRow | null,
+    error,
+    supabase,
+    legacyMode: false as const,
+  };
 };
 
 export async function GET() {
@@ -273,16 +345,36 @@ export async function GET() {
   }
 
   const { data: rows, error } = await withAppointmentSchemaRecovery<AppointmentRow[]>(() => query);
+
+  let normalizedRows: Array<AppointmentRow | AppointmentLegacyRow> = rows ?? [];
   if (error) {
     if (isAppointmentSchemaMismatchError(error)) {
-      return appointmentSchemaNotReadyResponse(error);
+      const legacyQuery = supabase
+        .from("appointments")
+        .select(LEGACY_APPOINTMENT_SELECT_COLUMNS)
+        .order("created_at", { ascending: false })
+        .limit(120);
+
+      const legacyScopedQuery =
+        auth.role === "patient"
+          ? legacyQuery.eq("patient_id", auth.userId)
+          : auth.role === "doctor"
+            ? legacyQuery.eq("doctor_id", auth.userId)
+            : legacyQuery;
+
+      const { data: legacyRows, error: legacyError } = await legacyScopedQuery;
+      if (legacyError) {
+        return appointmentSchemaNotReadyResponse(error);
+      }
+      normalizedRows = (legacyRows ?? []) as AppointmentLegacyRow[];
+    } else {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
   const profileIds = [
     ...new Set(
-      (rows ?? [])
+      normalizedRows
         .flatMap((row) => [row.patient_id, row.doctor_id])
         .filter((value): value is string => typeof value === "string" && value.length > 0),
     ),
@@ -300,39 +392,49 @@ export async function GET() {
     profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
   }
 
-  const appointments: AppointmentView[] = (rows ?? []).map((row) => ({
-    id: row.id,
-    patientId: row.patient_id,
-    doctorId: row.doctor_id,
-    requestedBy: row.requested_by,
-    requestNote: row.request_note,
-    patientPreferredAt: row.patient_preferred_at,
-    scheduledAt: row.scheduled_at,
-    status: normalizeStatus(row.status),
-    doctorConfirmationLink: row.doctor_confirmation_link,
-    doctorConfirmationToken: row.doctor_confirmation_token,
-    doctorProposedNote: row.doctor_proposed_note,
-    doctorProposedAt: row.doctor_proposed_at,
-    patientResponse: normalizePatientResponse(row.patient_response),
-    patientResponseNote: row.patient_response_note,
-    patientRespondedAt: row.patient_responded_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    patient: profileMap.has(row.patient_id)
-      ? {
-          id: row.patient_id,
-          fullName: profileMap.get(row.patient_id)?.full_name ?? null,
-          phone: profileMap.get(row.patient_id)?.phone ?? null,
-        }
-      : null,
-    doctor: profileMap.has(row.doctor_id)
-      ? {
-          id: row.doctor_id,
-          fullName: profileMap.get(row.doctor_id)?.full_name ?? null,
-          phone: profileMap.get(row.doctor_id)?.phone ?? null,
-        }
-      : null,
-  }));
+  const appointments: AppointmentView[] = normalizedRows.map((row) => {
+    const isLegacy = !("patient_preferred_at" in row);
+    const status = normalizeStatus(row.status);
+    const patientResponse = isLegacy
+      ? status === "confirmed" || status === "completed"
+        ? "accepted"
+        : "pending"
+      : normalizePatientResponse(row.patient_response);
+
+    return {
+      id: row.id,
+      patientId: row.patient_id,
+      doctorId: row.doctor_id,
+      requestedBy: row.requested_by,
+      requestNote: row.request_note,
+      patientPreferredAt: isLegacy ? row.scheduled_at : row.patient_preferred_at,
+      scheduledAt: row.scheduled_at,
+      status,
+      doctorConfirmationLink: isLegacy ? null : row.doctor_confirmation_link,
+      doctorConfirmationToken: isLegacy ? null : row.doctor_confirmation_token,
+      doctorProposedNote: isLegacy ? null : row.doctor_proposed_note,
+      doctorProposedAt: isLegacy ? null : row.doctor_proposed_at,
+      patientResponse,
+      patientResponseNote: isLegacy ? null : row.patient_response_note,
+      patientRespondedAt: isLegacy ? null : row.patient_responded_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      patient: profileMap.has(row.patient_id)
+        ? {
+            id: row.patient_id,
+            fullName: profileMap.get(row.patient_id)?.full_name ?? null,
+            phone: profileMap.get(row.patient_id)?.phone ?? null,
+          }
+        : null,
+      doctor: profileMap.has(row.doctor_id)
+        ? {
+            id: row.doctor_id,
+            fullName: profileMap.get(row.doctor_id)?.full_name ?? null,
+            phone: profileMap.get(row.doctor_id)?.phone ?? null,
+          }
+        : null,
+    };
+  });
 
   return NextResponse.json({ appointments });
 }
@@ -403,6 +505,25 @@ export async function POST(request: Request) {
 
   if (error || !data) {
     if (isAppointmentSchemaMismatchError(error)) {
+      const legacyInsert = await supabase
+        .from("appointments")
+        .insert({
+          patient_id: patientId,
+          doctor_id: payload.doctorId,
+          requested_by: auth.userId,
+          request_note: normalizeText(payload.requestNote),
+          scheduled_at: preferredAt,
+          status: "pending",
+        })
+        .select("id")
+        .single();
+
+      if (!legacyInsert.error && legacyInsert.data) {
+        return NextResponse.json({
+          success: true,
+          appointmentId: legacyInsert.data.id,
+        });
+      }
       return appointmentSchemaNotReadyResponse(error);
     }
     return NextResponse.json({ error: error?.message ?? "ไม่สามารถสร้างคำขอนัดหมายได้" }, { status: 400 });
@@ -428,7 +549,7 @@ export async function PATCH(request: Request) {
   await tryEnsureAppointmentSchema();
 
   const payload = parsed.data;
-  const { data: appointment, error: appointmentError, supabase } =
+  const { data: appointment, error: appointmentError, supabase, legacyMode } =
     await selectAppointmentForAction(payload.appointmentId);
 
   if (appointmentError) {
@@ -451,11 +572,147 @@ export async function PATCH(request: Request) {
 
   const now = new Date().toISOString();
 
+  if (legacyMode) {
+    const legacyAppointment = appointment as AppointmentActionLegacyRow;
+
+    if (payload.action === "doctor_propose") {
+      if (auth.role === "patient") {
+        return forbidden("Patient cannot send confirmation link");
+      }
+      if (legacyAppointment.status === "completed") {
+        return badRequest("Appointment already completed");
+      }
+
+      const scheduledAt = parseDateInput(payload.scheduledAt);
+      if (!scheduledAt) {
+        return badRequest("scheduledAt is invalid");
+      }
+
+      const legacyNote = appendLegacyNote(legacyAppointment.request_note, [
+        `[Doctor link] ${payload.confirmationLink}`,
+        payload.note ? `[Doctor note] ${payload.note}` : null,
+      ]);
+
+      const { error: updateError } = await supabase
+        .from("appointments")
+        .update({
+          scheduled_at: scheduledAt,
+          status: "pending",
+          request_note: legacyNote,
+          updated_at: now,
+        })
+        .eq("id", legacyAppointment.id);
+
+      if (updateError) {
+        return NextResponse.json({ error: updateError.message }, { status: 400 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        status: "pending",
+      });
+    }
+
+    if (payload.action === "doctor_complete") {
+      if (auth.role === "patient") {
+        return forbidden("Patient cannot close appointment");
+      }
+
+      const { error: updateError } = await supabase
+        .from("appointments")
+        .update({
+          status: "completed",
+          updated_at: now,
+        })
+        .eq("id", legacyAppointment.id);
+
+      if (updateError) {
+        return NextResponse.json({ error: updateError.message }, { status: 400 });
+      }
+
+      return NextResponse.json({ success: true, status: "completed" });
+    }
+
+    if (auth.role === "doctor") {
+      return forbidden("Doctor cannot respond to patient confirmation link");
+    }
+
+    if (!hasLegacyDoctorLink(legacyAppointment.request_note)) {
+      return badRequest("Doctor has not sent a confirmation link yet");
+    }
+
+    if (payload.action === "patient_accept") {
+      const { error: updateError } = await supabase
+        .from("appointments")
+        .update({
+          status: "confirmed",
+          request_note: appendLegacyNote(legacyAppointment.request_note, [
+            "[Patient accepted]",
+            payload.note ? `[Patient note] ${payload.note}` : null,
+          ]),
+          updated_at: now,
+        })
+        .eq("id", legacyAppointment.id);
+
+      if (updateError) {
+        return NextResponse.json({ error: updateError.message }, { status: 400 });
+      }
+
+      return NextResponse.json({ success: true, status: "confirmed" });
+    }
+
+    if (payload.action === "patient_decline") {
+      const { error: updateError } = await supabase
+        .from("appointments")
+        .update({
+          status: "pending",
+          request_note: appendLegacyNote(legacyAppointment.request_note, [
+            "[Patient declined]",
+            payload.note ? `[Patient note] ${payload.note}` : null,
+          ]),
+          updated_at: now,
+        })
+        .eq("id", legacyAppointment.id);
+
+      if (updateError) {
+        return NextResponse.json({ error: updateError.message }, { status: 400 });
+      }
+
+      return NextResponse.json({ success: true, status: "pending" });
+    }
+
+    const preferredAt = parseDateInput(payload.preferredAt);
+    if (payload.preferredAt && !preferredAt) {
+      return badRequest("preferredAt is invalid");
+    }
+
+    const { error: updateError } = await supabase
+      .from("appointments")
+      .update({
+        status: "pending",
+        scheduled_at: preferredAt ?? legacyAppointment.scheduled_at,
+        request_note: appendLegacyNote(legacyAppointment.request_note, [
+          "[Patient requested reschedule]",
+          payload.note ? `[Patient note] ${payload.note}` : null,
+        ]),
+        updated_at: now,
+      })
+      .eq("id", legacyAppointment.id);
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 400 });
+    }
+
+    return NextResponse.json({ success: true, status: "pending" });
+  }
+
+  const richAppointment = appointment as AppointmentActionRow;
+
   if (payload.action === "doctor_propose") {
     if (auth.role === "patient") {
       return forbidden("Patient cannot send confirmation link");
     }
-    if (appointment.status === "completed") {
+    if (richAppointment.status === "completed") {
       return badRequest("Appointment already completed");
     }
 
@@ -480,7 +737,7 @@ export async function PATCH(request: Request) {
     let updateQuery = supabase
       .from("appointments")
       .update(updates)
-      .eq("id", appointment.id);
+      .eq("id", richAppointment.id);
 
     if (auth.role === "doctor") {
       updateQuery = updateQuery.eq("doctor_id", auth.userId);
@@ -514,11 +771,11 @@ export async function PATCH(request: Request) {
       return forbidden("Patient cannot close appointment");
     }
 
-    if (appointment.status === "completed") {
+    if (richAppointment.status === "completed") {
       return NextResponse.json({ success: true, status: "completed" });
     }
 
-    if (appointment.status !== "confirmed") {
+    if (richAppointment.status !== "confirmed") {
       return badRequest("Appointment must be confirmed before completing");
     }
 
@@ -529,7 +786,7 @@ export async function PATCH(request: Request) {
           status: "completed",
           updated_at: now,
         })
-        .eq("id", appointment.id),
+        .eq("id", richAppointment.id),
     );
 
     if (error) {
@@ -546,11 +803,11 @@ export async function PATCH(request: Request) {
     return forbidden("Doctor cannot respond to patient confirmation link");
   }
 
-  if (!appointment.doctor_confirmation_link || !appointment.doctor_confirmation_token) {
+  if (!richAppointment.doctor_confirmation_link || !richAppointment.doctor_confirmation_token) {
     return badRequest("Doctor has not sent a confirmation link yet");
   }
 
-  if (payload.token !== appointment.doctor_confirmation_token) {
+  if (payload.token !== richAppointment.doctor_confirmation_token) {
     return forbidden("Confirmation link token is invalid");
   }
 
@@ -565,7 +822,7 @@ export async function PATCH(request: Request) {
           patient_responded_at: now,
           updated_at: now,
         })
-        .eq("id", appointment.id),
+        .eq("id", richAppointment.id),
     );
 
     if (error) {
@@ -589,7 +846,7 @@ export async function PATCH(request: Request) {
           patient_responded_at: now,
           updated_at: now,
         })
-        .eq("id", appointment.id),
+        .eq("id", richAppointment.id),
     );
 
     if (error) {
@@ -614,11 +871,11 @@ export async function PATCH(request: Request) {
         status: "pending",
         patient_response: "reschedule_requested",
         patient_response_note: normalizeText(payload.note),
-        patient_preferred_at: preferredAt ?? appointment.patient_preferred_at,
+        patient_preferred_at: preferredAt ?? richAppointment.patient_preferred_at,
         patient_responded_at: now,
         updated_at: now,
       })
-      .eq("id", appointment.id),
+      .eq("id", richAppointment.id),
   );
 
   if (error) {
