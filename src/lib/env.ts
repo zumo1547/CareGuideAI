@@ -18,6 +18,9 @@ export const env = {
   TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID ?? "",
   TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN ?? "",
   TWILIO_FROM_PHONE: process.env.TWILIO_FROM_PHONE ?? "",
+  POSTGRES_URL_NON_POOLING: process.env.POSTGRES_URL_NON_POOLING ?? "",
+  POSTGRES_URL: process.env.POSTGRES_URL ?? "",
+  POSTGRES_PRISMA_URL: process.env.POSTGRES_PRISMA_URL ?? "",
 };
 
 export const hasSupabasePublicConfig = Boolean(

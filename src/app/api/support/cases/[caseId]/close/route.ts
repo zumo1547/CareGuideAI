@@ -8,6 +8,7 @@ import {
   SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
 } from "@/lib/support-case-errors";
 import { fetchSupportCaseById, isSupportCaseStatus } from "@/lib/support-case-service";
+import { withSupportCaseSchemaRetry } from "@/lib/support-case-retry";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const caseIdSchema = z.object({
@@ -39,10 +40,12 @@ export async function POST(
   const supabase = createSupabaseAdminClient();
   let supportCase: Awaited<ReturnType<typeof fetchSupportCaseById>>;
   try {
-    supportCase = await fetchSupportCaseById({
-      supabase,
-      caseId: params.data.caseId,
-    });
+    supportCase = await withSupportCaseSchemaRetry(() =>
+      fetchSupportCaseById({
+        supabase,
+        caseId: params.data.caseId,
+      }),
+    );
   } catch (error) {
     if (isSupportCaseSchemaCacheError(error instanceof Error ? { message: error.message } : null)) {
       return NextResponse.json(
@@ -82,16 +85,30 @@ export async function POST(
   }
 
   const closedAt = new Date().toISOString();
-  const { error: updateError } = await supabase
-    .from("support_cases")
-    .update({
-      status: "closed",
-      closed_at: closedAt,
-      closed_by: auth.userId,
-      updated_at: closedAt,
-    })
-    .eq("id", supportCase.id)
-    .neq("status", "closed");
+  let updateError:
+    | {
+        message: string;
+        code?: string | null;
+      }
+    | null = null;
+  try {
+    const result = await withSupportCaseSchemaRetry(async () =>
+      await supabase
+        .from("support_cases")
+        .update({
+          status: "closed",
+          closed_at: closedAt,
+          closed_by: auth.userId,
+          updated_at: closedAt,
+        })
+        .eq("id", supportCase.id)
+        .neq("status", "closed"),
+    );
+    updateError = result.error;
+  } catch (error) {
+    updateError =
+      error instanceof Error ? { message: error.message } : { message: "Unable to close case" };
+  }
 
   if (updateError) {
     if (isSupportCaseSchemaCacheError(updateError)) {

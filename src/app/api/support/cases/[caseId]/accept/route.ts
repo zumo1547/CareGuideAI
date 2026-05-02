@@ -8,6 +8,7 @@ import {
   SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
 } from "@/lib/support-case-errors";
 import { fetchSupportCaseById, isSupportCaseStatus } from "@/lib/support-case-service";
+import { withSupportCaseSchemaRetry } from "@/lib/support-case-retry";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const caseIdSchema = z.object({
@@ -39,10 +40,12 @@ export async function POST(
   const supabase = createSupabaseAdminClient();
   let supportCase: Awaited<ReturnType<typeof fetchSupportCaseById>>;
   try {
-    supportCase = await fetchSupportCaseById({
-      supabase,
-      caseId: params.data.caseId,
-    });
+    supportCase = await withSupportCaseSchemaRetry(() =>
+      fetchSupportCaseById({
+        supabase,
+        caseId: params.data.caseId,
+      }),
+    );
   } catch (error) {
     if (isSupportCaseSchemaCacheError(error instanceof Error ? { message: error.message } : null)) {
       return NextResponse.json(
@@ -85,16 +88,31 @@ export async function POST(
   }
 
   const acceptedAt = new Date().toISOString();
-  const { error: updateError } = await supabase
-    .from("support_cases")
-    .update({
-      status: "active",
-      assigned_doctor_id: auth.userId,
-      accepted_at: acceptedAt,
-      updated_at: acceptedAt,
-    })
-    .eq("id", supportCase.id)
-    .eq("status", "pending");
+  let updateError:
+    | {
+        message: string;
+        code?: string | null;
+      }
+    | null = null;
+
+  try {
+    const result = await withSupportCaseSchemaRetry(async () =>
+      await supabase
+        .from("support_cases")
+        .update({
+          status: "active",
+          assigned_doctor_id: auth.userId,
+          accepted_at: acceptedAt,
+          updated_at: acceptedAt,
+        })
+        .eq("id", supportCase.id)
+        .eq("status", "pending"),
+    );
+    updateError = result.error;
+  } catch (error) {
+    updateError =
+      error instanceof Error ? { message: error.message } : { message: "Unable to update case" };
+  }
 
   if (updateError) {
     if (isSupportCaseSchemaCacheError(updateError)) {

@@ -8,6 +8,7 @@ import {
   SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
 } from "@/lib/support-case-errors";
 import { fetchSupportCaseList } from "@/lib/support-case-service";
+import { withSupportCaseSchemaRetry } from "@/lib/support-case-retry";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const createCaseSchema = z.object({
@@ -31,12 +32,14 @@ export async function GET() {
 
   const supabase = createSupabaseAdminClient();
   try {
-    const cases = await fetchSupportCaseList({
-      supabase,
-      userId: auth.userId,
-      role: auth.role,
-      limit: 100,
-    });
+    const cases = await withSupportCaseSchemaRetry(() =>
+      fetchSupportCaseList({
+        supabase,
+        userId: auth.userId,
+        role: auth.role,
+        limit: 100,
+      }),
+    );
 
     return NextResponse.json({
       success: true,
@@ -89,15 +92,40 @@ export async function POST(request: Request) {
     return badRequest("Requested doctor not found");
   }
 
-  const { data: existingCase, error: existingError } = await supabase
-    .from("support_cases")
-    .select("id, status")
-    .eq("patient_id", patientId)
-    .eq("requested_doctor_id", requestedDoctorId)
-    .in("status", ["pending", "active"])
-    .order("requested_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  let existingCase:
+    | {
+        id: string;
+        status: string;
+      }
+    | null
+    | undefined;
+  let existingError:
+    | {
+        message: string;
+        code?: string | null;
+      }
+    | null = null;
+
+  try {
+    const result = await withSupportCaseSchemaRetry(async () =>
+      await supabase
+        .from("support_cases")
+        .select("id, status")
+        .eq("patient_id", patientId)
+        .eq("requested_doctor_id", requestedDoctorId)
+        .in("status", ["pending", "active"])
+        .order("requested_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    );
+    existingCase = result.data;
+    existingError = result.error;
+  } catch (error) {
+    existingError =
+      error instanceof Error
+        ? { message: error.message }
+        : { message: "Unable to query support cases" };
+  }
 
   if (existingError) {
     if (isSupportCaseSchemaCacheError(existingError)) {
@@ -120,16 +148,40 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data: insertedCase, error: insertError } = await supabase
-    .from("support_cases")
-    .insert({
-      patient_id: patientId,
-      requested_doctor_id: requestedDoctorId,
-      request_message: requestMessage,
-      status: "pending",
-    })
-    .select("id")
-    .single();
+  let insertedCase:
+    | {
+        id: string;
+      }
+    | null
+    | undefined;
+  let insertError:
+    | {
+        message: string;
+        code?: string | null;
+      }
+    | null = null;
+
+  try {
+    const result = await withSupportCaseSchemaRetry(async () =>
+      await supabase
+        .from("support_cases")
+        .insert({
+          patient_id: patientId,
+          requested_doctor_id: requestedDoctorId,
+          request_message: requestMessage,
+          status: "pending",
+        })
+        .select("id")
+        .single(),
+    );
+    insertedCase = result.data;
+    insertError = result.error;
+  } catch (error) {
+    insertError =
+      error instanceof Error
+        ? { message: error.message }
+        : { message: "Unable to create support case" };
+  }
 
   if (insertError || !insertedCase) {
     if (isSupportCaseSchemaCacheError(insertError)) {

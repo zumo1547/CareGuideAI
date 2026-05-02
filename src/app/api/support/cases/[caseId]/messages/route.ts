@@ -12,6 +12,7 @@ import {
   fetchSupportCaseMessages,
   isSupportCaseStatus,
 } from "@/lib/support-case-service";
+import { withSupportCaseSchemaRetry } from "@/lib/support-case-retry";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const caseIdSchema = z.object({
@@ -63,10 +64,12 @@ export async function GET(
   const supabase = createSupabaseAdminClient();
   let supportCase: Awaited<ReturnType<typeof fetchSupportCaseById>>;
   try {
-    supportCase = await fetchSupportCaseById({
-      supabase,
-      caseId: params.data.caseId,
-    });
+    supportCase = await withSupportCaseSchemaRetry(() =>
+      fetchSupportCaseById({
+        supabase,
+        caseId: params.data.caseId,
+      }),
+    );
   } catch (error) {
     if (isSupportCaseSchemaCacheError(error instanceof Error ? { message: error.message } : null)) {
       return NextResponse.json(
@@ -95,10 +98,12 @@ export async function GET(
   }
 
   try {
-    const messages = await fetchSupportCaseMessages({
-      supabase,
-      caseId: supportCase.id,
-    });
+    const messages = await withSupportCaseSchemaRetry(() =>
+      fetchSupportCaseMessages({
+        supabase,
+        caseId: supportCase.id,
+      }),
+    );
 
     return NextResponse.json({
       success: true,
@@ -151,10 +156,12 @@ export async function POST(
   const supabase = createSupabaseAdminClient();
   let supportCase: Awaited<ReturnType<typeof fetchSupportCaseById>>;
   try {
-    supportCase = await fetchSupportCaseById({
-      supabase,
-      caseId: params.data.caseId,
-    });
+    supportCase = await withSupportCaseSchemaRetry(() =>
+      fetchSupportCaseById({
+        supabase,
+        caseId: params.data.caseId,
+      }),
+    );
   } catch (error) {
     if (isSupportCaseSchemaCacheError(error instanceof Error ? { message: error.message } : null)) {
       return NextResponse.json(
@@ -184,13 +191,29 @@ export async function POST(
     return badRequest("Case is not active yet");
   }
 
-  const { error: insertError } = await supabase
-    .from("support_case_messages")
-    .insert({
-      case_id: supportCase.id,
-      sender_id: auth.userId,
-      message: parsed.data.message,
-    });
+  let insertError:
+    | {
+        message: string;
+        code?: string | null;
+      }
+    | null = null;
+  try {
+    const result = await withSupportCaseSchemaRetry(async () =>
+      await supabase
+        .from("support_case_messages")
+        .insert({
+          case_id: supportCase.id,
+          sender_id: auth.userId,
+          message: parsed.data.message,
+        }),
+    );
+    insertError = result.error;
+  } catch (error) {
+    insertError =
+      error instanceof Error
+        ? { message: error.message }
+        : { message: "Unable to insert support message" };
+  }
 
   if (insertError) {
     if (isSupportCaseSchemaCacheError(insertError)) {

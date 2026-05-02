@@ -10,6 +10,9 @@ export const createSupabaseAdminClient = () => {
   }
 
   return createClient(url, env.SUPABASE_SERVICE_ROLE_KEY, {
+    db: {
+      schema: "public",
+    },
     auth: {
       autoRefreshToken: false,
       persistSession: false,
