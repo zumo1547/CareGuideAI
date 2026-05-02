@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Role } from "@/types/domain";
+import { isSchemaCacheMissingError } from "@/lib/onboarding-storage";
 import type {
   SupportCaseMessage,
   SupportCasePatientInfo,
@@ -51,6 +52,15 @@ const SUPPORT_CASE_COLUMNS =
   "id, patient_id, requested_doctor_id, assigned_doctor_id, request_message, status, requested_at, accepted_at, closed_at, closed_by, updated_at";
 
 const unique = <T>(values: T[]) => [...new Set(values)];
+
+const isMissingOnboardingProfileTable = (error: {
+  message: string;
+  code?: string | null;
+}) => {
+  if (!isSchemaCacheMissingError({ message: error.message, code: error.code ?? null })) return false;
+  const message = error.message.toLowerCase();
+  return message.includes("user_onboarding_profiles");
+};
 
 export const isSupportCaseStatus = (status: string): status is SupportCaseStatus =>
   status === "pending" || status === "active" || status === "closed";
@@ -140,12 +150,14 @@ export const fetchSupportCaseList = async ({
   if (profileError) {
     throw new Error(profileError.message);
   }
-  if (onboardingError) {
+  const safeOnboardingRows = (() => {
+    if (!onboardingError) return onboarding ?? [];
+    if (isMissingOnboardingProfileTable(onboardingError)) return [] as OnboardingRow[];
     throw new Error(onboardingError.message);
-  }
+  })();
 
   const profileMap = new Map((profiles ?? []).map((item) => [item.id, item]));
-  const onboardingMap = new Map((onboarding ?? []).map((item) => [item.user_id, item]));
+  const onboardingMap = new Map(safeOnboardingRows.map((item) => [item.user_id, item]));
 
   return rows.map((row) => ({
     id: row.id,
