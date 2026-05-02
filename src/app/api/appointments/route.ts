@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import { ensureAppointmentSchema } from "@/lib/appointment-schema-bootstrap";
 import { env } from "@/lib/env";
 import { isSchemaCacheMissingError } from "@/lib/onboarding-storage";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -15,6 +16,42 @@ type AppointmentPatientResponse = AppointmentView["patientResponse"];
 type PostgrestLikeError = {
   message?: string;
   code?: string | null;
+};
+
+type QueryResult<T> = {
+  data: T | null;
+  error: PostgrestLikeError | null;
+};
+
+type AppointmentRow = {
+  id: string;
+  patient_id: string;
+  doctor_id: string;
+  requested_by: string;
+  request_note: string | null;
+  patient_preferred_at: string | null;
+  scheduled_at: string | null;
+  status: string;
+  doctor_confirmation_link: string | null;
+  doctor_confirmation_token: string | null;
+  doctor_proposed_note: string | null;
+  doctor_proposed_at: string | null;
+  patient_response: string | null;
+  patient_response_note: string | null;
+  patient_responded_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type AppointmentActionRow = {
+  id: string;
+  patient_id: string;
+  doctor_id: string;
+  status: string;
+  patient_response: string | null;
+  doctor_confirmation_link: string | null;
+  doctor_confirmation_token: string | null;
+  patient_preferred_at: string | null;
 };
 
 const APPOINTMENT_SELECT_COLUMNS = `
@@ -148,39 +185,69 @@ const isAppointmentSchemaMismatchError = (
 ) => {
   if (!error) return false;
   const message = (error.message ?? "").toLowerCase();
+  const hasAppointmentFieldInMessage = APPOINTMENT_SCHEMA_REQUIRED_FIELDS.some(
+    (field) =>
+      message.includes(field) ||
+      message.includes(`appointments.${field}`) ||
+      message.includes(`'${field}'`),
+  );
   const isSchemaCacheError = isSchemaCacheMissingError({
     message: error.message ?? "",
     code: error.code ?? null,
   });
+  const isUndefinedColumnError =
+    error.code === "42703" ||
+    message.includes("column") && message.includes("does not exist");
   return (
-    isSchemaCacheError &&
-    APPOINTMENT_SCHEMA_REQUIRED_FIELDS.some((field) => message.includes(field))
+    hasAppointmentFieldInMessage && (isSchemaCacheError || isUndefinedColumnError)
   );
 };
 
-const appointmentSchemaNotReadyResponse = (error: PostgrestLikeError) =>
+const appointmentSchemaNotReadyResponse = (error: PostgrestLikeError | null | undefined) =>
   NextResponse.json(
     {
       error: APPOINTMENT_SCHEMA_NOT_READY_MESSAGE,
       code: "APPOINTMENT_SCHEMA_NOT_READY",
       schemaReloadSql: APPOINTMENT_SCHEMA_SQL,
       projectRefHint: getSupabaseProjectRefFromEnv(),
-      rawErrorMessage: error.message ?? null,
+      rawErrorMessage: error?.message ?? null,
     },
     { status: 503 },
   );
+
+const tryEnsureAppointmentSchema = async () => {
+  try {
+    await ensureAppointmentSchema();
+  } catch {
+    // Ignore bootstrap failure here and let the original error flow through.
+  }
+};
+
+const withAppointmentSchemaRecovery = async <T>(
+  operation: () => PromiseLike<QueryResult<T>>,
+): Promise<QueryResult<T>> => {
+  const first = await operation();
+  if (!first.error || !isAppointmentSchemaMismatchError(first.error)) {
+    return first;
+  }
+
+  await tryEnsureAppointmentSchema();
+  return operation();
+};
 
 const selectAppointmentForAction = async (
   appointmentId: string,
 ) => {
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("appointments")
-    .select(
-      "id, patient_id, doctor_id, status, patient_response, doctor_confirmation_link, doctor_confirmation_token, patient_preferred_at",
-    )
-    .eq("id", appointmentId)
-    .maybeSingle();
+  const { data, error } = await withAppointmentSchemaRecovery<AppointmentActionRow | null>(() =>
+    supabase
+      .from("appointments")
+      .select(
+        "id, patient_id, doctor_id, status, patient_response, doctor_confirmation_link, doctor_confirmation_token, patient_preferred_at",
+      )
+      .eq("id", appointmentId)
+      .maybeSingle(),
+  );
   return { data, error, supabase };
 };
 
@@ -189,6 +256,8 @@ export async function GET() {
   if (auth instanceof NextResponse) {
     return auth;
   }
+
+  await tryEnsureAppointmentSchema();
 
   const supabase = await createSupabaseServerClient();
   let query = supabase
@@ -203,7 +272,7 @@ export async function GET() {
     query = query.eq("doctor_id", auth.userId);
   }
 
-  const { data: rows, error } = await query;
+  const { data: rows, error } = await withAppointmentSchemaRecovery<AppointmentRow[]>(() => query);
   if (error) {
     if (isAppointmentSchemaMismatchError(error)) {
       return appointmentSchemaNotReadyResponse(error);
@@ -290,6 +359,8 @@ export async function POST(request: Request) {
     return badRequest("preferredAt is invalid");
   }
 
+  await tryEnsureAppointmentSchema();
+
   const supabase = await createSupabaseServerClient();
   if (auth.role !== "admin") {
     const { data: link, error: linkError } = await supabase
@@ -308,25 +379,27 @@ export async function POST(request: Request) {
     }
   }
 
-  const { data, error } = await supabase
-    .from("appointments")
-    .insert({
-      patient_id: patientId,
-      doctor_id: payload.doctorId,
-      requested_by: auth.userId,
-      request_note: normalizeText(payload.requestNote),
-      patient_preferred_at: preferredAt,
-      status: "pending",
-      patient_response: "pending",
-      doctor_confirmation_link: null,
-      doctor_confirmation_token: null,
-      doctor_proposed_note: null,
-      doctor_proposed_at: null,
-      patient_response_note: null,
-      patient_responded_at: null,
-    })
-    .select("id")
-    .single();
+  const { data, error } = await withAppointmentSchemaRecovery<{ id: string }>(() =>
+    supabase
+      .from("appointments")
+      .insert({
+        patient_id: patientId,
+        doctor_id: payload.doctorId,
+        requested_by: auth.userId,
+        request_note: normalizeText(payload.requestNote),
+        patient_preferred_at: preferredAt,
+        status: "pending",
+        patient_response: "pending",
+        doctor_confirmation_link: null,
+        doctor_confirmation_token: null,
+        doctor_proposed_note: null,
+        doctor_proposed_at: null,
+        patient_response_note: null,
+        patient_responded_at: null,
+      })
+      .select("id")
+      .single(),
+  );
 
   if (error || !data) {
     if (isAppointmentSchemaMismatchError(error)) {
@@ -351,6 +424,8 @@ export async function PATCH(request: Request) {
   if (!parsed.success) {
     return badRequest("Invalid payload", parsed.error.flatten());
   }
+
+  await tryEnsureAppointmentSchema();
 
   const payload = parsed.data;
   const { data: appointment, error: appointmentError, supabase } =
@@ -411,13 +486,20 @@ export async function PATCH(request: Request) {
       updateQuery = updateQuery.eq("doctor_id", auth.userId);
     }
 
-    const { data, error } = await updateQuery.select("doctor_confirmation_token").single();
+    const { data, error } = await withAppointmentSchemaRecovery<{
+      doctor_confirmation_token: string;
+    }>(() =>
+      updateQuery.select("doctor_confirmation_token").single(),
+    );
 
     if (error) {
       if (isAppointmentSchemaMismatchError(error)) {
         return appointmentSchemaNotReadyResponse(error);
       }
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (!data?.doctor_confirmation_token) {
+      return NextResponse.json({ error: "ไม่สามารถสร้างโทเคนยืนยันนัดหมายได้" }, { status: 400 });
     }
 
     return NextResponse.json({
@@ -440,13 +522,15 @@ export async function PATCH(request: Request) {
       return badRequest("Appointment must be confirmed before completing");
     }
 
-    const { error } = await supabase
-      .from("appointments")
-      .update({
-        status: "completed",
-        updated_at: now,
-      })
-      .eq("id", appointment.id);
+    const { error } = await withAppointmentSchemaRecovery(() =>
+      supabase
+        .from("appointments")
+        .update({
+          status: "completed",
+          updated_at: now,
+        })
+        .eq("id", appointment.id),
+    );
 
     if (error) {
       if (isAppointmentSchemaMismatchError(error)) {
@@ -471,16 +555,18 @@ export async function PATCH(request: Request) {
   }
 
   if (payload.action === "patient_accept") {
-    const { error } = await supabase
-      .from("appointments")
-      .update({
-        status: "confirmed",
-        patient_response: "accepted",
-        patient_response_note: normalizeText(payload.note),
-        patient_responded_at: now,
-        updated_at: now,
-      })
-      .eq("id", appointment.id);
+    const { error } = await withAppointmentSchemaRecovery(() =>
+      supabase
+        .from("appointments")
+        .update({
+          status: "confirmed",
+          patient_response: "accepted",
+          patient_response_note: normalizeText(payload.note),
+          patient_responded_at: now,
+          updated_at: now,
+        })
+        .eq("id", appointment.id),
+    );
 
     if (error) {
       if (isAppointmentSchemaMismatchError(error)) {
@@ -493,16 +579,18 @@ export async function PATCH(request: Request) {
   }
 
   if (payload.action === "patient_decline") {
-    const { error } = await supabase
-      .from("appointments")
-      .update({
-        status: "pending",
-        patient_response: "declined",
-        patient_response_note: normalizeText(payload.note),
-        patient_responded_at: now,
-        updated_at: now,
-      })
-      .eq("id", appointment.id);
+    const { error } = await withAppointmentSchemaRecovery(() =>
+      supabase
+        .from("appointments")
+        .update({
+          status: "pending",
+          patient_response: "declined",
+          patient_response_note: normalizeText(payload.note),
+          patient_responded_at: now,
+          updated_at: now,
+        })
+        .eq("id", appointment.id),
+    );
 
     if (error) {
       if (isAppointmentSchemaMismatchError(error)) {
@@ -519,17 +607,19 @@ export async function PATCH(request: Request) {
     return badRequest("preferredAt is invalid");
   }
 
-  const { error } = await supabase
-    .from("appointments")
-    .update({
-      status: "pending",
-      patient_response: "reschedule_requested",
-      patient_response_note: normalizeText(payload.note),
-      patient_preferred_at: preferredAt ?? appointment.patient_preferred_at,
-      patient_responded_at: now,
-      updated_at: now,
-    })
-    .eq("id", appointment.id);
+  const { error } = await withAppointmentSchemaRecovery(() =>
+    supabase
+      .from("appointments")
+      .update({
+        status: "pending",
+        patient_response: "reschedule_requested",
+        patient_response_note: normalizeText(payload.note),
+        patient_preferred_at: preferredAt ?? appointment.patient_preferred_at,
+        patient_responded_at: now,
+        updated_at: now,
+      })
+      .eq("id", appointment.id),
+  );
 
   if (error) {
     if (isAppointmentSchemaMismatchError(error)) {
