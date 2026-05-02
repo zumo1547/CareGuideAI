@@ -8,7 +8,7 @@ import {
   SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
 } from "@/lib/support-case-errors";
 import { fetchSupportCaseById, isSupportCaseStatus } from "@/lib/support-case-service";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const caseIdSchema = z.object({
   caseId: z.uuid(),
@@ -36,7 +36,7 @@ export async function POST(
     return badRequest("Invalid case id");
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAdminClient();
   let supportCase: Awaited<ReturnType<typeof fetchSupportCaseById>>;
   try {
     supportCase = await fetchSupportCaseById({

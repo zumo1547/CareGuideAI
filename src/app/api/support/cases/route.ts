@@ -8,7 +8,7 @@ import {
   SUPPORT_CASE_SCHEMA_CACHE_MESSAGE,
 } from "@/lib/support-case-errors";
 import { fetchSupportCaseList } from "@/lib/support-case-service";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const createCaseSchema = z.object({
   requestedDoctorId: z.uuid(),
@@ -29,7 +29,7 @@ export async function GET() {
     return auth;
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAdminClient();
   try {
     const cases = await fetchSupportCaseList({
       supabase,
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
     return forbidden("Only patient or admin can create support case");
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAdminClient();
   const { requestedDoctorId, requestMessage } = parsed.data;
   const patientId = auth.userId;
 
