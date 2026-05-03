@@ -126,12 +126,14 @@ const APPOINTMENT_SCHEMA_SQL = [
 const APPOINTMENT_SCHEMA_NOT_READY_MESSAGE =
   "Appointment flow schema is not ready. Run migration 0010_appointment_doctor_confirmation_flow.sql, then run NOTIFY pgrst, 'reload schema'; and retry.";
 
+const confirmationLinkSchema = z.string().trim().min(2).max(2000);
+
 const createRequestSchema = z.object({
   doctorId: z.uuid(),
   requestNote: z.string().trim().min(3).max(2000),
   preferredAt: z.string().optional().nullable(),
   scheduledAt: z.string().optional().nullable(),
-  confirmationLink: z.string().url().optional().nullable(),
+  confirmationLink: confirmationLinkSchema.optional().nullable(),
   doctorProposedNote: z.string().max(2000).optional().nullable(),
   patientId: z.uuid().optional(),
 });
@@ -141,7 +143,7 @@ const patchActionSchema = z.discriminatedUnion("action", [
     action: z.literal("doctor_propose"),
     appointmentId: z.uuid(),
     scheduledAt: z.string().min(1),
-    confirmationLink: z.string().url(),
+    confirmationLink: confirmationLinkSchema,
     note: z.string().max(2000).optional().nullable(),
   }),
   z.object({
@@ -458,6 +460,7 @@ export async function POST(request: Request) {
   if (!patientId) {
     return badRequest("patientId is required");
   }
+  const normalizedConfirmationLink = normalizeText(payload.confirmationLink);
 
   const preferredAt = parseDateInput(payload.preferredAt);
   if (payload.preferredAt && !preferredAt) {
@@ -476,7 +479,7 @@ export async function POST(request: Request) {
     if (!scheduledAt) {
       return badRequest("scheduledAt is required for doctor created appointment");
     }
-    if (!payload.confirmationLink) {
+    if (!normalizedConfirmationLink) {
       return badRequest("confirmationLink is required for doctor created appointment");
     }
   }
@@ -499,7 +502,7 @@ export async function POST(request: Request) {
         scheduled_at: isDoctorCreated ? scheduledAt : null,
         status: "pending",
         patient_response: "pending",
-        doctor_confirmation_link: isDoctorCreated ? payload.confirmationLink : null,
+        doctor_confirmation_link: isDoctorCreated ? normalizedConfirmationLink : null,
         doctor_confirmation_token: isDoctorCreated ? randomUUID().replace(/-/g, "") : null,
         doctor_proposed_note: isDoctorCreated
           ? normalizeText(payload.doctorProposedNote)
@@ -522,7 +525,9 @@ export async function POST(request: Request) {
           requested_by: auth.userId,
           request_note: isDoctorCreated
             ? appendLegacyNote(normalizeText(payload.requestNote), [
-                payload.confirmationLink ? `[Doctor link] ${payload.confirmationLink}` : null,
+                normalizedConfirmationLink
+                  ? `[Doctor link] ${normalizedConfirmationLink}`
+                  : null,
                 payload.doctorProposedNote
                   ? `[Doctor note] ${payload.doctorProposedNote}`
                   : null,
@@ -599,15 +604,19 @@ export async function PATCH(request: Request) {
         return badRequest("Appointment already completed");
       }
 
-      const scheduledAt = parseDateInput(payload.scheduledAt);
-      if (!scheduledAt) {
-        return badRequest("scheduledAt is invalid");
-      }
+    const scheduledAt = parseDateInput(payload.scheduledAt);
+    if (!scheduledAt) {
+      return badRequest("scheduledAt is invalid");
+    }
+    const normalizedConfirmationLink = normalizeText(payload.confirmationLink);
+    if (!normalizedConfirmationLink) {
+      return badRequest("confirmationLink is required");
+    }
 
-      const legacyNote = appendLegacyNote(legacyAppointment.request_note, [
-        `[Doctor link] ${payload.confirmationLink}`,
-        payload.note ? `[Doctor note] ${payload.note}` : null,
-      ]);
+    const legacyNote = appendLegacyNote(legacyAppointment.request_note, [
+      `[Doctor link] ${normalizedConfirmationLink}`,
+      payload.note ? `[Doctor note] ${payload.note}` : null,
+    ]);
 
       const { error: updateError } = await supabase
         .from("appointments")
@@ -736,10 +745,14 @@ export async function PATCH(request: Request) {
     if (!scheduledAt) {
       return badRequest("scheduledAt is invalid");
     }
+    const normalizedConfirmationLink = normalizeText(payload.confirmationLink);
+    if (!normalizedConfirmationLink) {
+      return badRequest("confirmationLink is required");
+    }
 
     const updates = {
       scheduled_at: scheduledAt,
-      doctor_confirmation_link: payload.confirmationLink,
+      doctor_confirmation_link: normalizedConfirmationLink,
       doctor_confirmation_token: randomUUID().replace(/-/g, ""),
       doctor_proposed_note: normalizeText(payload.note),
       doctor_proposed_at: now,
