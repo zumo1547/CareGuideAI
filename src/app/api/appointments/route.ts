@@ -149,19 +149,19 @@ const patchActionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("patient_accept"),
     appointmentId: z.uuid(),
-    token: z.string().min(8),
+    token: z.string().min(8).optional().nullable(),
     note: z.string().max(2000).optional().nullable(),
   }),
   z.object({
     action: z.literal("patient_decline"),
     appointmentId: z.uuid(),
-    token: z.string().min(8),
+    token: z.string().min(8).optional().nullable(),
     note: z.string().max(2000).optional().nullable(),
   }),
   z.object({
     action: z.literal("patient_reschedule"),
     appointmentId: z.uuid(),
-    token: z.string().min(8),
+    token: z.string().min(8).optional().nullable(),
     note: z.string().max(2000).optional().nullable(),
     preferredAt: z.string().optional().nullable(),
   }),
@@ -208,6 +208,31 @@ const normalizePatientResponse = (
 
 const hasLegacyDoctorLink = (requestNote: string | null | undefined) =>
   (requestNote ?? "").includes("[Doctor link]");
+
+const readLastTaggedValue = (
+  source: string | null | undefined,
+  tag: "Doctor link" | "Doctor note" | "Patient note",
+) => {
+  if (!source) return null;
+  const matches = Array.from(
+    source.matchAll(new RegExp(`\\[${tag}\\]\\s*([^\\n\\r\\[]+)`, "gi")),
+  );
+  if (!matches.length) return null;
+  return normalizeText(matches[matches.length - 1]?.[1]);
+};
+
+const sanitizeLegacyRequestNote = (value: string | null | undefined) => {
+  if (!value) return null;
+  const cleaned = value
+    .replace(/\[Doctor link\][^\n\r]*/gi, "")
+    .replace(/\[Doctor note\][^\n\r]*/gi, "")
+    .replace(/\[Patient accepted\]/gi, "")
+    .replace(/\[Patient declined\]/gi, "")
+    .replace(/\[Patient requested reschedule\]/gi, "")
+    .replace(/\[Patient note\][^\n\r]*/gi, "")
+    .replace(/\n{3,}/g, "\n\n");
+  return normalizeText(cleaned);
+};
 
 const appendLegacyNote = (
   current: string | null | undefined,
@@ -400,6 +425,9 @@ export async function GET() {
   const appointments: AppointmentView[] = normalizedRows.map((row) => {
     const isLegacy = !("patient_preferred_at" in row);
     const status = normalizeStatus(row.status);
+    const legacyDoctorLink = isLegacy ? readLastTaggedValue(row.request_note, "Doctor link") : null;
+    const legacyDoctorNote = isLegacy ? readLastTaggedValue(row.request_note, "Doctor note") : null;
+    const legacyPatientNote = isLegacy ? readLastTaggedValue(row.request_note, "Patient note") : null;
     const patientResponse = isLegacy
       ? status === "confirmed" || status === "completed"
         ? "accepted"
@@ -411,16 +439,20 @@ export async function GET() {
       patientId: row.patient_id,
       doctorId: row.doctor_id,
       requestedBy: row.requested_by,
-      requestNote: row.request_note,
+      requestNote: isLegacy ? sanitizeLegacyRequestNote(row.request_note) : row.request_note,
       patientPreferredAt: isLegacy ? row.scheduled_at : row.patient_preferred_at,
       scheduledAt: row.scheduled_at,
       status,
-      doctorConfirmationLink: isLegacy ? null : row.doctor_confirmation_link,
+      doctorConfirmationLink: isLegacy ? legacyDoctorLink : row.doctor_confirmation_link,
       doctorConfirmationToken: isLegacy ? null : row.doctor_confirmation_token,
-      doctorProposedNote: isLegacy ? null : row.doctor_proposed_note,
-      doctorProposedAt: isLegacy ? null : row.doctor_proposed_at,
+      doctorProposedNote: isLegacy ? legacyDoctorNote : row.doctor_proposed_note,
+      doctorProposedAt: isLegacy
+        ? legacyDoctorLink
+          ? row.updated_at
+          : null
+        : row.doctor_proposed_at,
       patientResponse,
-      patientResponseNote: isLegacy ? null : row.patient_response_note,
+      patientResponseNote: isLegacy ? legacyPatientNote : row.patient_response_note,
       patientRespondedAt: isLegacy ? null : row.patient_responded_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -604,19 +636,19 @@ export async function PATCH(request: Request) {
         return badRequest("Appointment already completed");
       }
 
-    const scheduledAt = parseDateInput(payload.scheduledAt);
-    if (!scheduledAt) {
-      return badRequest("scheduledAt is invalid");
-    }
-    const normalizedConfirmationLink = normalizeText(payload.confirmationLink);
-    if (!normalizedConfirmationLink) {
-      return badRequest("confirmationLink is required");
-    }
+      const scheduledAt = parseDateInput(payload.scheduledAt);
+      if (!scheduledAt) {
+        return badRequest("scheduledAt is invalid");
+      }
+      const normalizedConfirmationLink = normalizeText(payload.confirmationLink);
+      if (!normalizedConfirmationLink) {
+        return badRequest("confirmationLink is required");
+      }
 
-    const legacyNote = appendLegacyNote(legacyAppointment.request_note, [
-      `[Doctor link] ${normalizedConfirmationLink}`,
-      payload.note ? `[Doctor note] ${payload.note}` : null,
-    ]);
+      const legacyNote = appendLegacyNote(legacyAppointment.request_note, [
+        `[Doctor link] ${normalizedConfirmationLink}`,
+        payload.note ? `[Doctor note] ${payload.note}` : null,
+      ]);
 
       const { error: updateError } = await supabase
         .from("appointments")
@@ -834,6 +866,10 @@ export async function PATCH(request: Request) {
 
   if (!richAppointment.doctor_confirmation_link || !richAppointment.doctor_confirmation_token) {
     return badRequest("Doctor has not sent a confirmation link yet");
+  }
+
+  if (!payload.token) {
+    return badRequest("Confirmation link token is required");
   }
 
   if (payload.token !== richAppointment.doctor_confirmation_token) {

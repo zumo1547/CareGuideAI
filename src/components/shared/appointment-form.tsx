@@ -234,10 +234,6 @@ export const AppointmentForm = ({
     action: "patient_accept" | "patient_decline" | "patient_reschedule",
   ) => {
     const token = appointment.doctorConfirmationToken;
-    if (!token) {
-      setError("ยังไม่มีลิงก์ยืนยันจากคุณหมอ");
-      return;
-    }
     const draft = getDraft(appointment);
 
     setActionLoadingId(appointment.id);
@@ -250,7 +246,7 @@ export const AppointmentForm = ({
         body: JSON.stringify({
           action,
           appointmentId: appointment.id,
-          token,
+          token: token ?? null,
           note: draft.note || null,
           preferredAt: action === "patient_reschedule" ? draft.preferredAt || null : undefined,
         }),
