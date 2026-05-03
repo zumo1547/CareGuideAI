@@ -49,6 +49,22 @@ create index if not exists idx_appointments_patient_status_response
 create index if not exists idx_appointments_doctor_status_response
   on public.appointments(doctor_id, status, patient_response, updated_at desc);
 
+drop policy if exists appointments_scope on public.appointments;
+create policy appointments_scope
+on public.appointments
+for all
+using (
+  public.current_user_role() = 'admin'
+  or patient_id = auth.uid()
+  or doctor_id = auth.uid()
+)
+with check (
+  public.current_user_role() = 'admin'
+  or patient_id = auth.uid()
+  or requested_by = auth.uid()
+  or doctor_id = auth.uid()
+);
+
 notify pgrst, 'reload schema';
 
 commit;
@@ -97,4 +113,3 @@ export const ensureAppointmentSchema = async () => {
 
   await appointmentBootstrapPromise;
 };
-

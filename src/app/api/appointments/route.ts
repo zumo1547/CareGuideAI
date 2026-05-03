@@ -125,6 +125,8 @@ const APPOINTMENT_SCHEMA_SQL = [
 
 const APPOINTMENT_SCHEMA_NOT_READY_MESSAGE =
   "Appointment flow schema is not ready. Run migration 0010_appointment_doctor_confirmation_flow.sql, then run NOTIFY pgrst, 'reload schema'; and retry.";
+const APPOINTMENT_RLS_NOT_READY_MESSAGE =
+  "Appointment permissions are outdated. Run migration 0011_appointments_rls_patient_update_fix.sql, then run NOTIFY pgrst, 'reload schema'; and retry.";
 
 const confirmationLinkSchema = z.string().trim().min(2).max(2000);
 
@@ -308,6 +310,31 @@ const appointmentSchemaNotReadyResponse = (error: PostgrestLikeError | null | un
     { status: 503 },
   );
 
+const isAppointmentRlsPolicyError = (
+  error: PostgrestLikeError | null | undefined,
+) => {
+  if (!error) return false;
+  const message = (error.message ?? "").toLowerCase();
+  return (
+    (error.code === "42501" || message.includes("row-level security policy")) &&
+    message.includes("appointments")
+  );
+};
+
+const appointmentRlsNotReadyResponse = (error: PostgrestLikeError | null | undefined) =>
+  NextResponse.json(
+    {
+      error: APPOINTMENT_RLS_NOT_READY_MESSAGE,
+      code: "APPOINTMENT_RLS_NOT_READY",
+      migrationSql:
+        "Run supabase/migrations/0011_appointments_rls_patient_update_fix.sql",
+      schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
+      projectRefHint: getSupabaseProjectRefFromEnv(),
+      rawErrorMessage: error?.message ?? null,
+    },
+    { status: 503 },
+  );
+
 const tryEnsureAppointmentSchema = async () => {
   try {
     await ensureAppointmentSchema();
@@ -321,6 +348,18 @@ const withAppointmentSchemaRecovery = async <T>(
 ): Promise<QueryResult<T>> => {
   const first = await operation();
   if (!first.error || !isAppointmentSchemaMismatchError(first.error)) {
+    return first;
+  }
+
+  await tryEnsureAppointmentSchema();
+  return operation();
+};
+
+const withAppointmentWriteRecovery = async <T>(
+  operation: () => PromiseLike<QueryResult<T>>,
+): Promise<QueryResult<T>> => {
+  const first = await withAppointmentSchemaRecovery(operation);
+  if (!first.error || !isAppointmentRlsPolicyError(first.error)) {
     return first;
   }
 
@@ -533,7 +572,7 @@ export async function POST(request: Request) {
   const now = new Date().toISOString();
   const isDoctorCreated = auth.role === "doctor";
 
-  const { data, error } = await withAppointmentSchemaRecovery<{ id: string }>(() =>
+  const { data, error } = await withAppointmentWriteRecovery<{ id: string }>(() =>
     supabase
       .from("appointments")
       .insert({
@@ -589,6 +628,9 @@ export async function POST(request: Request) {
         });
       }
       return appointmentSchemaNotReadyResponse(error);
+    }
+    if (isAppointmentRlsPolicyError(error)) {
+      return appointmentRlsNotReadyResponse(error);
     }
     return NextResponse.json({ error: error?.message ?? "ไม่สามารถสร้างคำขอนัดหมายได้" }, { status: 400 });
   }
@@ -672,6 +714,9 @@ export async function PATCH(request: Request) {
         .eq("id", legacyAppointment.id);
 
       if (updateError) {
+        if (isAppointmentRlsPolicyError(updateError)) {
+          return appointmentRlsNotReadyResponse(updateError);
+        }
         return NextResponse.json({ error: updateError.message }, { status: 400 });
       }
 
@@ -695,6 +740,9 @@ export async function PATCH(request: Request) {
         .eq("id", legacyAppointment.id);
 
       if (updateError) {
+        if (isAppointmentRlsPolicyError(updateError)) {
+          return appointmentRlsNotReadyResponse(updateError);
+        }
         return NextResponse.json({ error: updateError.message }, { status: 400 });
       }
 
@@ -723,6 +771,9 @@ export async function PATCH(request: Request) {
         .eq("id", legacyAppointment.id);
 
       if (updateError) {
+        if (isAppointmentRlsPolicyError(updateError)) {
+          return appointmentRlsNotReadyResponse(updateError);
+        }
         return NextResponse.json({ error: updateError.message }, { status: 400 });
       }
 
@@ -748,6 +799,9 @@ export async function PATCH(request: Request) {
         .eq("id", legacyAppointment.id);
 
       if (updateError) {
+        if (isAppointmentRlsPolicyError(updateError)) {
+          return appointmentRlsNotReadyResponse(updateError);
+        }
         return NextResponse.json({ error: updateError.message }, { status: 400 });
       }
 
@@ -773,6 +827,9 @@ export async function PATCH(request: Request) {
       .eq("id", legacyAppointment.id);
 
     if (updateError) {
+      if (isAppointmentRlsPolicyError(updateError)) {
+        return appointmentRlsNotReadyResponse(updateError);
+      }
       return NextResponse.json({ error: updateError.message }, { status: 400 });
     }
 
@@ -820,7 +877,7 @@ export async function PATCH(request: Request) {
       updateQuery = updateQuery.eq("doctor_id", auth.userId);
     }
 
-    const { data, error } = await withAppointmentSchemaRecovery<{
+    const { data, error } = await withAppointmentWriteRecovery<{
       doctor_confirmation_token: string;
     }>(() =>
       updateQuery.select("doctor_confirmation_token").single(),
@@ -829,6 +886,9 @@ export async function PATCH(request: Request) {
     if (error) {
       if (isAppointmentSchemaMismatchError(error)) {
         return appointmentSchemaNotReadyResponse(error);
+      }
+      if (isAppointmentRlsPolicyError(error)) {
+        return appointmentRlsNotReadyResponse(error);
       }
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
@@ -856,7 +916,7 @@ export async function PATCH(request: Request) {
       return badRequest("Appointment must be confirmed before completing");
     }
 
-    const { error } = await withAppointmentSchemaRecovery(() =>
+    const { error } = await withAppointmentWriteRecovery(() =>
       supabase
         .from("appointments")
         .update({
@@ -869,6 +929,9 @@ export async function PATCH(request: Request) {
     if (error) {
       if (isAppointmentSchemaMismatchError(error)) {
         return appointmentSchemaNotReadyResponse(error);
+      }
+      if (isAppointmentRlsPolicyError(error)) {
+        return appointmentRlsNotReadyResponse(error);
       }
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
@@ -893,7 +956,7 @@ export async function PATCH(request: Request) {
   }
 
   if (payload.action === "patient_accept") {
-    const { error } = await withAppointmentSchemaRecovery(() =>
+    const { error } = await withAppointmentWriteRecovery(() =>
       supabase
         .from("appointments")
         .update({
@@ -910,6 +973,9 @@ export async function PATCH(request: Request) {
       if (isAppointmentSchemaMismatchError(error)) {
         return appointmentSchemaNotReadyResponse(error);
       }
+      if (isAppointmentRlsPolicyError(error)) {
+        return appointmentRlsNotReadyResponse(error);
+      }
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
@@ -922,7 +988,7 @@ export async function PATCH(request: Request) {
       return badRequest("Please provide a cancellation reason (at least 3 characters)");
     }
 
-    const { error } = await withAppointmentSchemaRecovery(() =>
+    const { error } = await withAppointmentWriteRecovery(() =>
       supabase
         .from("appointments")
         .update({
@@ -939,6 +1005,9 @@ export async function PATCH(request: Request) {
       if (isAppointmentSchemaMismatchError(error)) {
         return appointmentSchemaNotReadyResponse(error);
       }
+      if (isAppointmentRlsPolicyError(error)) {
+        return appointmentRlsNotReadyResponse(error);
+      }
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
@@ -950,7 +1019,7 @@ export async function PATCH(request: Request) {
     return badRequest("preferredAt is invalid");
   }
 
-  const { error } = await withAppointmentSchemaRecovery(() =>
+  const { error } = await withAppointmentWriteRecovery(() =>
     supabase
       .from("appointments")
       .update({
@@ -967,6 +1036,9 @@ export async function PATCH(request: Request) {
   if (error) {
     if (isAppointmentSchemaMismatchError(error)) {
       return appointmentSchemaNotReadyResponse(error);
+    }
+    if (isAppointmentRlsPolicyError(error)) {
+      return appointmentRlsNotReadyResponse(error);
     }
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
