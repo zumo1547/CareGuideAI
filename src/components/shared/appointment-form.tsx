@@ -57,16 +57,16 @@ const formatDateTime = (value: string | null) => {
 };
 
 const formatStatus = (status: AppointmentView["status"]) => {
-  if (status === "confirmed") return "เธขเธทเธเธขเธฑเธเนเธฅเนเธง";
-  if (status === "completed") return "เน€เธชเธฃเนเธเธชเธดเนเธ";
-  return "เธฃเธญเธ”เธณเน€เธเธดเธเธเธฒเธฃ";
+  if (status === "confirmed") return "confirmed";
+  if (status === "completed") return "completed";
+  return "pending";
 };
 
 const formatPatientResponse = (response: AppointmentView["patientResponse"]) => {
-  if (response === "accepted") return "เธเธนเนเธเนเธงเธขเธขเธทเธเธขเธฑเธเนเธฅเนเธง";
-  if (response === "declined") return "เธเธนเนเธเนเธงเธขเธเธเธดเน€เธชเธ";
-  if (response === "reschedule_requested") return "เธเธนเนเธเนเธงเธขเธเธญเน€เธฅเธทเนเธญเธเธเธฑเธ”";
-  return "เธฃเธญเธเธนเนเธเนเธงเธขเธ•เธญเธเธฃเธฑเธ";
+  if (response === "accepted") return "patient accepted";
+  if (response === "declined") return "patient declined";
+  if (response === "reschedule_requested") return "reschedule requested";
+  return "awaiting patient response";
 };
 
 const toInputDateTimeValue = (iso: string | null) => {
@@ -87,7 +87,7 @@ const announceAlarm = (message: string) => {
   window.alert(message);
   if ("speechSynthesis" in window) {
     const utterance = new SpeechSynthesisUtterance(message);
-    utterance.lang = "th-TH";
+    utterance.lang = "en-US";
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   }
@@ -142,11 +142,11 @@ export const AppointmentForm = ({
       });
       const payload = (await response.json()) as ApiPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "เนเธซเธฅเธ”เธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
+        throw new Error(payload.error ?? "Failed to load appointments");
       }
       setAppointments(payload.appointments ?? []);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "เนเธซเธฅเธ”เธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
+      setError(loadError instanceof Error ? loadError.message : "Failed to load appointments");
     } finally {
       setLoadingList(false);
     }
@@ -187,11 +187,11 @@ export const AppointmentForm = ({
 
   const submitRequest = async () => {
     if (!canRequestAppointment || !selectedDoctorId) {
-      setError("เธเธฃเธธเธ“เธฒเน€เธฅเธทเธญเธเธเธธเธ“เธซเธกเธญเธเนเธญเธเธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธข");
+      setError("Please select a doctor before sending an appointment request.");
       return;
     }
     if (requestNote.trim().length < 3) {
-      setError("เธเธฃเธธเธ“เธฒเธฃเธฐเธเธธเธญเธฒเธเธฒเธฃเธซเธฃเธทเธญเธชเธดเนเธเธ—เธตเนเธ•เนเธญเธเธเธฒเธฃเธเธฃเธถเธเธฉเธฒเธญเธขเนเธฒเธเธเนเธญเธข 3 เธ•เธฑเธงเธญเธฑเธเธฉเธฃ");
+      setError("Please enter at least 3 characters for symptom or reason.");
       return;
     }
 
@@ -211,15 +211,17 @@ export const AppointmentForm = ({
 
       const payload = (await response.json()) as ApiPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "เธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
+        throw new Error(payload.error ?? "Failed to send appointment request");
       }
 
       setRequestNote("");
       setPreferredAt("");
-      setSuccess("เธชเนเธเธเธณเธเธญเธ–เธถเธเธเธธเธ“เธซเธกเธญเนเธฅเนเธง เธฃเธญเธเธธเธ“เธซเธกเธญเธชเนเธเธฅเธดเธเธเนเธขเธทเธเธขเธฑเธเธเธฑเธ”เธซเธกเธฒเธข");
+      setSuccess("Appointment request sent. Waiting for doctor confirmation link.");
       await refreshAppointments(true);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "เธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
+      setError(
+        submitError instanceof Error ? submitError.message : "Failed to send appointment request",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -249,7 +251,7 @@ export const AppointmentForm = ({
     const draft = getDraft(appointment);
 
     if (action === "patient_decline" && draft.note.trim().length < 3) {
-      setError("เธเธฃเธธเธ“เธฒเธฃเธฐเธเธธเน€เธซเธ•เธธเธเธฅเธ—เธตเนเธขเธเน€เธฅเธดเธเธเธฑเธ”เธญเธขเนเธฒเธเธเนเธญเธข 3 เธ•เธฑเธงเธญเธฑเธเธฉเธฃ");
+      setError("Please provide cancellation reason with at least 3 characters.");
       return;
     }
 
@@ -271,23 +273,23 @@ export const AppointmentForm = ({
       });
       const payload = (await response.json()) as ApiPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "เธ•เธญเธเธเธฅเธฑเธเธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
+        throw new Error(payload.error ?? "Failed to respond appointment");
       }
 
       if (action === "patient_accept") {
-        setSuccess("เธขเธทเธเธขเธฑเธเธฃเธฑเธเธเธฑเธ”เธซเธกเธฒเธขเน€เธฃเธตเธขเธเธฃเนเธญเธขเนเธฅเนเธง");
+        setSuccess("Appointment accepted.");
       } else if (action === "patient_decline") {
-        const alarmMessage = "เธขเธเน€เธฅเธดเธเธเธฑเธ”เนเธฅเนเธง เนเธฅเธฐเธชเนเธเน€เธซเธ•เธธเธเธฅเนเธซเนเธเธธเธ“เธซเธกเธญเน€เธฃเธตเธขเธเธฃเนเธญเธข";
-        setSuccess("เธขเธเน€เธฅเธดเธเธเธฑเธ”เธซเธกเธฒเธขเธชเธณเน€เธฃเนเธ เธฃเธฒเธขเธเธฒเธฃเธเธตเนเธ–เธนเธเธขเธเน€เธฅเธดเธเนเธฅเนเธง");
+        const alarmMessage = "Appointment canceled. Cancellation reason has been sent to doctor.";
+        setSuccess("Appointment canceled successfully.");
         setLastAlarmMessage(alarmMessage);
         announceAlarm(alarmMessage);
         setAppointments((current) => current.filter((item) => item.id !== appointment.id));
       } else {
-        setSuccess("เธชเนเธเธเธณเธเธญเน€เธฅเธทเนเธญเธเธเธฑเธ”เนเธซเนเธเธธเธ“เธซเธกเธญเน€เธฃเธตเธขเธเธฃเนเธญเธขเนเธฅเนเธง");
+        setSuccess("Reschedule request sent to doctor.");
       }
       await refreshAppointments(true);
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "เธ•เธญเธเธเธฅเธฑเธเธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
+      setError(actionError instanceof Error ? actionError.message : "Failed to respond appointment");
     } finally {
       setActionLoadingId(null);
     }
@@ -307,45 +309,46 @@ export const AppointmentForm = ({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <CalendarClock className="h-5 w-5" />
-          เธฃเธฐเธเธเธเธฑเธ”เธซเธกเธฒเธขเธ—เธตเนเธเธธเธ“เธซเธกเธญเธขเธทเธเธขเธฑเธเธเนเธญเธ
+          Doctor-Confirmed Appointment Flow
         </CardTitle>
         <CardDescription>
-          เธเธนเนเธเนเธงเธขเธชเนเธเธเธณเธเธญเธเนเธญเธ เนเธฅเนเธงเธฃเธญเธเธธเธ“เธซเธกเธญเธชเนเธเธฅเธดเธเธเนเธเธฑเธ”เธซเธกเธฒเธขเธกเธฒเนเธซเน เธเธฒเธเธเธฑเนเธเธเธถเธเธเธ”เธขเธทเธเธขเธฑเธ / เธเธเธดเน€เธชเธ / เธเธญเน€เธฅเธทเนเธญเธเธเธฑเธ”เนเธ”เน
+          Patients request first, then doctor sends confirmation link. Patient can accept, decline,
+          or request reschedule.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
           <Alert variant="destructive">
-            <AlertTitle>เน€เธเธดเธ”เธเนเธญเธเธดเธ”เธเธฅเธฒเธ”</AlertTitle>
+            <AlertTitle>Error</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
         {success ? (
           <Alert>
-            <AlertTitle>เธชเธณเน€เธฃเนเธ</AlertTitle>
+            <AlertTitle>Success</AlertTitle>
             <AlertDescription>{success}</AlertDescription>
           </Alert>
         ) : null}
         {lastAlarmMessage ? (
           <Alert>
-            <AlertTitle>เนเธเนเธเน€เธ•เธทเธญเธเธเธฒเธฃเธขเธเน€เธฅเธดเธเธเธฑเธ”</AlertTitle>
+            <AlertTitle>Cancellation Alarm</AlertTitle>
             <AlertDescription>{lastAlarmMessage}</AlertDescription>
           </Alert>
         ) : null}
 
         {!hasLinkedDoctor ? (
           <Alert>
-            <AlertTitle>เธขเธฑเธเนเธกเนเธกเธตเธซเธกเธญเธ—เธตเนเนเธญเธ”เธกเธดเธเธเธฑเธเธเธนเน</AlertTitle>
+            <AlertTitle>No admin-linked doctor yet</AlertTitle>
             <AlertDescription>
-              เธเธธเธ“เธขเธฑเธเธชเธฒเธกเธฒเธฃเธ–เธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธขเธ•เธฃเธเธ–เธถเธเธซเธกเธญเนเธ”เน เนเธ”เธขเนเธกเนเธ•เนเธญเธเธฃเธญเนเธญเธ”เธกเธดเธเธเธฑเธเธเธนเน
+              You can still send requests directly to doctor. Admin pairing remains as backup.
             </AlertDescription>
           </Alert>
         ) : null}
 
         <section className="space-y-3 rounded-xl border p-3">
-          <h3 className="text-sm font-semibold">เธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธขเนเธซเนเธเธธเธ“เธซเธกเธญ</h3>
+          <h3 className="text-sm font-semibold">Send Appointment Request</h3>
           <div className="space-y-2">
-            <Label htmlFor="appointment-doctor-id">เน€เธฅเธทเธญเธเธเธธเธ“เธซเธกเธญเธ—เธตเนเธ”เธนเนเธฅ</Label>
+            <Label htmlFor="appointment-doctor-id">Doctor</Label>
             <select
               id="appointment-doctor-id"
               value={selectedDoctorId}
@@ -364,7 +367,7 @@ export const AppointmentForm = ({
             </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="appointment-preferred-at">เน€เธงเธฅเธฒเธ—เธตเนเธชเธฐเธ”เธงเธ (optional)</Label>
+            <Label htmlFor="appointment-preferred-at">Preferred time (optional)</Label>
             <Input
               id="appointment-preferred-at"
               type="datetime-local"
@@ -374,13 +377,13 @@ export const AppointmentForm = ({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="appointment-note">เธญเธฒเธเธฒเธฃเธซเธฃเธทเธญเธชเธดเนเธเธ—เธตเนเธ•เนเธญเธเธเธฒเธฃเธเธฃเธถเธเธฉเธฒ</Label>
+            <Label htmlFor="appointment-note">Symptom / consultation reason</Label>
             <Textarea
               id="appointment-note"
               rows={3}
               value={requestNote}
               onChange={(event) => setRequestNote(event.target.value)}
-              placeholder="เน€เธเนเธ เน€เธงเธตเธขเธเธซเธฑเธงเธซเธฅเธฑเธเธ—เธฒเธเธขเธฒ เธ•เนเธญเธเธเธฒเธฃเธเธฃเธถเธเธฉเธฒเนเธเธ—เธขเนเธ”เนเธงเธ"
+              placeholder="Example: dizziness after medication"
               disabled={!canRequestAppointment || submitting}
             />
           </div>
@@ -390,23 +393,23 @@ export const AppointmentForm = ({
             disabled={!canRequestAppointment || submitting || requestNote.trim().length < 3}
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {submitting ? "เธเธณเธฅเธฑเธเธชเนเธเธเธณเธเธญ..." : "เธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธข"}
+            {submitting ? "Sending..." : "Send request"}
           </Button>
         </section>
 
         <section className="space-y-3 rounded-xl border p-3">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">เธเธฑเธ”เธซเธกเธฒเธขเธเธญเธเธเธฑเธ</h3>
+            <h3 className="text-sm font-semibold">My Appointments</h3>
             <Button type="button" variant="outline" size="sm" onClick={() => void refreshAppointments()} disabled={loadingList}>
               {loadingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              เธฃเธตเน€เธเธฃเธ
+              Refresh
             </Button>
           </div>
 
           {loadingList ? (
-            <p className="text-sm text-muted-foreground">เธเธณเธฅเธฑเธเนเธซเธฅเธ”เธเธฑเธ”เธซเธกเธฒเธข...</p>
+            <p className="text-sm text-muted-foreground">Loading appointments...</p>
           ) : visibleAppointments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">เธขเธฑเธเนเธกเนเธกเธตเธเธฑเธ”เธซเธกเธฒเธขเนเธเธฃเธฐเธเธ</p>
+            <p className="text-sm text-muted-foreground">No appointments found.</p>
           ) : (
             <div className="space-y-3">
               {visibleAppointments.map((appointment) => {
@@ -421,10 +424,10 @@ export const AppointmentForm = ({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="text-sm font-semibold">
-                          เธเธธเธ“เธซเธกเธญ: {appointment.doctor?.fullName ?? appointment.doctorId}
+                          Doctor: {appointment.doctor?.fullName ?? appointment.doctorId}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          เธชเธฃเนเธฒเธเธเธณเธเธญเน€เธกเธทเนเธญ {formatDateTime(appointment.createdAt)}
+                          Created: {formatDateTime(appointment.createdAt)}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -437,57 +440,57 @@ export const AppointmentForm = ({
 
                     <div className="space-y-1 text-sm">
                       <p>
-                        เธญเธฒเธเธฒเธฃเธ—เธตเนเนเธเนเธ: <span className="font-medium">{appointment.requestNote ?? "-"}</span>
+                        Reason: <span className="font-medium">{appointment.requestNote ?? "-"}</span>
                       </p>
                       <p>
-                        เน€เธงเธฅเธฒเธ—เธตเนเธชเธฐเธ”เธงเธเน€เธ”เธดเธก: <span className="font-medium">{formatDateTime(appointment.patientPreferredAt)}</span>
+                        Preferred time: <span className="font-medium">{formatDateTime(appointment.patientPreferredAt)}</span>
                       </p>
                       <p>
-                        เธซเธกเธญเธเธฑเธ”เธซเธกเธฒเธขเน€เธงเธฅเธฒ: <span className="font-medium">{formatDateTime(appointment.scheduledAt)}</span>
+                        Scheduled time: <span className="font-medium">{formatDateTime(appointment.scheduledAt)}</span>
                       </p>
                       <p>
-                        เธชเนเธเธฅเธดเธเธเนเน€เธกเธทเนเธญ: <span className="font-medium">{formatDateTime(appointment.doctorProposedAt)}</span>
+                        Link sent at: <span className="font-medium">{formatDateTime(appointment.doctorProposedAt)}</span>
                       </p>
                       {appointment.doctorProposedNote ? (
                         <p>
-                          เธซเธกเธฒเธขเน€เธซเธ•เธธเธเธฒเธเธซเธกเธญ: <span className="font-medium">{appointment.doctorProposedNote}</span>
+                          Doctor note: <span className="font-medium">{appointment.doctorProposedNote}</span>
                         </p>
                       ) : null}
                       {appointment.patientResponseNote ? (
                         <p>
-                          เธซเธกเธฒเธขเน€เธซเธ•เธธเธเธฒเธเธเธนเนเธเนเธงเธข: <span className="font-medium">{appointment.patientResponseNote}</span>
+                          Patient note: <span className="font-medium">{appointment.patientResponseNote}</span>
                         </p>
                       ) : null}
                     </div>
 
                     {appointment.doctorConfirmationLink ? (
                       <div className="rounded-lg border bg-cyan-50/60 p-3 text-sm">
-                        <p className="font-medium">เธฅเธดเธเธเนเธขเธทเธเธขเธฑเธเธเธฑเธ”เธซเธกเธฒเธขเธเธฒเธเธเธธเธ“เธซเธกเธญ</p>
+                        <p className="font-medium">Doctor confirmation link</p>
                         <a
                           href={appointment.doctorConfirmationLink}
                           target="_blank"
                           rel="noreferrer"
                           className="mt-1 inline-flex items-center gap-1 text-cyan-800 underline underline-offset-2"
                         >
-                          เน€เธเธดเธ”เธฅเธดเธเธเนเธเธฑเธ”เธซเธกเธฒเธข
+                          Open meeting link
                           <ExternalLink className="h-3.5 w-3.5" />
                         </a>
                       </div>
                     ) : (
                       <Alert>
-                        <AlertTitle>เธฃเธญเธเธธเธ“เธซเธกเธญเธชเนเธเธฅเธดเธเธเน</AlertTitle>
+                        <AlertTitle>Waiting for doctor link</AlertTitle>
                         <AlertDescription>
-                          เธเธฑเธ”เธซเธกเธฒเธขเธเธตเนเธขเธฑเธเธขเธทเธเธขเธฑเธเนเธกเนเนเธ”เนเธเธเธเธงเนเธฒเธเธธเธ“เธซเธกเธญเธเธฐเธชเนเธเธฅเธดเธเธเนเธขเธทเธเธขเธฑเธเน€เธเนเธฒเธกเธฒ
+                          You cannot confirm this appointment until doctor sends confirmation link.
                         </AlertDescription>
                       </Alert>
                     )}
 
                     {canRespond ? (
                       <div className="space-y-2 rounded-lg border p-3">
-                        <p className="text-sm font-semibold">เธ•เธญเธเธฃเธฑเธเธเธฑเธ”เธซเธกเธฒเธขเธเธฒเธเธเธธเธ“เธซเธกเธญ</p>
+                        <p className="text-sm font-semibold">Respond to doctor appointment</p>
                         <div className="space-y-2">
                           <Label htmlFor={`appointment-response-note-${appointment.id}`}>
-                            เธเนเธญเธเธงเธฒเธกเธ–เธถเธเธเธธเธ“เธซเธกเธญ
+                            Message to doctor
                           </Label>
                           <Textarea
                             id={`appointment-response-note-${appointment.id}`}
@@ -496,12 +499,12 @@ export const AppointmentForm = ({
                             onChange={(event) =>
                               updateDraft(appointment.id, { note: event.target.value })
                             }
-                            placeholder="เน€เธเนเธ เธชเธฐเธ”เธงเธเธ•เธฒเธกเน€เธงเธฅเธฒเธเธตเน เธซเธฃเธทเธญเธเธญเน€เธฅเธทเนเธญเธเน€เธเธทเนเธญเธเธเธฒเธ..."
+                            placeholder="Example: Available at this time / Need to reschedule"
                           />
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor={`appointment-reschedule-at-${appointment.id}`}>
-                            เน€เธงเธฅเธฒเธ—เธตเนเธชเธฐเธ”เธงเธเนเธซเธกเน (เธชเธณเธซเธฃเธฑเธเธเธญเน€เธฅเธทเนเธญเธเธเธฑเธ”)
+                            New preferred time (for reschedule)
                           </Label>
                           <Input
                             id={`appointment-reschedule-at-${appointment.id}`}
@@ -523,7 +526,7 @@ export const AppointmentForm = ({
                             ) : (
                               <CheckCircle2 className="h-4 w-4" />
                             )}
-                            เธขเธทเธเธขเธฑเธเธฃเธฑเธเธเธฑเธ”
+                            Accept
                           </Button>
                           <Button
                             type="button"
@@ -535,7 +538,7 @@ export const AppointmentForm = ({
                             }
                           >
                             <XCircle className="h-4 w-4" />
-                            เธเธเธดเน€เธชเธเธเธฑเธ”
+                            Decline
                           </Button>
                           <Button
                             type="button"
@@ -543,11 +546,11 @@ export const AppointmentForm = ({
                             onClick={() => void respondToDoctor(appointment, "patient_reschedule")}
                             disabled={actionLoadingId === appointment.id}
                           >
-                            เธเธญเน€เธฅเธทเนเธญเธเธเธฑเธ”
+                            Request reschedule
                           </Button>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          เธซเธฒเธเธเธ”เธเธเธดเน€เธชเธเธเธฑเธ” เธ•เนเธญเธเธฃเธฐเธเธธเน€เธซเธ•เธธเธเธฅเธญเธขเนเธฒเธเธเนเธญเธข 3 เธ•เธฑเธงเธญเธฑเธเธฉเธฃ เนเธฅเธฐเธฃเธฐเธเธเธเธฐเธขเธเน€เธฅเธดเธเธฃเธฒเธขเธเธฒเธฃเธเธตเนเธ—เธฑเธเธ—เธต
+                          Decline requires a reason (minimum 3 characters), and the appointment is canceled immediately.
                         </p>
                       </div>
                     ) : null}
