@@ -57,16 +57,16 @@ const formatDateTime = (value: string | null) => {
 };
 
 const formatStatus = (status: AppointmentView["status"]) => {
-  if (status === "confirmed") return "confirmed";
-  if (status === "completed") return "completed";
-  return "pending";
+  if (status === "confirmed") return "ยืนยันแล้ว";
+  if (status === "completed") return "เสร็จสิ้น";
+  return "รอดำเนินการ";
 };
 
 const formatPatientResponse = (response: AppointmentView["patientResponse"]) => {
-  if (response === "accepted") return "patient accepted";
-  if (response === "declined") return "patient declined";
-  if (response === "reschedule_requested") return "reschedule requested";
-  return "awaiting patient response";
+  if (response === "accepted") return "ผู้ป่วยยืนยันแล้ว";
+  if (response === "declined") return "ผู้ป่วยปฏิเสธนัด";
+  if (response === "reschedule_requested") return "ผู้ป่วยขอเลื่อนนัด";
+  return "รอผู้ป่วยตอบรับ";
 };
 
 const toInputDateTimeValue = (iso: string | null) => {
@@ -87,7 +87,7 @@ const announceAlarm = (message: string) => {
   window.alert(message);
   if ("speechSynthesis" in window) {
     const utterance = new SpeechSynthesisUtterance(message);
-    utterance.lang = "en-US";
+    utterance.lang = "th-TH";
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   }
@@ -142,11 +142,11 @@ export const AppointmentForm = ({
       });
       const payload = (await response.json()) as ApiPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to load appointments");
+        throw new Error(payload.error ?? "โหลดรายการนัดหมายไม่สำเร็จ");
       }
       setAppointments(payload.appointments ?? []);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load appointments");
+      setError(loadError instanceof Error ? loadError.message : "โหลดรายการนัดหมายไม่สำเร็จ");
     } finally {
       setLoadingList(false);
     }
@@ -187,11 +187,11 @@ export const AppointmentForm = ({
 
   const submitRequest = async () => {
     if (!canRequestAppointment || !selectedDoctorId) {
-      setError("Please select a doctor before sending an appointment request.");
+      setError("กรุณาเลือกคุณหมอก่อนส่งคำขอนัดหมาย");
       return;
     }
     if (requestNote.trim().length < 3) {
-      setError("Please enter at least 3 characters for symptom or reason.");
+      setError("กรุณากรอกอาการหรือเหตุผลอย่างน้อย 3 ตัวอักษร");
       return;
     }
 
@@ -211,16 +211,16 @@ export const AppointmentForm = ({
 
       const payload = (await response.json()) as ApiPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to send appointment request");
+        throw new Error(payload.error ?? "ส่งคำขอนัดหมายไม่สำเร็จ");
       }
 
       setRequestNote("");
       setPreferredAt("");
-      setSuccess("Appointment request sent. Waiting for doctor confirmation link.");
+      setSuccess("ส่งคำขอนัดหมายแล้ว กรุณารอคุณหมอส่งลิงก์ยืนยันนัด");
       await refreshAppointments(true);
     } catch (submitError) {
       setError(
-        submitError instanceof Error ? submitError.message : "Failed to send appointment request",
+        submitError instanceof Error ? submitError.message : "ส่งคำขอนัดหมายไม่สำเร็จ",
       );
     } finally {
       setSubmitting(false);
@@ -251,7 +251,7 @@ export const AppointmentForm = ({
     const draft = getDraft(appointment);
 
     if (action === "patient_decline" && draft.note.trim().length < 3) {
-      setError("Please provide cancellation reason with at least 3 characters.");
+      setError("กรุณาระบุเหตุผลการปฏิเสธอย่างน้อย 3 ตัวอักษร");
       return;
     }
 
@@ -273,23 +273,23 @@ export const AppointmentForm = ({
       });
       const payload = (await response.json()) as ApiPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to respond appointment");
+        throw new Error(payload.error ?? "ตอบกลับนัดหมายไม่สำเร็จ");
       }
 
       if (action === "patient_accept") {
-        setSuccess("Appointment accepted.");
+        setSuccess("ยืนยันนัดหมายเรียบร้อย");
       } else if (action === "patient_decline") {
-        const alarmMessage = "Appointment canceled. Cancellation reason has been sent to doctor.";
-        setSuccess("Appointment canceled successfully.");
+        const alarmMessage = "ยกเลิกนัดสำเร็จ และส่งเหตุผลให้คุณหมอแล้ว";
+        setSuccess("ยกเลิกนัดหมายเรียบร้อย");
         setLastAlarmMessage(alarmMessage);
         announceAlarm(alarmMessage);
         setAppointments((current) => current.filter((item) => item.id !== appointment.id));
       } else {
-        setSuccess("Reschedule request sent to doctor.");
+        setSuccess("ส่งคำขอเลื่อนนัดให้คุณหมอแล้ว");
       }
       await refreshAppointments(true);
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Failed to respond appointment");
+      setError(actionError instanceof Error ? actionError.message : "ตอบกลับนัดหมายไม่สำเร็จ");
     } finally {
       setActionLoadingId(null);
     }
@@ -309,46 +309,46 @@ export const AppointmentForm = ({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <CalendarClock className="h-5 w-5" />
-          Doctor-Confirmed Appointment Flow
+          ระบบนัดหมายที่คุณหมอยืนยันก่อน
         </CardTitle>
         <CardDescription>
-          Patients request first, then doctor sends confirmation link. Patient can accept, decline,
-          or request reschedule.
+          ผู้ป่วยส่งคำขอก่อน แล้วรอคุณหมอส่งลิงก์นัดหมายมาให้ จากนั้นจึงกดยืนยัน
+          ปฏิเสธ หรือขอเลื่อนนัดได้
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
           <Alert variant="destructive">
-            <AlertTitle>Error</AlertTitle>
+            <AlertTitle>เกิดข้อผิดพลาด</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
         {success ? (
           <Alert>
-            <AlertTitle>Success</AlertTitle>
+            <AlertTitle>สำเร็จ</AlertTitle>
             <AlertDescription>{success}</AlertDescription>
           </Alert>
         ) : null}
         {lastAlarmMessage ? (
           <Alert>
-            <AlertTitle>Cancellation Alarm</AlertTitle>
+            <AlertTitle>แจ้งเตือนการยกเลิกนัด</AlertTitle>
             <AlertDescription>{lastAlarmMessage}</AlertDescription>
           </Alert>
         ) : null}
 
         {!hasLinkedDoctor ? (
           <Alert>
-            <AlertTitle>No admin-linked doctor yet</AlertTitle>
+            <AlertTitle>ยังไม่มีคุณหมอที่แอดมินจับคู่</AlertTitle>
             <AlertDescription>
-              You can still send requests directly to doctor. Admin pairing remains as backup.
+              คุณยังส่งคำขอนัดตรงถึงคุณหมอได้ โดยไม่ต้องรอแอดมินจับคู่
             </AlertDescription>
           </Alert>
         ) : null}
 
         <section className="space-y-3 rounded-xl border p-3">
-          <h3 className="text-sm font-semibold">Send Appointment Request</h3>
+          <h3 className="text-sm font-semibold">ส่งคำขอนัดหมาย</h3>
           <div className="space-y-2">
-            <Label htmlFor="appointment-doctor-id">Doctor</Label>
+            <Label htmlFor="appointment-doctor-id">คุณหมอที่ต้องการนัด</Label>
             <select
               id="appointment-doctor-id"
               value={selectedDoctorId}
@@ -356,18 +356,18 @@ export const AppointmentForm = ({
               disabled={!canRequestAppointment || submitting}
               className="flex h-10 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {!sortedDoctorOptions.length ? <option value="">No doctors available</option> : null}
+              {!sortedDoctorOptions.length ? <option value="">ยังไม่มีคุณหมอในระบบ</option> : null}
               {sortedDoctorOptions.map((doctor) => (
                 <option key={doctor.id} value={doctor.id}>
                   {doctor.fullName}
                   {doctor.phone ? ` (${doctor.phone})` : ""}
-                  {doctor.isLinked ? " (Admin linked)" : ""}
+                  {doctor.isLinked ? " (แอดมินจับคู่แล้ว)" : ""}
                 </option>
               ))}
             </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="appointment-preferred-at">Preferred time (optional)</Label>
+            <Label htmlFor="appointment-preferred-at">เวลาที่สะดวก (ไม่บังคับ)</Label>
             <Input
               id="appointment-preferred-at"
               type="datetime-local"
@@ -377,13 +377,13 @@ export const AppointmentForm = ({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="appointment-note">Symptom / consultation reason</Label>
+            <Label htmlFor="appointment-note">อาการหรือเหตุผลที่ต้องการปรึกษา</Label>
             <Textarea
               id="appointment-note"
               rows={3}
               value={requestNote}
               onChange={(event) => setRequestNote(event.target.value)}
-              placeholder="Example: dizziness after medication"
+              placeholder="เช่น เวียนหัวหลังทานยา ต้องการปรึกษาแพทย์ด่วน"
               disabled={!canRequestAppointment || submitting}
             />
           </div>
@@ -393,23 +393,23 @@ export const AppointmentForm = ({
             disabled={!canRequestAppointment || submitting || requestNote.trim().length < 3}
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {submitting ? "Sending..." : "Send request"}
+            {submitting ? "กำลังส่ง..." : "ส่งคำขอนัดหมาย"}
           </Button>
         </section>
 
         <section className="space-y-3 rounded-xl border p-3">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">My Appointments</h3>
+            <h3 className="text-sm font-semibold">นัดหมายของฉัน</h3>
             <Button type="button" variant="outline" size="sm" onClick={() => void refreshAppointments()} disabled={loadingList}>
               {loadingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              Refresh
+              รีเฟรช
             </Button>
           </div>
 
           {loadingList ? (
-            <p className="text-sm text-muted-foreground">Loading appointments...</p>
+            <p className="text-sm text-muted-foreground">กำลังโหลดรายการนัดหมาย...</p>
           ) : visibleAppointments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No appointments found.</p>
+            <p className="text-sm text-muted-foreground">ยังไม่มีนัดหมายในระบบ</p>
           ) : (
             <div className="space-y-3">
               {visibleAppointments.map((appointment) => {
@@ -424,10 +424,10 @@ export const AppointmentForm = ({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="text-sm font-semibold">
-                          Doctor: {appointment.doctor?.fullName ?? appointment.doctorId}
+                          คุณหมอ: {appointment.doctor?.fullName ?? appointment.doctorId}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Created: {formatDateTime(appointment.createdAt)}
+                          สร้างเมื่อ: {formatDateTime(appointment.createdAt)}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -440,57 +440,57 @@ export const AppointmentForm = ({
 
                     <div className="space-y-1 text-sm">
                       <p>
-                        Reason: <span className="font-medium">{appointment.requestNote ?? "-"}</span>
+                        อาการที่แจ้ง: <span className="font-medium">{appointment.requestNote ?? "-"}</span>
                       </p>
                       <p>
-                        Preferred time: <span className="font-medium">{formatDateTime(appointment.patientPreferredAt)}</span>
+                        เวลาที่สะดวกเดิม: <span className="font-medium">{formatDateTime(appointment.patientPreferredAt)}</span>
                       </p>
                       <p>
-                        Scheduled time: <span className="font-medium">{formatDateTime(appointment.scheduledAt)}</span>
+                        หมอนัดเวลา: <span className="font-medium">{formatDateTime(appointment.scheduledAt)}</span>
                       </p>
                       <p>
-                        Link sent at: <span className="font-medium">{formatDateTime(appointment.doctorProposedAt)}</span>
+                        ส่งลิงก์เมื่อ: <span className="font-medium">{formatDateTime(appointment.doctorProposedAt)}</span>
                       </p>
                       {appointment.doctorProposedNote ? (
                         <p>
-                          Doctor note: <span className="font-medium">{appointment.doctorProposedNote}</span>
+                          หมายเหตุจากคุณหมอ: <span className="font-medium">{appointment.doctorProposedNote}</span>
                         </p>
                       ) : null}
                       {appointment.patientResponseNote ? (
                         <p>
-                          Patient note: <span className="font-medium">{appointment.patientResponseNote}</span>
+                          หมายเหตุจากผู้ป่วย: <span className="font-medium">{appointment.patientResponseNote}</span>
                         </p>
                       ) : null}
                     </div>
 
                     {appointment.doctorConfirmationLink ? (
                       <div className="rounded-lg border bg-cyan-50/60 p-3 text-sm">
-                        <p className="font-medium">Doctor confirmation link</p>
+                        <p className="font-medium">ลิงก์ยืนยันนัดจากคุณหมอ</p>
                         <a
                           href={appointment.doctorConfirmationLink}
                           target="_blank"
                           rel="noreferrer"
                           className="mt-1 inline-flex items-center gap-1 text-cyan-800 underline underline-offset-2"
                         >
-                          Open meeting link
+                          เปิดลิงก์นัดหมาย
                           <ExternalLink className="h-3.5 w-3.5" />
                         </a>
                       </div>
                     ) : (
                       <Alert>
-                        <AlertTitle>Waiting for doctor link</AlertTitle>
+                        <AlertTitle>รอคุณหมอส่งลิงก์</AlertTitle>
                         <AlertDescription>
-                          You cannot confirm this appointment until doctor sends confirmation link.
+                          นัดนี้ยังยืนยันไม่ได้จนกว่าคุณหมอจะส่งลิงก์ยืนยันนัดมาให้
                         </AlertDescription>
                       </Alert>
                     )}
 
                     {canRespond ? (
                       <div className="space-y-2 rounded-lg border p-3">
-                        <p className="text-sm font-semibold">Respond to doctor appointment</p>
+                        <p className="text-sm font-semibold">ตอบรับนัดหมายจากคุณหมอ</p>
                         <div className="space-y-2">
                           <Label htmlFor={`appointment-response-note-${appointment.id}`}>
-                            Message to doctor
+                            ข้อความถึงคุณหมอ
                           </Label>
                           <Textarea
                             id={`appointment-response-note-${appointment.id}`}
@@ -499,12 +499,12 @@ export const AppointmentForm = ({
                             onChange={(event) =>
                               updateDraft(appointment.id, { note: event.target.value })
                             }
-                            placeholder="Example: Available at this time / Need to reschedule"
+                            placeholder="เช่น สะดวกเวลานี้ หรือขอเลื่อนเนื่องจาก..."
                           />
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor={`appointment-reschedule-at-${appointment.id}`}>
-                            New preferred time (for reschedule)
+                            เวลาที่สะดวกใหม่ (ใช้เมื่อขอเลื่อนนัด)
                           </Label>
                           <Input
                             id={`appointment-reschedule-at-${appointment.id}`}
@@ -526,7 +526,7 @@ export const AppointmentForm = ({
                             ) : (
                               <CheckCircle2 className="h-4 w-4" />
                             )}
-                            Accept
+                            ยืนยันรับนัด
                           </Button>
                           <Button
                             type="button"
@@ -538,7 +538,7 @@ export const AppointmentForm = ({
                             }
                           >
                             <XCircle className="h-4 w-4" />
-                            Decline
+                            ปฏิเสธนัด
                           </Button>
                           <Button
                             type="button"
@@ -546,11 +546,11 @@ export const AppointmentForm = ({
                             onClick={() => void respondToDoctor(appointment, "patient_reschedule")}
                             disabled={actionLoadingId === appointment.id}
                           >
-                            Request reschedule
+                            ขอเลื่อนนัด
                           </Button>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          Decline requires a reason (minimum 3 characters), and the appointment is canceled immediately.
+                          หากปฏิเสธนัด ต้องใส่เหตุผลอย่างน้อย 3 ตัวอักษร และระบบจะยกเลิกนัดทันที
                         </p>
                       </div>
                     ) : null}
