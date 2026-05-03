@@ -57,16 +57,16 @@ const formatDateTime = (value: string | null) => {
 };
 
 const formatStatus = (status: AppointmentView["status"]) => {
-  if (status === "confirmed") return "ยืนยันแล้ว";
-  if (status === "completed") return "เสร็จสิ้น";
-  return "รอดำเนินการ";
+  if (status === "confirmed") return "เธขเธทเธเธขเธฑเธเนเธฅเนเธง";
+  if (status === "completed") return "เน€เธชเธฃเนเธเธชเธดเนเธ";
+  return "เธฃเธญเธ”เธณเน€เธเธดเธเธเธฒเธฃ";
 };
 
 const formatPatientResponse = (response: AppointmentView["patientResponse"]) => {
-  if (response === "accepted") return "ผู้ป่วยยืนยันรับนัดแล้ว";
-  if (response === "declined") return "ผู้ป่วยปฏิเสธนัด";
-  if (response === "reschedule_requested") return "ผู้ป่วยขอเลื่อนนัด";
-  return "รอผู้ป่วยตอบรับ";
+  if (response === "accepted") return "เธเธนเนเธเนเธงเธขเธขเธทเธเธขเธฑเธเนเธฅเนเธง";
+  if (response === "declined") return "เธเธนเนเธเนเธงเธขเธเธเธดเน€เธชเธ";
+  if (response === "reschedule_requested") return "เธเธนเนเธเนเธงเธขเธเธญเน€เธฅเธทเนเธญเธเธเธฑเธ”";
+  return "เธฃเธญเธเธนเนเธเนเธงเธขเธ•เธญเธเธฃเธฑเธ";
 };
 
 const toInputDateTimeValue = (iso: string | null) => {
@@ -80,6 +80,17 @@ const toInputDateTimeValue = (iso: string | null) => {
   const hour = pad(date.getHours());
   const minute = pad(date.getMinutes());
   return `${year}-${month}-${day}T${hour}:${minute}`;
+};
+
+const announceAlarm = (message: string) => {
+  if (typeof window === "undefined") return;
+  window.alert(message);
+  if ("speechSynthesis" in window) {
+    const utterance = new SpeechSynthesisUtterance(message);
+    utterance.lang = "th-TH";
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  }
 };
 
 export const AppointmentForm = ({
@@ -112,6 +123,7 @@ export const AppointmentForm = ({
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [lastAlarmMessage, setLastAlarmMessage] = useState<string | null>(null);
 
   const selectedDoctorId = useMemo(() => {
     if (doctorId && sortedDoctorOptions.some((doctor) => doctor.id === doctorId)) {
@@ -130,11 +142,11 @@ export const AppointmentForm = ({
       });
       const payload = (await response.json()) as ApiPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "โหลดนัดหมายไม่สำเร็จ");
+        throw new Error(payload.error ?? "เนเธซเธฅเธ”เธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
       }
       setAppointments(payload.appointments ?? []);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "โหลดนัดหมายไม่สำเร็จ");
+      setError(loadError instanceof Error ? loadError.message : "เนเธซเธฅเธ”เธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
     } finally {
       setLoadingList(false);
     }
@@ -175,11 +187,11 @@ export const AppointmentForm = ({
 
   const submitRequest = async () => {
     if (!canRequestAppointment || !selectedDoctorId) {
-      setError("Please select a doctor before sending an appointment request.");
+      setError("เธเธฃเธธเธ“เธฒเน€เธฅเธทเธญเธเธเธธเธ“เธซเธกเธญเธเนเธญเธเธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธข");
       return;
     }
     if (requestNote.trim().length < 3) {
-      setError("กรุณาระบุอาการหรือเรื่องที่ต้องการปรึกษาอย่างน้อย 3 ตัวอักษร");
+      setError("เธเธฃเธธเธ“เธฒเธฃเธฐเธเธธเธญเธฒเธเธฒเธฃเธซเธฃเธทเธญเธชเธดเนเธเธ—เธตเนเธ•เนเธญเธเธเธฒเธฃเธเธฃเธถเธเธฉเธฒเธญเธขเนเธฒเธเธเนเธญเธข 3 เธ•เธฑเธงเธญเธฑเธเธฉเธฃ");
       return;
     }
 
@@ -199,15 +211,15 @@ export const AppointmentForm = ({
 
       const payload = (await response.json()) as ApiPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "ส่งคำขอนัดหมายไม่สำเร็จ");
+        throw new Error(payload.error ?? "เธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
       }
 
       setRequestNote("");
       setPreferredAt("");
-      setSuccess("ส่งคำขอถึงคุณหมอแล้ว รอคุณหมอส่งลิงก์ยืนยันนัดหมาย");
+      setSuccess("เธชเนเธเธเธณเธเธญเธ–เธถเธเธเธธเธ“เธซเธกเธญเนเธฅเนเธง เธฃเธญเธเธธเธ“เธซเธกเธญเธชเนเธเธฅเธดเธเธเนเธขเธทเธเธขเธฑเธเธเธฑเธ”เธซเธกเธฒเธข");
       await refreshAppointments(true);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "ส่งคำขอนัดหมายไม่สำเร็จ");
+      setError(submitError instanceof Error ? submitError.message : "เธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
     } finally {
       setSubmitting(false);
     }
@@ -236,9 +248,15 @@ export const AppointmentForm = ({
     const token = appointment.doctorConfirmationToken;
     const draft = getDraft(appointment);
 
+    if (action === "patient_decline" && draft.note.trim().length < 3) {
+      setError("เธเธฃเธธเธ“เธฒเธฃเธฐเธเธธเน€เธซเธ•เธธเธเธฅเธ—เธตเนเธขเธเน€เธฅเธดเธเธเธฑเธ”เธญเธขเนเธฒเธเธเนเธญเธข 3 เธ•เธฑเธงเธญเธฑเธเธฉเธฃ");
+      return;
+    }
+
     setActionLoadingId(appointment.id);
     setError(null);
     setSuccess(null);
+    setLastAlarmMessage(null);
     try {
       const response = await fetch("/api/appointments", {
         method: "PATCH",
@@ -253,63 +271,81 @@ export const AppointmentForm = ({
       });
       const payload = (await response.json()) as ApiPayload;
       if (!response.ok) {
-        throw new Error(payload.error ?? "ตอบกลับนัดหมายไม่สำเร็จ");
+        throw new Error(payload.error ?? "เธ•เธญเธเธเธฅเธฑเธเธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
       }
 
       if (action === "patient_accept") {
-        setSuccess("ยืนยันรับนัดหมายเรียบร้อยแล้ว");
+        setSuccess("เธขเธทเธเธขเธฑเธเธฃเธฑเธเธเธฑเธ”เธซเธกเธฒเธขเน€เธฃเธตเธขเธเธฃเนเธญเธขเนเธฅเนเธง");
       } else if (action === "patient_decline") {
-        setSuccess("ปฏิเสธนัดหมายเรียบร้อยแล้ว");
+        const alarmMessage = "เธขเธเน€เธฅเธดเธเธเธฑเธ”เนเธฅเนเธง เนเธฅเธฐเธชเนเธเน€เธซเธ•เธธเธเธฅเนเธซเนเธเธธเธ“เธซเธกเธญเน€เธฃเธตเธขเธเธฃเนเธญเธข";
+        setSuccess("เธขเธเน€เธฅเธดเธเธเธฑเธ”เธซเธกเธฒเธขเธชเธณเน€เธฃเนเธ เธฃเธฒเธขเธเธฒเธฃเธเธตเนเธ–เธนเธเธขเธเน€เธฅเธดเธเนเธฅเนเธง");
+        setLastAlarmMessage(alarmMessage);
+        announceAlarm(alarmMessage);
+        setAppointments((current) => current.filter((item) => item.id !== appointment.id));
       } else {
-        setSuccess("ส่งคำขอเลื่อนนัดให้คุณหมอเรียบร้อยแล้ว");
+        setSuccess("เธชเนเธเธเธณเธเธญเน€เธฅเธทเนเธญเธเธเธฑเธ”เนเธซเนเธเธธเธ“เธซเธกเธญเน€เธฃเธตเธขเธเธฃเนเธญเธขเนเธฅเนเธง");
       }
       await refreshAppointments(true);
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "ตอบกลับนัดหมายไม่สำเร็จ");
+      setError(actionError instanceof Error ? actionError.message : "เธ•เธญเธเธเธฅเธฑเธเธเธฑเธ”เธซเธกเธฒเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
     } finally {
       setActionLoadingId(null);
     }
   };
+
+  const visibleAppointments = useMemo(
+    () =>
+      appointments.filter(
+        (appointment) =>
+          !(appointment.status === "completed" && appointment.patientResponse === "declined"),
+      ),
+    [appointments],
+  );
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <CalendarClock className="h-5 w-5" />
-          ระบบนัดหมายที่คุณหมอยืนยันก่อน
+          เธฃเธฐเธเธเธเธฑเธ”เธซเธกเธฒเธขเธ—เธตเนเธเธธเธ“เธซเธกเธญเธขเธทเธเธขเธฑเธเธเนเธญเธ
         </CardTitle>
         <CardDescription>
-          ผู้ป่วยส่งคำขอก่อน แล้วรอคุณหมอส่งลิงก์นัดหมายมาให้ จากนั้นจึงกดยืนยัน / ปฏิเสธ / ขอเลื่อนนัดได้
+          เธเธนเนเธเนเธงเธขเธชเนเธเธเธณเธเธญเธเนเธญเธ เนเธฅเนเธงเธฃเธญเธเธธเธ“เธซเธกเธญเธชเนเธเธฅเธดเธเธเนเธเธฑเธ”เธซเธกเธฒเธขเธกเธฒเนเธซเน เธเธฒเธเธเธฑเนเธเธเธถเธเธเธ”เธขเธทเธเธขเธฑเธ / เธเธเธดเน€เธชเธ / เธเธญเน€เธฅเธทเนเธญเธเธเธฑเธ”เนเธ”เน
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
           <Alert variant="destructive">
-            <AlertTitle>เกิดข้อผิดพลาด</AlertTitle>
+            <AlertTitle>เน€เธเธดเธ”เธเนเธญเธเธดเธ”เธเธฅเธฒเธ”</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
         {success ? (
           <Alert>
-            <AlertTitle>สำเร็จ</AlertTitle>
+            <AlertTitle>เธชเธณเน€เธฃเนเธ</AlertTitle>
             <AlertDescription>{success}</AlertDescription>
+          </Alert>
+        ) : null}
+        {lastAlarmMessage ? (
+          <Alert>
+            <AlertTitle>เนเธเนเธเน€เธ•เธทเธญเธเธเธฒเธฃเธขเธเน€เธฅเธดเธเธเธฑเธ”</AlertTitle>
+            <AlertDescription>{lastAlarmMessage}</AlertDescription>
           </Alert>
         ) : null}
 
         {!hasLinkedDoctor ? (
           <Alert>
-            <AlertTitle>No admin-linked doctor yet</AlertTitle>
+            <AlertTitle>เธขเธฑเธเนเธกเนเธกเธตเธซเธกเธญเธ—เธตเนเนเธญเธ”เธกเธดเธเธเธฑเธเธเธนเน</AlertTitle>
             <AlertDescription>
-              You can still send appointment requests directly to a doctor without admin pairing.
-              Admin pairing remains available as a backup workflow.
+              เธเธธเธ“เธขเธฑเธเธชเธฒเธกเธฒเธฃเธ–เธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธขเธ•เธฃเธเธ–เธถเธเธซเธกเธญเนเธ”เน เนเธ”เธขเนเธกเนเธ•เนเธญเธเธฃเธญเนเธญเธ”เธกเธดเธเธเธฑเธเธเธนเน
             </AlertDescription>
           </Alert>
         ) : null}
 
         <section className="space-y-3 rounded-xl border p-3">
-          <h3 className="text-sm font-semibold">ส่งคำขอนัดหมายให้คุณหมอ</h3>
+          <h3 className="text-sm font-semibold">เธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธขเนเธซเนเธเธธเธ“เธซเธกเธญ</h3>
           <div className="space-y-2">
-            <Label htmlFor="appointment-doctor-id">เลือกคุณหมอที่ดูแล</Label>
+            <Label htmlFor="appointment-doctor-id">เน€เธฅเธทเธญเธเธเธธเธ“เธซเธกเธญเธ—เธตเนเธ”เธนเนเธฅ</Label>
             <select
               id="appointment-doctor-id"
               value={selectedDoctorId}
@@ -328,7 +364,7 @@ export const AppointmentForm = ({
             </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="appointment-preferred-at">เวลาที่สะดวก (optional)</Label>
+            <Label htmlFor="appointment-preferred-at">เน€เธงเธฅเธฒเธ—เธตเนเธชเธฐเธ”เธงเธ (optional)</Label>
             <Input
               id="appointment-preferred-at"
               type="datetime-local"
@@ -338,13 +374,13 @@ export const AppointmentForm = ({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="appointment-note">อาการหรือสิ่งที่ต้องการปรึกษา</Label>
+            <Label htmlFor="appointment-note">เธญเธฒเธเธฒเธฃเธซเธฃเธทเธญเธชเธดเนเธเธ—เธตเนเธ•เนเธญเธเธเธฒเธฃเธเธฃเธถเธเธฉเธฒ</Label>
             <Textarea
               id="appointment-note"
               rows={3}
               value={requestNote}
               onChange={(event) => setRequestNote(event.target.value)}
-              placeholder="เช่น เวียนหัวหลังทานยา ต้องการปรึกษาแพทย์ด่วน"
+              placeholder="เน€เธเนเธ เน€เธงเธตเธขเธเธซเธฑเธงเธซเธฅเธฑเธเธ—เธฒเธเธขเธฒ เธ•เนเธญเธเธเธฒเธฃเธเธฃเธถเธเธฉเธฒเนเธเธ—เธขเนเธ”เนเธงเธ"
               disabled={!canRequestAppointment || submitting}
             />
           </div>
@@ -354,26 +390,26 @@ export const AppointmentForm = ({
             disabled={!canRequestAppointment || submitting || requestNote.trim().length < 3}
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {submitting ? "กำลังส่งคำขอ..." : "ส่งคำขอนัดหมาย"}
+            {submitting ? "เธเธณเธฅเธฑเธเธชเนเธเธเธณเธเธญ..." : "เธชเนเธเธเธณเธเธญเธเธฑเธ”เธซเธกเธฒเธข"}
           </Button>
         </section>
 
         <section className="space-y-3 rounded-xl border p-3">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">นัดหมายของฉัน</h3>
+            <h3 className="text-sm font-semibold">เธเธฑเธ”เธซเธกเธฒเธขเธเธญเธเธเธฑเธ</h3>
             <Button type="button" variant="outline" size="sm" onClick={() => void refreshAppointments()} disabled={loadingList}>
               {loadingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              รีเฟรช
+              เธฃเธตเน€เธเธฃเธ
             </Button>
           </div>
 
           {loadingList ? (
-            <p className="text-sm text-muted-foreground">กำลังโหลดนัดหมาย...</p>
-          ) : appointments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">ยังไม่มีนัดหมายในระบบ</p>
+            <p className="text-sm text-muted-foreground">เธเธณเธฅเธฑเธเนเธซเธฅเธ”เธเธฑเธ”เธซเธกเธฒเธข...</p>
+          ) : visibleAppointments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">เธขเธฑเธเนเธกเนเธกเธตเธเธฑเธ”เธซเธกเธฒเธขเนเธเธฃเธฐเธเธ</p>
           ) : (
             <div className="space-y-3">
-              {appointments.map((appointment) => {
+              {visibleAppointments.map((appointment) => {
                 const draft = getDraft(appointment);
                 const canRespond =
                   appointment.status === "pending" &&
@@ -385,10 +421,10 @@ export const AppointmentForm = ({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="text-sm font-semibold">
-                          คุณหมอ: {appointment.doctor?.fullName ?? appointment.doctorId}
+                          เธเธธเธ“เธซเธกเธญ: {appointment.doctor?.fullName ?? appointment.doctorId}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          สร้างคำขอเมื่อ {formatDateTime(appointment.createdAt)}
+                          เธชเธฃเนเธฒเธเธเธณเธเธญเน€เธกเธทเนเธญ {formatDateTime(appointment.createdAt)}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -401,57 +437,57 @@ export const AppointmentForm = ({
 
                     <div className="space-y-1 text-sm">
                       <p>
-                        อาการที่แจ้ง: <span className="font-medium">{appointment.requestNote ?? "-"}</span>
+                        เธญเธฒเธเธฒเธฃเธ—เธตเนเนเธเนเธ: <span className="font-medium">{appointment.requestNote ?? "-"}</span>
                       </p>
                       <p>
-                        เวลาที่สะดวกเดิม: <span className="font-medium">{formatDateTime(appointment.patientPreferredAt)}</span>
+                        เน€เธงเธฅเธฒเธ—เธตเนเธชเธฐเธ”เธงเธเน€เธ”เธดเธก: <span className="font-medium">{formatDateTime(appointment.patientPreferredAt)}</span>
                       </p>
                       <p>
-                        หมอนัดหมายเวลา: <span className="font-medium">{formatDateTime(appointment.scheduledAt)}</span>
+                        เธซเธกเธญเธเธฑเธ”เธซเธกเธฒเธขเน€เธงเธฅเธฒ: <span className="font-medium">{formatDateTime(appointment.scheduledAt)}</span>
                       </p>
                       <p>
-                        ส่งลิงก์เมื่อ: <span className="font-medium">{formatDateTime(appointment.doctorProposedAt)}</span>
+                        เธชเนเธเธฅเธดเธเธเนเน€เธกเธทเนเธญ: <span className="font-medium">{formatDateTime(appointment.doctorProposedAt)}</span>
                       </p>
                       {appointment.doctorProposedNote ? (
                         <p>
-                          หมายเหตุจากหมอ: <span className="font-medium">{appointment.doctorProposedNote}</span>
+                          เธซเธกเธฒเธขเน€เธซเธ•เธธเธเธฒเธเธซเธกเธญ: <span className="font-medium">{appointment.doctorProposedNote}</span>
                         </p>
                       ) : null}
                       {appointment.patientResponseNote ? (
                         <p>
-                          หมายเหตุฝั่งผู้ป่วย: <span className="font-medium">{appointment.patientResponseNote}</span>
+                          เธซเธกเธฒเธขเน€เธซเธ•เธธเธเธฒเธเธเธนเนเธเนเธงเธข: <span className="font-medium">{appointment.patientResponseNote}</span>
                         </p>
                       ) : null}
                     </div>
 
                     {appointment.doctorConfirmationLink ? (
                       <div className="rounded-lg border bg-cyan-50/60 p-3 text-sm">
-                        <p className="font-medium">ลิงก์ยืนยันนัดหมายจากคุณหมอ</p>
+                        <p className="font-medium">เธฅเธดเธเธเนเธขเธทเธเธขเธฑเธเธเธฑเธ”เธซเธกเธฒเธขเธเธฒเธเธเธธเธ“เธซเธกเธญ</p>
                         <a
                           href={appointment.doctorConfirmationLink}
                           target="_blank"
                           rel="noreferrer"
                           className="mt-1 inline-flex items-center gap-1 text-cyan-800 underline underline-offset-2"
                         >
-                          เปิดลิงก์นัดหมาย
+                          เน€เธเธดเธ”เธฅเธดเธเธเนเธเธฑเธ”เธซเธกเธฒเธข
                           <ExternalLink className="h-3.5 w-3.5" />
                         </a>
                       </div>
                     ) : (
                       <Alert>
-                        <AlertTitle>รอคุณหมอส่งลิงก์</AlertTitle>
+                        <AlertTitle>เธฃเธญเธเธธเธ“เธซเธกเธญเธชเนเธเธฅเธดเธเธเน</AlertTitle>
                         <AlertDescription>
-                          นัดหมายนี้ยังยืนยันไม่ได้จนกว่าคุณหมอจะส่งลิงก์ยืนยันเข้ามา
+                          เธเธฑเธ”เธซเธกเธฒเธขเธเธตเนเธขเธฑเธเธขเธทเธเธขเธฑเธเนเธกเนเนเธ”เนเธเธเธเธงเนเธฒเธเธธเธ“เธซเธกเธญเธเธฐเธชเนเธเธฅเธดเธเธเนเธขเธทเธเธขเธฑเธเน€เธเนเธฒเธกเธฒ
                         </AlertDescription>
                       </Alert>
                     )}
 
                     {canRespond ? (
                       <div className="space-y-2 rounded-lg border p-3">
-                        <p className="text-sm font-semibold">ตอบรับนัดหมายจากคุณหมอ</p>
+                        <p className="text-sm font-semibold">เธ•เธญเธเธฃเธฑเธเธเธฑเธ”เธซเธกเธฒเธขเธเธฒเธเธเธธเธ“เธซเธกเธญ</p>
                         <div className="space-y-2">
                           <Label htmlFor={`appointment-response-note-${appointment.id}`}>
-                            ข้อความถึงคุณหมอ (optional)
+                            เธเนเธญเธเธงเธฒเธกเธ–เธถเธเธเธธเธ“เธซเธกเธญ
                           </Label>
                           <Textarea
                             id={`appointment-response-note-${appointment.id}`}
@@ -460,12 +496,12 @@ export const AppointmentForm = ({
                             onChange={(event) =>
                               updateDraft(appointment.id, { note: event.target.value })
                             }
-                            placeholder="เช่น สะดวกตามเวลานี้ หรือขอเลื่อนเนื่องจาก..."
+                            placeholder="เน€เธเนเธ เธชเธฐเธ”เธงเธเธ•เธฒเธกเน€เธงเธฅเธฒเธเธตเน เธซเธฃเธทเธญเธเธญเน€เธฅเธทเนเธญเธเน€เธเธทเนเธญเธเธเธฒเธ..."
                           />
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor={`appointment-reschedule-at-${appointment.id}`}>
-                            เวลาที่สะดวกใหม่ (สำหรับขอเลื่อนนัด)
+                            เน€เธงเธฅเธฒเธ—เธตเนเธชเธฐเธ”เธงเธเนเธซเธกเน (เธชเธณเธซเธฃเธฑเธเธเธญเน€เธฅเธทเนเธญเธเธเธฑเธ”)
                           </Label>
                           <Input
                             id={`appointment-reschedule-at-${appointment.id}`}
@@ -487,16 +523,19 @@ export const AppointmentForm = ({
                             ) : (
                               <CheckCircle2 className="h-4 w-4" />
                             )}
-                            ยืนยันรับนัด
+                            เธขเธทเธเธขเธฑเธเธฃเธฑเธเธเธฑเธ”
                           </Button>
                           <Button
                             type="button"
                             variant="outline"
                             onClick={() => void respondToDoctor(appointment, "patient_decline")}
-                            disabled={actionLoadingId === appointment.id}
+                            disabled={
+                              actionLoadingId === appointment.id ||
+                              draft.note.trim().length < 3
+                            }
                           >
                             <XCircle className="h-4 w-4" />
-                            ปฏิเสธนัด
+                            เธเธเธดเน€เธชเธเธเธฑเธ”
                           </Button>
                           <Button
                             type="button"
@@ -504,9 +543,12 @@ export const AppointmentForm = ({
                             onClick={() => void respondToDoctor(appointment, "patient_reschedule")}
                             disabled={actionLoadingId === appointment.id}
                           >
-                            ขอเลื่อนนัด
+                            เธเธญเน€เธฅเธทเนเธญเธเธเธฑเธ”
                           </Button>
                         </div>
+                        <p className="text-xs text-muted-foreground">
+                          เธซเธฒเธเธเธ”เธเธเธดเน€เธชเธเธเธฑเธ” เธ•เนเธญเธเธฃเธฐเธเธธเน€เธซเธ•เธธเธเธฅเธญเธขเนเธฒเธเธเนเธญเธข 3 เธ•เธฑเธงเธญเธฑเธเธฉเธฃ เนเธฅเธฐเธฃเธฐเธเธเธเธฐเธขเธเน€เธฅเธดเธเธฃเธฒเธขเธเธฒเธฃเธเธตเนเธ—เธฑเธเธ—เธต
+                        </p>
                       </div>
                     ) : null}
                   </div>

@@ -206,6 +206,17 @@ const normalizePatientResponse = (
   return "pending";
 };
 
+const getRequiredCancellationReason = (
+  note: string | null | undefined,
+  minimumLength = 3,
+) => {
+  const normalized = normalizeText(note);
+  if (!normalized || normalized.length < minimumLength) {
+    return null;
+  }
+  return normalized;
+};
+
 const hasLegacyDoctorLink = (requestNote: string | null | undefined) =>
   (requestNote ?? "").includes("[Doctor link]");
 
@@ -719,13 +730,18 @@ export async function PATCH(request: Request) {
     }
 
     if (payload.action === "patient_decline") {
+      const cancellationReason = getRequiredCancellationReason(payload.note);
+      if (!cancellationReason) {
+        return badRequest("Please provide a cancellation reason (at least 3 characters)");
+      }
+
       const { error: updateError } = await supabase
         .from("appointments")
         .update({
-          status: "pending",
+          status: "completed",
           request_note: appendLegacyNote(legacyAppointment.request_note, [
             "[Patient declined]",
-            payload.note ? `[Patient note] ${payload.note}` : null,
+            `[Patient note] ${cancellationReason}`,
           ]),
           updated_at: now,
         })
@@ -735,7 +751,7 @@ export async function PATCH(request: Request) {
         return NextResponse.json({ error: updateError.message }, { status: 400 });
       }
 
-      return NextResponse.json({ success: true, status: "pending" });
+      return NextResponse.json({ success: true, status: "completed" });
     }
 
     const preferredAt = parseDateInput(payload.preferredAt);
@@ -901,13 +917,18 @@ export async function PATCH(request: Request) {
   }
 
   if (payload.action === "patient_decline") {
+    const cancellationReason = getRequiredCancellationReason(payload.note);
+    if (!cancellationReason) {
+      return badRequest("Please provide a cancellation reason (at least 3 characters)");
+    }
+
     const { error } = await withAppointmentSchemaRecovery(() =>
       supabase
         .from("appointments")
         .update({
-          status: "pending",
+          status: "completed",
           patient_response: "declined",
-          patient_response_note: normalizeText(payload.note),
+          patient_response_note: cancellationReason,
           patient_responded_at: now,
           updated_at: now,
         })
@@ -921,7 +942,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, status: "pending" });
+    return NextResponse.json({ success: true, status: "completed" });
   }
 
   const preferredAt = parseDateInput(payload.preferredAt);
