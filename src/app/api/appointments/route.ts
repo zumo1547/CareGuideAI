@@ -7,6 +7,7 @@ import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers
 import { ensureAppointmentSchema } from "@/lib/appointment-schema-bootstrap";
 import { env } from "@/lib/env";
 import { isSchemaCacheMissingError } from "@/lib/onboarding-storage";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { AppointmentView } from "@/types/appointment";
 import type { AppointmentStatus } from "@/types/domain";
@@ -568,12 +569,14 @@ export async function POST(request: Request) {
 
   await tryEnsureAppointmentSchema();
 
-  const supabase = await createSupabaseServerClient();
+  const writeSupabase = env.SUPABASE_SERVICE_ROLE_KEY
+    ? createSupabaseAdminClient()
+    : await createSupabaseServerClient();
   const now = new Date().toISOString();
   const isDoctorCreated = auth.role === "doctor";
 
   const { data, error } = await withAppointmentWriteRecovery<{ id: string }>(() =>
-    supabase
+    writeSupabase
       .from("appointments")
       .insert({
         patient_id: patientId,
@@ -599,7 +602,7 @@ export async function POST(request: Request) {
 
   if (error || !data) {
     if (isAppointmentSchemaMismatchError(error)) {
-      const legacyInsert = await supabase
+      const legacyInsert = await writeSupabase
         .from("appointments")
         .insert({
           patient_id: patientId,
@@ -655,7 +658,7 @@ export async function PATCH(request: Request) {
   await tryEnsureAppointmentSchema();
 
   const payload = parsed.data;
-  const { data: appointment, error: appointmentError, supabase, legacyMode } =
+  const { data: appointment, error: appointmentError, legacyMode } =
     await selectAppointmentForAction(payload.appointmentId);
 
   if (appointmentError) {
@@ -677,6 +680,9 @@ export async function PATCH(request: Request) {
   }
 
   const now = new Date().toISOString();
+  const writeSupabase = env.SUPABASE_SERVICE_ROLE_KEY
+    ? createSupabaseAdminClient()
+    : await createSupabaseServerClient();
 
   if (legacyMode) {
     const legacyAppointment = appointment as AppointmentActionLegacyRow;
@@ -703,7 +709,7 @@ export async function PATCH(request: Request) {
         payload.note ? `[Doctor note] ${payload.note}` : null,
       ]);
 
-      const { error: updateError } = await supabase
+      let updateQuery = writeSupabase
         .from("appointments")
         .update({
           scheduled_at: scheduledAt,
@@ -712,6 +718,12 @@ export async function PATCH(request: Request) {
           updated_at: now,
         })
         .eq("id", legacyAppointment.id);
+
+      if (auth.role === "doctor") {
+        updateQuery = updateQuery.eq("doctor_id", auth.userId);
+      }
+
+      const { error: updateError } = await updateQuery;
 
       if (updateError) {
         if (isAppointmentRlsPolicyError(updateError)) {
@@ -731,13 +743,19 @@ export async function PATCH(request: Request) {
         return forbidden("Patient cannot close appointment");
       }
 
-      const { error: updateError } = await supabase
+      let updateQuery = writeSupabase
         .from("appointments")
         .update({
           status: "completed",
           updated_at: now,
         })
         .eq("id", legacyAppointment.id);
+
+      if (auth.role === "doctor") {
+        updateQuery = updateQuery.eq("doctor_id", auth.userId);
+      }
+
+      const { error: updateError } = await updateQuery;
 
       if (updateError) {
         if (isAppointmentRlsPolicyError(updateError)) {
@@ -758,7 +776,7 @@ export async function PATCH(request: Request) {
     }
 
     if (payload.action === "patient_accept") {
-      const { error: updateError } = await supabase
+      let updateQuery = writeSupabase
         .from("appointments")
         .update({
           status: "confirmed",
@@ -769,6 +787,12 @@ export async function PATCH(request: Request) {
           updated_at: now,
         })
         .eq("id", legacyAppointment.id);
+
+      if (auth.role === "patient") {
+        updateQuery = updateQuery.eq("patient_id", auth.userId);
+      }
+
+      const { error: updateError } = await updateQuery;
 
       if (updateError) {
         if (isAppointmentRlsPolicyError(updateError)) {
@@ -786,7 +810,7 @@ export async function PATCH(request: Request) {
         return badRequest("Please provide a cancellation reason (at least 3 characters)");
       }
 
-      const { error: updateError } = await supabase
+      let updateQuery = writeSupabase
         .from("appointments")
         .update({
           status: "completed",
@@ -797,6 +821,12 @@ export async function PATCH(request: Request) {
           updated_at: now,
         })
         .eq("id", legacyAppointment.id);
+
+      if (auth.role === "patient") {
+        updateQuery = updateQuery.eq("patient_id", auth.userId);
+      }
+
+      const { error: updateError } = await updateQuery;
 
       if (updateError) {
         if (isAppointmentRlsPolicyError(updateError)) {
@@ -813,7 +843,7 @@ export async function PATCH(request: Request) {
       return badRequest("preferredAt is invalid");
     }
 
-    const { error: updateError } = await supabase
+    let updateQuery = writeSupabase
       .from("appointments")
       .update({
         status: "pending",
@@ -825,6 +855,12 @@ export async function PATCH(request: Request) {
         updated_at: now,
       })
       .eq("id", legacyAppointment.id);
+
+    if (auth.role === "patient") {
+      updateQuery = updateQuery.eq("patient_id", auth.userId);
+    }
+
+    const { error: updateError } = await updateQuery;
 
     if (updateError) {
       if (isAppointmentRlsPolicyError(updateError)) {
@@ -868,7 +904,7 @@ export async function PATCH(request: Request) {
       updated_at: now,
     };
 
-    let updateQuery = supabase
+    let updateQuery = writeSupabase
       .from("appointments")
       .update(updates)
       .eq("id", richAppointment.id);
@@ -916,15 +952,21 @@ export async function PATCH(request: Request) {
       return badRequest("Appointment must be confirmed before completing");
     }
 
-    const { error } = await withAppointmentWriteRecovery(() =>
-      supabase
+    const { error } = await withAppointmentWriteRecovery(() => {
+      let updateQuery = writeSupabase
         .from("appointments")
         .update({
           status: "completed",
           updated_at: now,
         })
-        .eq("id", richAppointment.id),
-    );
+        .eq("id", richAppointment.id);
+
+      if (auth.role === "doctor") {
+        updateQuery = updateQuery.eq("doctor_id", auth.userId);
+      }
+
+      return updateQuery;
+    });
 
     if (error) {
       if (isAppointmentSchemaMismatchError(error)) {
@@ -956,8 +998,8 @@ export async function PATCH(request: Request) {
   }
 
   if (payload.action === "patient_accept") {
-    const { error } = await withAppointmentWriteRecovery(() =>
-      supabase
+    const { error } = await withAppointmentWriteRecovery(() => {
+      let updateQuery = writeSupabase
         .from("appointments")
         .update({
           status: "confirmed",
@@ -966,8 +1008,14 @@ export async function PATCH(request: Request) {
           patient_responded_at: now,
           updated_at: now,
         })
-        .eq("id", richAppointment.id),
-    );
+        .eq("id", richAppointment.id);
+
+      if (auth.role === "patient") {
+        updateQuery = updateQuery.eq("patient_id", auth.userId);
+      }
+
+      return updateQuery;
+    });
 
     if (error) {
       if (isAppointmentSchemaMismatchError(error)) {
@@ -988,8 +1036,8 @@ export async function PATCH(request: Request) {
       return badRequest("Please provide a cancellation reason (at least 3 characters)");
     }
 
-    const { error } = await withAppointmentWriteRecovery(() =>
-      supabase
+    const { error } = await withAppointmentWriteRecovery(() => {
+      let updateQuery = writeSupabase
         .from("appointments")
         .update({
           status: "completed",
@@ -998,8 +1046,14 @@ export async function PATCH(request: Request) {
           patient_responded_at: now,
           updated_at: now,
         })
-        .eq("id", richAppointment.id),
-    );
+        .eq("id", richAppointment.id);
+
+      if (auth.role === "patient") {
+        updateQuery = updateQuery.eq("patient_id", auth.userId);
+      }
+
+      return updateQuery;
+    });
 
     if (error) {
       if (isAppointmentSchemaMismatchError(error)) {
@@ -1019,8 +1073,8 @@ export async function PATCH(request: Request) {
     return badRequest("preferredAt is invalid");
   }
 
-  const { error } = await withAppointmentWriteRecovery(() =>
-    supabase
+  const { error } = await withAppointmentWriteRecovery(() => {
+    let updateQuery = writeSupabase
       .from("appointments")
       .update({
         status: "pending",
@@ -1030,8 +1084,14 @@ export async function PATCH(request: Request) {
         patient_responded_at: now,
         updated_at: now,
       })
-      .eq("id", richAppointment.id),
-  );
+      .eq("id", richAppointment.id);
+
+    if (auth.role === "patient") {
+      updateQuery = updateQuery.eq("patient_id", auth.userId);
+    }
+
+    return updateQuery;
+  });
 
   if (error) {
     if (isAppointmentSchemaMismatchError(error)) {
