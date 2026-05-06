@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import { canAccessPatientScope } from "@/lib/caregiver/access";
 import { searchOpenFdaMedicines } from "@/lib/openfda";
 import { computeScanGuidance } from "@/lib/scan/guidance";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -22,7 +23,7 @@ const schema = z.object({
 });
 
 export async function POST(request: Request) {
-  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
+  const auth = await getApiAuthContext(["patient", "caregiver", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -34,11 +35,16 @@ export async function POST(request: Request) {
 
   const { patientId, barcode, frame } = parsed.data;
   const resolvedPatientId = patientId ?? auth.userId;
-  if (auth.role === "patient" && resolvedPatientId !== auth.userId) {
-    return forbidden("Patient can only scan for own account");
-  }
-
   const supabase = await createSupabaseServerClient();
+  const canAccess = await canAccessPatientScope({
+    supabase,
+    role: auth.role,
+    actorId: auth.userId,
+    patientId: resolvedPatientId,
+  });
+  if (!canAccess) {
+    return forbidden("Cannot scan for this patient");
+  }
   const guidance = computeScanGuidance(frame);
 
   let medicineId: string | null = null;

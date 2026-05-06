@@ -10,7 +10,13 @@ import { z } from "zod";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -20,6 +26,7 @@ const schema = z.object({
   email: z.email("อีเมลไม่ถูกต้อง"),
   phone: z.string().min(9, "กรุณากรอกเบอร์โทรศัพท์ให้ครบ"),
   password: z.string().min(8, "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร"),
+  role: z.enum(["patient", "caregiver"]),
   inviteToken: z.string().optional(),
 });
 
@@ -42,6 +49,7 @@ export const RegisterForm = ({ inviteTokenFromUrl = "" }: RegisterFormProps) => 
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
+      role: "patient",
       inviteToken: inviteTokenFromUrl,
     },
   });
@@ -85,7 +93,7 @@ export const RegisterForm = ({ inviteTokenFromUrl = "" }: RegisterFormProps) => 
       <CardHeader>
         <CardTitle>สมัครใช้งาน CareGuideAI</CardTitle>
         <CardDescription>
-          ผู้พิการสมัครได้ทันที, คุณหมอสมัครได้ผ่านคำเชิญจากแอดมิน
+          เลือกได้เฉพาะผู้พิการหรือผู้ช่วยดูแล ส่วนคุณหมอสมัครได้ผ่าน Invite เท่านั้น
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -138,8 +146,23 @@ export const RegisterForm = ({ inviteTokenFromUrl = "" }: RegisterFormProps) => 
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="inviteToken">Invite Token (สำหรับหมอ)</Label>
+            <Label htmlFor="role">ประเภทผู้ใช้งาน</Label>
+            <select
+              id="role"
+              {...register("role")}
+              className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+            >
+              <option value="patient">ผู้พิการ / ผู้ป่วย</option>
+              <option value="caregiver">ผู้ช่วยดูแล (Caregiver)</option>
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="inviteToken">Invite Token (เฉพาะคุณหมอ)</Label>
             <Input id="inviteToken" {...register("inviteToken")} />
+            <p className="text-xs text-muted-foreground">
+              ถ้ามี token ระบบจะสมัครเป็นคุณหมออัตโนมัติและข้ามตัวเลือกบทบาทด้านบน
+            </p>
           </div>
 
           <Button className="w-full" type="submit" disabled={loading}>

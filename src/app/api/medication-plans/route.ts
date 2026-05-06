@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import { canAccessPatientScope } from "@/lib/caregiver/access";
 import { normalizeScheduleInput, type NormalizedScheduleTime } from "@/lib/medications/schedule";
 import { searchOpenFdaMedicines } from "@/lib/openfda";
 import { hasTwilioConfig } from "@/lib/reminders/twilio-sms-provider";
@@ -161,7 +162,7 @@ const buildDueSlotsUntilDate = ({
 };
 
 export async function POST(request: Request) {
-  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
+  const auth = await getApiAuthContext(["patient", "caregiver", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -173,11 +174,17 @@ export async function POST(request: Request) {
 
   const payload = parsed.data;
   const patientId = payload.patientId ?? auth.userId;
-  if (auth.role === "patient" && patientId !== auth.userId) {
-    return forbidden("Patient can only create own medication plan");
-  }
-
   const supabase = await createSupabaseServerClient();
+
+  const canAccess = await canAccessPatientScope({
+    supabase,
+    role: auth.role,
+    actorId: auth.userId,
+    patientId,
+  });
+  if (!canAccess) {
+    return forbidden("Cannot create medication plan for this patient");
+  }
 
   if (payload.ocrRawText?.trim()) {
     const parsedOcr = parseMedicationDetailsFromText(payload.ocrRawText);
@@ -188,19 +195,6 @@ export async function POST(request: Request) {
       return badRequest(`OCR quality too low: ${ocrValidation.messageTh}`, {
         ocrValidation,
       });
-    }
-  }
-
-  if (auth.role === "doctor" && patientId !== auth.userId) {
-    const { data: link } = await supabase
-      .from("patient_doctor_links")
-      .select("id")
-      .eq("doctor_id", auth.userId)
-      .eq("patient_id", patientId)
-      .maybeSingle();
-
-    if (!link) {
-      return forbidden("Doctor can only create plans for assigned patients");
     }
   }
 

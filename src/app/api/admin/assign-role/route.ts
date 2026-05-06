@@ -9,7 +9,7 @@ import type { Role } from "@/types/domain";
 
 const schema = z.object({
   userId: z.uuid(),
-  role: z.enum(["patient", "doctor", "admin"]),
+  role: z.enum(["patient", "caregiver", "doctor", "admin"]),
 });
 
 export async function POST(request: Request) {

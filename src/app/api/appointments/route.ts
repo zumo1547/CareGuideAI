@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
 import { ensureAppointmentSchema } from "@/lib/appointment-schema-bootstrap";
+import { canAccessPatientScope } from "@/lib/caregiver/access";
 import { env } from "@/lib/env";
 import { isSchemaCacheMissingError } from "@/lib/onboarding-storage";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -404,8 +405,8 @@ const selectAppointmentForAction = async (
   };
 };
 
-export async function GET() {
-  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
+export async function GET(request: Request) {
+  const auth = await getApiAuthContext(["patient", "caregiver", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -413,6 +414,21 @@ export async function GET() {
   await tryEnsureAppointmentSchema();
 
   const supabase = await createSupabaseServerClient();
+  const { searchParams } = new URL(request.url);
+  const requestedPatientId = searchParams.get("patientId");
+
+  if (auth.role === "caregiver" && requestedPatientId) {
+    const canAccess = await canAccessPatientScope({
+      supabase,
+      role: auth.role,
+      actorId: auth.userId,
+      patientId: requestedPatientId,
+    });
+    if (!canAccess) {
+      return forbidden("Caregiver cannot access this patient appointments");
+    }
+  }
+
   let query = supabase
     .from("appointments")
     .select(APPOINTMENT_SELECT_COLUMNS)
@@ -421,8 +437,17 @@ export async function GET() {
 
   if (auth.role === "patient") {
     query = query.eq("patient_id", auth.userId);
+  } else if (auth.role === "caregiver") {
+    if (requestedPatientId) {
+      query = query.eq("patient_id", requestedPatientId);
+    }
   } else if (auth.role === "doctor") {
     query = query.eq("doctor_id", auth.userId);
+    if (requestedPatientId) {
+      query = query.eq("patient_id", requestedPatientId);
+    }
+  } else if (auth.role === "admin" && requestedPatientId) {
+    query = query.eq("patient_id", requestedPatientId);
   }
 
   const { data: rows, error } = await withAppointmentSchemaRecovery<AppointmentRow[]>(() => query);
@@ -440,8 +465,16 @@ export async function GET() {
         auth.role === "patient"
           ? legacyQuery.eq("patient_id", auth.userId)
           : auth.role === "doctor"
-            ? legacyQuery.eq("doctor_id", auth.userId)
-            : legacyQuery;
+            ? requestedPatientId
+              ? legacyQuery.eq("doctor_id", auth.userId).eq("patient_id", requestedPatientId)
+              : legacyQuery.eq("doctor_id", auth.userId)
+            : auth.role === "caregiver"
+              ? requestedPatientId
+                ? legacyQuery.eq("patient_id", requestedPatientId)
+                : legacyQuery
+              : auth.role === "admin" && requestedPatientId
+                ? legacyQuery.eq("patient_id", requestedPatientId)
+                : legacyQuery;
 
       const { data: legacyRows, error: legacyError } = await legacyScopedQuery;
       if (legacyError) {
@@ -528,7 +561,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
+  const auth = await getApiAuthContext(["patient", "caregiver", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -542,6 +575,18 @@ export async function POST(request: Request) {
   const patientId = auth.role === "patient" ? auth.userId : payload.patientId;
   if (!patientId) {
     return badRequest("patientId is required");
+  }
+  if (auth.role === "caregiver") {
+    const verificationSupabase = await createSupabaseServerClient();
+    const canAccess = await canAccessPatientScope({
+      supabase: verificationSupabase,
+      role: auth.role,
+      actorId: auth.userId,
+      patientId,
+    });
+    if (!canAccess) {
+      return forbidden("Caregiver cannot create appointment for this patient");
+    }
   }
   const normalizedConfirmationLink = normalizeText(payload.confirmationLink);
 
@@ -645,7 +690,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
+  const auth = await getApiAuthContext(["patient", "caregiver", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -675,6 +720,18 @@ export async function PATCH(request: Request) {
   if (auth.role === "patient" && appointment.patient_id !== auth.userId) {
     return forbidden("Patient cannot access this appointment");
   }
+  if (auth.role === "caregiver") {
+    const verificationSupabase = await createSupabaseServerClient();
+    const canAccess = await canAccessPatientScope({
+      supabase: verificationSupabase,
+      role: auth.role,
+      actorId: auth.userId,
+      patientId: appointment.patient_id,
+    });
+    if (!canAccess) {
+      return forbidden("Caregiver cannot access this appointment");
+    }
+  }
   if (auth.role === "doctor" && appointment.doctor_id !== auth.userId) {
     return forbidden("Doctor cannot access this appointment");
   }
@@ -688,8 +745,8 @@ export async function PATCH(request: Request) {
     const legacyAppointment = appointment as AppointmentActionLegacyRow;
 
     if (payload.action === "doctor_propose") {
-      if (auth.role === "patient") {
-        return forbidden("Patient cannot send confirmation link");
+      if (auth.role === "patient" || auth.role === "caregiver") {
+        return forbidden("Only doctor/admin can send confirmation link");
       }
       if (legacyAppointment.status === "completed") {
         return badRequest("Appointment already completed");
@@ -739,8 +796,8 @@ export async function PATCH(request: Request) {
     }
 
     if (payload.action === "doctor_complete") {
-      if (auth.role === "patient") {
-        return forbidden("Patient cannot close appointment");
+      if (auth.role === "patient" || auth.role === "caregiver") {
+        return forbidden("Only doctor/admin can close appointment");
       }
 
       let updateQuery = writeSupabase
@@ -791,6 +848,9 @@ export async function PATCH(request: Request) {
       if (auth.role === "patient") {
         updateQuery = updateQuery.eq("patient_id", auth.userId);
       }
+      if (auth.role === "caregiver") {
+        updateQuery = updateQuery.eq("patient_id", legacyAppointment.patient_id);
+      }
 
       const { error: updateError } = await updateQuery;
 
@@ -824,6 +884,9 @@ export async function PATCH(request: Request) {
 
       if (auth.role === "patient") {
         updateQuery = updateQuery.eq("patient_id", auth.userId);
+      }
+      if (auth.role === "caregiver") {
+        updateQuery = updateQuery.eq("patient_id", legacyAppointment.patient_id);
       }
 
       const { error: updateError } = await updateQuery;
@@ -859,6 +922,9 @@ export async function PATCH(request: Request) {
     if (auth.role === "patient") {
       updateQuery = updateQuery.eq("patient_id", auth.userId);
     }
+    if (auth.role === "caregiver") {
+      updateQuery = updateQuery.eq("patient_id", legacyAppointment.patient_id);
+    }
 
     const { error: updateError } = await updateQuery;
 
@@ -875,8 +941,8 @@ export async function PATCH(request: Request) {
   const richAppointment = appointment as AppointmentActionRow;
 
   if (payload.action === "doctor_propose") {
-    if (auth.role === "patient") {
-      return forbidden("Patient cannot send confirmation link");
+    if (auth.role === "patient" || auth.role === "caregiver") {
+      return forbidden("Only doctor/admin can send confirmation link");
     }
     if (richAppointment.status === "completed") {
       return badRequest("Appointment already completed");
@@ -940,8 +1006,8 @@ export async function PATCH(request: Request) {
   }
 
   if (payload.action === "doctor_complete") {
-    if (auth.role === "patient") {
-      return forbidden("Patient cannot close appointment");
+    if (auth.role === "patient" || auth.role === "caregiver") {
+      return forbidden("Only doctor/admin can close appointment");
     }
 
     if (richAppointment.status === "completed") {
@@ -1013,6 +1079,9 @@ export async function PATCH(request: Request) {
       if (auth.role === "patient") {
         updateQuery = updateQuery.eq("patient_id", auth.userId);
       }
+      if (auth.role === "caregiver") {
+        updateQuery = updateQuery.eq("patient_id", richAppointment.patient_id);
+      }
 
       return updateQuery;
     });
@@ -1051,6 +1120,9 @@ export async function PATCH(request: Request) {
       if (auth.role === "patient") {
         updateQuery = updateQuery.eq("patient_id", auth.userId);
       }
+      if (auth.role === "caregiver") {
+        updateQuery = updateQuery.eq("patient_id", richAppointment.patient_id);
+      }
 
       return updateQuery;
     });
@@ -1088,6 +1160,9 @@ export async function PATCH(request: Request) {
 
     if (auth.role === "patient") {
       updateQuery = updateQuery.eq("patient_id", auth.userId);
+    }
+    if (auth.role === "caregiver") {
+      updateQuery = updateQuery.eq("patient_id", richAppointment.patient_id);
     }
 
     return updateQuery;

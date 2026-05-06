@@ -21,6 +21,7 @@ type ReminderEventRow = {
 
 interface ReminderEventsTableProps {
   initialEvents: ReminderEventRow[];
+  patientId?: string;
 }
 
 const formatDateTime = (dateValue: string | null) =>
@@ -47,7 +48,7 @@ const getDisplayStatus = (event: ReminderEventRow) => {
   return event.status;
 };
 
-export const ReminderEventsTable = ({ initialEvents }: ReminderEventsTableProps) => {
+export const ReminderEventsTable = ({ initialEvents, patientId }: ReminderEventsTableProps) => {
   const router = useRouter();
   const [events, setEvents] = useState(initialEvents);
   const [isCancellingId, setCancellingId] = useState<string | null>(null);
@@ -63,7 +64,10 @@ export const ReminderEventsTable = ({ initialEvents }: ReminderEventsTableProps)
       const response = await fetch("/api/reminders/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventId }),
+        body: JSON.stringify({
+          eventId,
+          patientId: patientId ?? undefined,
+        }),
       });
       const payload = (await response.json()) as {
         error?: string;
@@ -174,4 +178,3 @@ export const ReminderEventsTable = ({ initialEvents }: ReminderEventsTableProps)
     </div>
   );
 };
-

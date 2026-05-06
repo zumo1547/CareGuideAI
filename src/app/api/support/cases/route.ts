@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import { canAccessPatientScope } from "@/lib/caregiver/access";
 import {
   getSupabaseProjectRefFromEnv,
   isSupportCaseSchemaCacheError,
@@ -10,10 +11,12 @@ import {
 import { fetchSupportCaseList } from "@/lib/support-case-service";
 import { withSupportCaseSchemaRetry } from "@/lib/support-case-retry";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const createCaseSchema = z.object({
   requestedDoctorId: z.uuid(),
   requestMessage: z.string().trim().min(3).max(3000),
+  patientId: z.uuid().optional(),
 });
 
 const buildSchemaCacheErrorPayload = (rawErrorMessage?: string) => ({
@@ -24,10 +27,32 @@ const buildSchemaCacheErrorPayload = (rawErrorMessage?: string) => ({
   rawErrorMessage: rawErrorMessage ?? null,
 });
 
-export async function GET() {
-  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
+export async function GET(request: Request) {
+  const auth = await getApiAuthContext(["patient", "caregiver", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
+  }
+
+  const { searchParams } = new URL(request.url);
+  const requestedPatientId = searchParams.get("patientId");
+  const patientId =
+    auth.role === "patient"
+      ? auth.userId
+      : requestedPatientId && requestedPatientId.length > 0
+        ? requestedPatientId
+        : null;
+
+  if (auth.role === "caregiver" && patientId) {
+    const viewerSupabase = await createSupabaseServerClient();
+    const canAccess = await canAccessPatientScope({
+      supabase: viewerSupabase,
+      role: auth.role,
+      actorId: auth.userId,
+      patientId,
+    });
+    if (!canAccess) {
+      return forbidden("Caregiver cannot access this patient");
+    }
   }
 
   const supabase = createSupabaseAdminClient();
@@ -37,6 +62,7 @@ export async function GET() {
         supabase,
         userId: auth.userId,
         role: auth.role,
+        patientId,
         limit: 100,
       }),
     );
@@ -60,7 +86,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await getApiAuthContext(["patient", "admin"]);
+  const auth = await getApiAuthContext(["patient", "caregiver", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -70,13 +96,32 @@ export async function POST(request: Request) {
     return badRequest("Invalid payload", parsed.error.flatten());
   }
 
-  if (auth.role !== "patient" && auth.role !== "admin") {
-    return forbidden("Only patient or admin can create support case");
+  if (auth.role !== "patient" && auth.role !== "caregiver" && auth.role !== "admin") {
+    return forbidden("Only patient, caregiver, or admin can create support case");
+  }
+
+  const targetPatientId =
+    auth.role === "patient" ? auth.userId : parsed.data.patientId ?? null;
+  if (!targetPatientId) {
+    return badRequest("patientId is required");
+  }
+
+  if (auth.role === "caregiver") {
+    const viewerSupabase = await createSupabaseServerClient();
+    const canAccess = await canAccessPatientScope({
+      supabase: viewerSupabase,
+      role: auth.role,
+      actorId: auth.userId,
+      patientId: targetPatientId,
+    });
+    if (!canAccess) {
+      return forbidden("Caregiver cannot create support case for this patient");
+    }
   }
 
   const supabase = createSupabaseAdminClient();
   const { requestedDoctorId, requestMessage } = parsed.data;
-  const patientId = auth.userId;
+  const patientId = targetPatientId;
 
   const { data: doctorProfile, error: doctorError } = await supabase
     .from("profiles")

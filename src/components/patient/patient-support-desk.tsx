@@ -28,6 +28,8 @@ interface PatientSupportDeskProps {
   patientId: string;
   doctorOptions: DoctorOption[];
   hasLinkedDoctor: boolean;
+  actorUserId?: string;
+  actorRole?: "patient" | "caregiver";
 }
 
 interface SupportApiErrorPayload {
@@ -73,7 +75,10 @@ export const PatientSupportDesk = ({
   patientId,
   doctorOptions,
   hasLinkedDoctor,
+  actorUserId,
+  actorRole = "patient",
 }: PatientSupportDeskProps) => {
+  const actorId = actorUserId ?? patientId;
   const supabaseRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
   if (supabaseRef.current == null) {
     supabaseRef.current = createSupabaseBrowserClient();
@@ -126,7 +131,11 @@ export const PatientSupportDesk = ({
       try {
         setSchemaDebugMessage(null);
         setSchemaReloadSql(null);
-        const response = await fetch("/api/support/cases", {
+        const endpoint =
+          actorRole === "caregiver"
+            ? `/api/support/cases?patientId=${encodeURIComponent(patientId)}`
+            : "/api/support/cases";
+        const response = await fetch(endpoint, {
           cache: "no-store",
         });
         const payload = (await response.json()) as SupportApiErrorPayload & {
@@ -147,7 +156,7 @@ export const PatientSupportDesk = ({
         setLoadingCases(false);
       }
     },
-    [handleSchemaCacheError],
+    [actorRole, handleSchemaCacheError, patientId],
   );
 
   const refreshMessages = useCallback(
@@ -196,6 +205,7 @@ export const PatientSupportDesk = ({
         body: JSON.stringify({
           requestedDoctorId: selectedDoctorIdValue,
           requestMessage: requestMessage.trim(),
+          patientId: actorRole === "caregiver" ? patientId : undefined,
         }),
       });
 
@@ -420,7 +430,9 @@ export const PatientSupportDesk = ({
 
         <section className="space-y-2 rounded-xl border p-3">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">เคสของฉัน</h3>
+            <h3 className="text-sm font-semibold">
+              {actorRole === "caregiver" ? "เคสของผู้ป่วยคนนี้" : "เคสของฉัน"}
+            </h3>
             <Button type="button" variant="outline" size="sm" onClick={() => void refreshCases()} disabled={isLoadingCases}>
               {isLoadingCases ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
               รีเฟรช
@@ -487,7 +499,7 @@ export const PatientSupportDesk = ({
                 <p className="text-sm text-muted-foreground">กำลังโหลดข้อความ...</p>
               ) : (
                 messages.map((message) => {
-                  const isMine = message.senderId === patientId;
+                  const isMine = message.senderId === actorId;
                   return (
                     <div
                       key={message.id}

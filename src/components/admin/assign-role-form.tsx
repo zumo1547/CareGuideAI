@@ -104,6 +104,7 @@ export const AssignRoleForm = ({ users }: AssignRoleFormProps) => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="patient">patient</SelectItem>
+              <SelectItem value="caregiver">caregiver</SelectItem>
               <SelectItem value="doctor">doctor</SelectItem>
               <SelectItem value="admin">admin</SelectItem>
             </SelectContent>

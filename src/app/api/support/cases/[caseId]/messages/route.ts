@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import { canAccessPatientScope } from "@/lib/caregiver/access";
 import {
   getSupabaseProjectRefFromEnv,
   isSupportCaseSchemaCacheError,
@@ -14,6 +15,8 @@ import {
 } from "@/lib/support-case-service";
 import { withSupportCaseSchemaRetry } from "@/lib/support-case-retry";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { Role } from "@/types/domain";
 
 const caseIdSchema = z.object({
   caseId: z.uuid(),
@@ -31,19 +34,33 @@ const buildSchemaCacheErrorPayload = (rawErrorMessage?: string) => ({
   rawErrorMessage: rawErrorMessage ?? null,
 });
 
-const canReadCase = (
+const canReadCase = async ({
+  userId,
+  role,
+  supportCase,
+  viewerSupabase,
+}: {
   userId: string,
-  role: "patient" | "doctor" | "admin",
+  role: Role,
   supportCase: {
     patient_id: string;
     requested_doctor_id: string;
     assigned_doctor_id: string | null;
   },
-) => {
+  viewerSupabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+}) => {
   if (role === "admin") return true;
   if (supportCase.patient_id === userId) return true;
   if (supportCase.requested_doctor_id === userId) return true;
   if (supportCase.assigned_doctor_id === userId) return true;
+  if (role === "caregiver") {
+    return canAccessPatientScope({
+      supabase: viewerSupabase,
+      role,
+      actorId: userId,
+      patientId: supportCase.patient_id,
+    });
+  }
   return false;
 };
 
@@ -51,7 +68,7 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ caseId: string }> },
 ) {
-  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
+  const auth = await getApiAuthContext(["patient", "caregiver", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -88,7 +105,12 @@ export async function GET(
   }
 
   if (
-    !canReadCase(auth.userId, auth.role, supportCase)
+    !(await canReadCase({
+      userId: auth.userId,
+      role: auth.role,
+      supportCase,
+      viewerSupabase: await createSupabaseServerClient(),
+    }))
   ) {
     return forbidden("Cannot access this case");
   }
@@ -138,7 +160,7 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ caseId: string }> },
 ) {
-  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
+  const auth = await getApiAuthContext(["patient", "caregiver", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -179,7 +201,14 @@ export async function POST(
     return NextResponse.json({ error: "Case not found" }, { status: 404 });
   }
 
-  if (!canReadCase(auth.userId, auth.role, supportCase)) {
+  if (
+    !(await canReadCase({
+      userId: auth.userId,
+      role: auth.role,
+      supportCase,
+      viewerSupabase: await createSupabaseServerClient(),
+    }))
+  ) {
     return forbidden("Cannot send message to this case");
   }
 

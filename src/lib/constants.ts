@@ -2,6 +2,7 @@ import type { Role, SchedulePreset } from "@/types/domain";
 
 export const ROLE_HOME: Record<Role, string> = {
   patient: "/app/patient",
+  caregiver: "/app/caregiver",
   doctor: "/app/doctor",
   admin: "/app/admin",
 };
@@ -10,6 +11,7 @@ export const PROTECTED_ROUTES = ["/app"];
 
 export const ROLE_GUARDED_ROUTES: Record<string, Role[]> = {
   "/app/patient": ["patient", "admin"],
+  "/app/caregiver": ["caregiver", "admin"],
   "/app/doctor": ["doctor", "admin"],
   "/app/admin": ["admin"],
   "/app/scan": ["patient", "admin"],

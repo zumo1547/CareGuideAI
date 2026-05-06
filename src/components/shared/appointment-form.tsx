@@ -31,6 +31,7 @@ interface AppointmentFormProps {
   patientId: string;
   doctorOptions: DoctorOption[];
   hasLinkedDoctor: boolean;
+  actorRole?: "patient" | "caregiver";
 }
 
 interface ApiPayload {
@@ -97,6 +98,7 @@ export const AppointmentForm = ({
   patientId,
   doctorOptions,
   hasLinkedDoctor,
+  actorRole = "patient",
 }: AppointmentFormProps) => {
   const supabaseRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
   if (supabaseRef.current == null) {
@@ -137,7 +139,11 @@ export const AppointmentForm = ({
       setLoadingList(true);
     }
     try {
-      const response = await fetch("/api/appointments", {
+      const endpoint =
+        actorRole === "caregiver"
+          ? `/api/appointments?patientId=${encodeURIComponent(patientId)}`
+          : "/api/appointments";
+      const response = await fetch(endpoint, {
         cache: "no-store",
       });
       const payload = (await response.json()) as ApiPayload;
@@ -150,7 +156,7 @@ export const AppointmentForm = ({
     } finally {
       setLoadingList(false);
     }
-  }, []);
+  }, [actorRole, patientId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -206,6 +212,7 @@ export const AppointmentForm = ({
           doctorId: selectedDoctorId,
           requestNote: requestNote.trim(),
           preferredAt: preferredAt || null,
+          patientId: actorRole === "caregiver" ? patientId : undefined,
         }),
       });
 

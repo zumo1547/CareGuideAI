@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import { canAccessPatientScope } from "@/lib/caregiver/access";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const schema = z.object({
   eventId: z.uuid(),
+  patientId: z.uuid().optional(),
 });
 
 const isMissingCancelledAtColumnError = (message: string | undefined) =>
@@ -18,7 +20,7 @@ const isStatusConstraintError = (
   code === "23514" || (message ?? "").toLowerCase().includes("reminder_events_status_check");
 
 export async function POST(request: Request) {
-  const auth = await getApiAuthContext(["patient", "admin"]);
+  const auth = await getApiAuthContext(["patient", "caregiver", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -29,7 +31,7 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const { eventId } = parsed.data;
+  const { eventId, patientId } = parsed.data;
 
   const { data: event, error: eventError } = await supabase
     .from("reminder_events")
@@ -45,8 +47,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Reminder event not found" }, { status: 404 });
   }
 
+  if (patientId && patientId !== event.patient_id) {
+    return badRequest("Reminder event does not belong to target patient");
+  }
+
   if (auth.role === "patient" && event.patient_id !== auth.userId) {
     return forbidden("Cannot cancel this reminder");
+  }
+  if (auth.role === "caregiver") {
+    const canAccess = await canAccessPatientScope({
+      supabase,
+      role: auth.role,
+      actorId: auth.userId,
+      patientId: event.patient_id,
+    });
+    if (!canAccess) {
+      return forbidden("Cannot cancel this reminder");
+    }
   }
 
   if (event.status !== "pending") {

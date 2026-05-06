@@ -1,4 +1,4 @@
-export type Role = "patient" | "doctor" | "admin";
+export type Role = "patient" | "caregiver" | "doctor" | "admin";
 
 export type ReminderChannel = "sms" | "voice";
 

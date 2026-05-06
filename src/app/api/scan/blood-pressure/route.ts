@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import { canAccessPatientScope } from "@/lib/caregiver/access";
 import { getBmiTrend, type BiologicalSex } from "@/lib/onboarding";
 import { isSchemaCacheMissingError } from "@/lib/onboarding-storage";
 import {
@@ -71,21 +72,6 @@ const readingFromManualInput = (payload: z.infer<typeof postSchema>): ParsedBloo
   };
 };
 
-const canDoctorAccessPatient = async (
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  doctorId: string,
-  patientId: string,
-) => {
-  const { data } = await supabase
-    .from("patient_doctor_links")
-    .select("id")
-    .eq("doctor_id", doctorId)
-    .eq("patient_id", patientId)
-    .maybeSingle();
-
-  return Boolean(data);
-};
-
 const serializeReading = (record: {
   id: string;
   measured_at: string;
@@ -115,7 +101,7 @@ const serializeReading = (record: {
 });
 
 export async function POST(request: Request) {
-  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
+  const auth = await getApiAuthContext(["patient", "caregiver", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -127,17 +113,15 @@ export async function POST(request: Request) {
 
   const payload = parsed.data;
   const patientId = payload.patientId ?? auth.userId;
-  if (auth.role === "patient" && patientId !== auth.userId) {
-    return forbidden("Patient can only save own blood pressure");
-  }
-
   const supabase = await createSupabaseServerClient();
-
-  if (auth.role === "doctor" && patientId !== auth.userId) {
-    const canAccess = await canDoctorAccessPatient(supabase, auth.userId, patientId);
-    if (!canAccess) {
-      return forbidden("Doctor can only save blood pressure for assigned patients");
-    }
+  const canAccess = await canAccessPatientScope({
+    supabase,
+    role: auth.role,
+    actorId: auth.userId,
+    patientId,
+  });
+  if (!canAccess) {
+    return forbidden("Cannot save blood pressure for this patient");
   }
 
   const ocrReading = payload.extractedText ? parseBloodPressureFromText(payload.extractedText) : null;
@@ -281,7 +265,7 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
+  const auth = await getApiAuthContext(["patient", "caregiver", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -290,17 +274,15 @@ export async function GET(request: Request) {
   const patientIdParam = searchParams.get("patientId");
   const patientId = patientIdParam || auth.userId;
 
-  if (auth.role === "patient" && patientId !== auth.userId) {
-    return forbidden("Patient can only read own blood pressure history");
-  }
-
   const supabase = await createSupabaseServerClient();
-
-  if (auth.role === "doctor" && patientId !== auth.userId) {
-    const canAccess = await canDoctorAccessPatient(supabase, auth.userId, patientId);
-    if (!canAccess) {
-      return forbidden("Doctor can only read blood pressure for assigned patients");
-    }
+  const canAccess = await canAccessPatientScope({
+    supabase,
+    role: auth.role,
+    actorId: auth.userId,
+    patientId,
+  });
+  if (!canAccess) {
+    return forbidden("Cannot read blood pressure for this patient");
   }
 
   const listQuery = await supabase

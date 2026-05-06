@@ -91,11 +91,13 @@ export const fetchSupportCaseList = async ({
   supabase,
   userId,
   role,
+  patientId,
   limit = 60,
 }: {
   supabase: SupabaseClient;
   userId: string;
   role: Role;
+  patientId?: string | null;
   limit?: number;
 }) => {
   let query = supabase
@@ -110,6 +112,41 @@ export const fetchSupportCaseList = async ({
 
   if (role === "doctor") {
     query = query.or(`requested_doctor_id.eq.${userId},assigned_doctor_id.eq.${userId}`);
+    if (patientId) {
+      query = query.eq("patient_id", patientId);
+    }
+  }
+
+  if (role === "caregiver") {
+    let patientIds: string[] = [];
+    if (patientId) {
+      patientIds = [patientId];
+    } else {
+      const { data: links, error: linksError } = await supabase
+        .from("caregiver_patient_links")
+        .select("patient_id")
+        .eq("caregiver_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (linksError) {
+        throw new Error(linksError.message);
+      }
+      patientIds = unique(
+        (links ?? [])
+          .map((row) => row.patient_id)
+          .filter((value): value is string => typeof value === "string" && value.length > 0),
+      );
+    }
+
+    if (!patientIds.length) {
+      return [] as SupportCaseSummary[];
+    }
+
+    query = query.in("patient_id", patientIds);
+  }
+
+  if (role === "admin" && patientId) {
+    query = query.eq("patient_id", patientId);
   }
 
   const { data: caseRows, error: caseError } = await query;

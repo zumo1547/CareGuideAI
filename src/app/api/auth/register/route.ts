@@ -10,6 +10,7 @@ const schema = z.object({
   email: z.email(),
   phone: z.string().min(9),
   password: z.string().min(8),
+  role: z.enum(["patient", "caregiver"]).default("patient"),
   inviteToken: z.string().optional(),
 });
 
@@ -19,10 +20,10 @@ export async function POST(request: Request) {
     return badRequest("Invalid register payload", parsed.error.flatten());
   }
 
-  const { fullName, email, phone, password, inviteToken } = parsed.data;
+  const { fullName, email, phone, password, role: requestedRole, inviteToken } = parsed.data;
   const admin = createSupabaseAdminClient();
 
-  let role: "patient" | "doctor" = "patient";
+  let role: "patient" | "caregiver" | "doctor" = requestedRole;
   let inviteId: string | null = null;
 
   if (inviteToken?.trim()) {

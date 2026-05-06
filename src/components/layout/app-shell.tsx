@@ -13,6 +13,10 @@ const navByRole: Record<Role, { href: string; label: string }[]> = {
     { href: "/app/scan/blood-pressure", label: "สแกนความดัน" },
     { href: "/app/profile", label: "แฟ้มข้อมูลของฉัน" },
   ],
+  caregiver: [
+    { href: "/app/caregiver", label: "โหมดผู้ช่วยดูแล" },
+    { href: "/app/profile", label: "แฟ้มข้อมูลของฉัน" },
+  ],
   doctor: [
     { href: "/app/doctor", label: "หน้าแดชบอร์ดคุณหมอ" },
     { href: "/app/profile", label: "แฟ้มข้อมูลของฉัน" },

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import { canAccessPatientScope } from "@/lib/caregiver/access";
 import { resolveMedicationKnowledge } from "@/lib/medications/knowledge";
 import { searchOpenFdaMedicines } from "@/lib/openfda";
 import {
@@ -118,7 +119,7 @@ const createUsageSummaryTh = (candidate: MedicineSearchResult) => {
 };
 
 export async function POST(request: Request) {
-  const auth = await getApiAuthContext(["patient", "doctor", "admin"]);
+  const auth = await getApiAuthContext(["patient", "caregiver", "doctor", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
@@ -129,10 +130,6 @@ export async function POST(request: Request) {
   }
 
   const resolvedPatientId = parsed.data.patientId ?? auth.userId;
-  if (auth.role === "patient" && resolvedPatientId !== auth.userId) {
-    return forbidden("Patient can only scan for own account");
-  }
-
   const ocrText = await extractTextFromImageFallback(parsed.data.extractedText);
   if (!ocrText) {
     return badRequest("No text found for OCR fallback");
@@ -150,6 +147,16 @@ export async function POST(request: Request) {
 
   const safeQuery = sanitizeForIlike(searchQuery);
   const supabase = await createSupabaseServerClient();
+  const canAccess = await canAccessPatientScope({
+    supabase,
+    role: auth.role,
+    actorId: auth.userId,
+    patientId: resolvedPatientId,
+  });
+  if (!canAccess) {
+    return forbidden("Cannot scan for this patient");
+  }
+
   const { data: localRows } = await supabase
     .from("medicines")
     .select(
