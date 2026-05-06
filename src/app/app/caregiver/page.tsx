@@ -1,7 +1,6 @@
 import { format } from "date-fns";
 import { Activity, BellRing, CalendarClock, HeartPulse, Pill, ShieldAlert } from "lucide-react";
 
-import { AppointmentForm } from "@/components/shared/appointment-form";
 import { CaregiverLinkManager } from "@/components/caregiver/caregiver-link-manager";
 import { CaregiverRoutineBoard } from "@/components/caregiver/caregiver-routine-board";
 import { BloodPressureScanner } from "@/components/patient/blood-pressure-scanner";
@@ -9,6 +8,7 @@ import { MedicationPlanForm } from "@/components/patient/medication-plan-form";
 import { MedicationScanner } from "@/components/patient/medication-scanner";
 import { PatientSupportDesk } from "@/components/patient/patient-support-desk";
 import { ReminderEventsTable } from "@/components/patient/reminder-events-table";
+import { AppointmentForm } from "@/components/shared/appointment-form";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -134,7 +134,11 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
 
   const linkRows = (rawLinks ?? []) as CaregiverLinkRow[];
   const linkedPatientIds = [
-    ...new Set(linkRows.map((row) => row.patient_id).filter((id) => typeof id === "string" && id.length > 0)),
+    ...new Set(
+      linkRows
+        .map((row) => row.patient_id)
+        .filter((id) => typeof id === "string" && id.length > 0),
+    ),
   ];
 
   const safeSelectedPatientId =
@@ -233,7 +237,11 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
     routines = (rawRoutines ?? []) as RoutineRow[];
 
     const medicineIds = [
-      ...new Set(plans.map((plan) => plan.medicine_id).filter((id) => typeof id === "string" && id.length > 0)),
+      ...new Set(
+        plans
+          .map((plan) => plan.medicine_id)
+          .filter((id) => typeof id === "string" && id.length > 0),
+      ),
     ];
     const planIds = plans.map((plan) => plan.id);
 
@@ -260,7 +268,6 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
       .limit(1);
     latestBp = ((bpRows ?? [])[0] ?? null) as BloodPressureRow | null;
 
-    // Use service role for doctor directory and linked-doctor relation because caregiver RLS may hide doctor profiles.
     try {
       const adminSupabase = createSupabaseAdminClient();
       const [{ data: doctors }, { data: links }] = await Promise.all([
@@ -310,7 +317,7 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>แผนยา Active วันนี้</CardDescription>
+            <CardDescription>แผนยาที่ใช้งานอยู่วันนี้</CardDescription>
             <CardTitle className="flex items-center gap-2 text-2xl">
               <Pill className="h-5 w-5 text-cyan-700" />
               {plans.filter((plan) => plan.is_active).length}
@@ -351,9 +358,9 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
       {!safeSelectedPatientId ? (
         <Card>
           <CardHeader>
-            <CardTitle>ยังไม่มีผู้ป่วยที่เลือก</CardTitle>
+            <CardTitle>ยังไม่ได้เลือกผู้ป่วย</CardTitle>
             <CardDescription>
-              ให้กดรับผู้ป่วยในกล่องด้านบนก่อน แล้วระบบจะเปิดโหมดดูแลแบบครบทุกฟีเจอร์ให้อัตโนมัติ
+              กรุณาเพิ่มหรือเลือกผู้ป่วยจากกล่องด้านบนก่อน ระบบจะแสดงเครื่องมือดูแลทั้งหมดเมื่อเลือกผู้ป่วยแล้ว
             </CardDescription>
           </CardHeader>
         </Card>
@@ -376,7 +383,9 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
               </p>
               <p>
                 ประเภทความพิการ:{" "}
-                <span className="font-semibold">{selectedOnboarding?.disability_type ?? "ไม่ระบุ"}</span>
+                <span className="font-semibold">
+                  {selectedOnboarding?.disability_type ?? "ไม่ระบุ"}
+                </span>
               </p>
               <p>
                 ความดันล่าสุด:{" "}
@@ -386,7 +395,9 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
               </p>
               <p>
                 สถานะนัดล่าสุด:{" "}
-                <span className="font-semibold">{latestAppointment?.status ?? "ยังไม่มีนัดหมาย"}</span>
+                <span className="font-semibold">
+                  {latestAppointment?.status ?? "ยังไม่มีนัดหมาย"}
+                </span>
               </p>
               <p className="md:col-span-2 xl:col-span-4">
                 รายละเอียดความดันล่าสุด:{" "}
@@ -449,7 +460,7 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
               <CardHeader>
                 <CardTitle>ตารางยาและเวลาแจ้งเตือนของผู้ป่วย</CardTitle>
                 <CardDescription>
-                  ผู้ดูแลสามารถตรวจสอบแผนยา และจัดการแจ้งเตือนแทนผู้ป่วยได้
+                  ผู้ดูแลสามารถตรวจสอบแผนยา และจัดการการแจ้งเตือนแทนผู้ป่วยได้
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -502,10 +513,10 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <CalendarClock className="h-5 w-5 text-cyan-700" />
-                  Reminder Events ของผู้ป่วย
+                  รายการแจ้งเตือนของผู้ป่วย
                 </CardTitle>
                 <CardDescription>
-                  หากผู้ป่วยยังไม่สะดวก ผู้ดูแลสามารถกดยกเลิกเตือนให้แทนได้ทันที
+                  หากผู้ป่วยยังไม่สะดวก ผู้ดูแลสามารถยกเลิกการแจ้งเตือนแทนได้ทันที
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -529,3 +540,4 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
     </div>
   );
 }
+

@@ -78,7 +78,8 @@ export const CaregiverRoutineBoard = ({
 
   const summaryLines = useMemo(() => {
     const entries = sortedRoutines.map((routine) => {
-      const slotLabel = timeSlotOptions.find((item) => item.value === routine.timeSlot)?.label ?? "กำหนดเอง";
+      const slotLabel =
+        timeSlotOptions.find((item) => item.value === routine.timeSlot)?.label ?? "กำหนดเอง";
       const timeLabel = routine.timeText ? ` (${routine.timeText})` : "";
       const doneLabel = routine.isDone ? "เสร็จแล้ว" : "ยังไม่ทำ";
       return `${slotLabel}${timeLabel}: ${routine.taskText} - ${doneLabel}`;
@@ -237,7 +238,7 @@ export const CaregiverRoutineBoard = ({
               </select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="routine-time-text">เวลา (optional)</Label>
+              <Label htmlFor="routine-time-text">เวลา (ถ้ามี)</Label>
               <Input
                 id="routine-time-text"
                 value={timeText}
@@ -272,8 +273,18 @@ export const CaregiverRoutineBoard = ({
         <section className="space-y-3 rounded-xl border p-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">รายการวันนี้แบบอ่านง่าย</h3>
-            <Button type="button" variant="outline" size="sm" onClick={() => void refreshRoutines()} disabled={isRefreshing}>
-              {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void refreshRoutines()}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-4 w-4" />
+              )}
               รีเฟรช
             </Button>
           </div>
@@ -312,7 +323,8 @@ export const CaregiverRoutineBoard = ({
                 sortedRoutines.map((routine) => (
                   <TableRow key={routine.id}>
                     <TableCell>
-                      {timeSlotOptions.find((item) => item.value === routine.timeSlot)?.label ?? "กำหนดเอง"}
+                      {timeSlotOptions.find((item) => item.value === routine.timeSlot)?.label ??
+                        "กำหนดเอง"}
                       {routine.timeText ? ` (${routine.timeText})` : ""}
                     </TableCell>
                     <TableCell>{routine.taskText}</TableCell>
@@ -359,3 +371,4 @@ export const CaregiverRoutineBoard = ({
     </Card>
   );
 };
+

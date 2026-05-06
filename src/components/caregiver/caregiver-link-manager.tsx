@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { Loader2, Plus, RefreshCcw, Trash2, UserRoundPlus } from "lucide-react";
@@ -35,10 +35,10 @@ interface CaregiverLinkManagerProps {
 }
 
 const severityLabel: Record<string, string> = {
-  none: "เธเธเธ•เธด",
-  mild: "เน€เธฅเนเธเธเนเธญเธข",
-  moderate: "เธเธฒเธเธเธฅเธฒเธ",
-  severe: "เธฃเธธเธเนเธฃเธ",
+  none: "ปกติ",
+  mild: "เล็กน้อย",
+  moderate: "ปานกลาง",
+  severe: "รุนแรง",
 };
 
 const formatDateTime = (value: string) =>
@@ -76,16 +76,16 @@ export const CaregiverLinkManager = ({
       });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) {
-        setError(payload.error ?? "เน€เธเธดเนเธกเธเธนเนเธเนเธงเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
+        setError(payload.error ?? "เพิ่มผู้ป่วยไม่สำเร็จ");
         return;
       }
-      setSuccess("เธฃเธฑเธเธเธนเนเธเนเธงเธขเน€เธเนเธฒเธ”เธนเนเธฅเธชเธณเน€เธฃเนเธ");
+      setSuccess("รับผู้ป่วยเข้าสู่ความดูแลสำเร็จ");
       setPatientId("");
       setPatientPhone("");
       setNotes("");
       router.refresh();
     } catch {
-      setError("เน€เธเธดเนเธกเธเธนเนเธเนเธงเธขเนเธกเนเธชเธณเน€เธฃเนเธ");
+      setError("เพิ่มผู้ป่วยไม่สำเร็จ");
     } finally {
       setLoading(false);
     }
@@ -103,13 +103,13 @@ export const CaregiverLinkManager = ({
       });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) {
-        setError(payload.error ?? "เธขเธเน€เธฅเธดเธเธเธฒเธฃเธ”เธนเนเธฅเนเธกเนเธชเธณเน€เธฃเนเธ");
+        setError(payload.error ?? "ยกเลิกการดูแลไม่สำเร็จ");
         return;
       }
-      setSuccess("เธขเธเน€เธฅเธดเธเธเธฒเธฃเธ”เธนเนเธฅเธเธนเนเธเนเธงเธขเธชเธณเน€เธฃเนเธ");
+      setSuccess("ยกเลิกการดูแลผู้ป่วยสำเร็จ");
       router.refresh();
     } catch {
-      setError("เธขเธเน€เธฅเธดเธเธเธฒเธฃเธ”เธนเนเธฅเนเธกเนเธชเธณเน€เธฃเนเธ");
+      setError("ยกเลิกการดูแลไม่สำเร็จ");
     } finally {
       setRemovingId(null);
     }
@@ -120,22 +120,22 @@ export const CaregiverLinkManager = ({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <UserRoundPlus className="h-5 w-5 text-cyan-700" />
-          เธเธฑเธ”เธเธฒเธฃเธเธนเนเธเนเธงเธขเธ—เธตเนเธ”เธนเนเธฅ
+          จัดการผู้ป่วยที่ดูแล
         </CardTitle>
         <CardDescription>
-          เธฃเธฑเธเธเธนเนเธเนเธงเธขเน€เธเนเธฒเธ”เธนเนเธฅเนเธฅเธฐเธชเธฅเธฑเธเธเธนเนเธเนเธงเธขเน€เธเธทเนเธญเธ—เธณเธเธฒเธเนเธ—เธเนเธเธฃเธฐเธเธเน€เธ”เธตเธขเธง
+          เพิ่มผู้ป่วยเข้าสู่ความดูแล และสลับผู้ป่วยเพื่อจัดการแทนได้ในหน้าเดียว
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
           <Alert variant="destructive">
-            <AlertTitle>เน€เธเธดเธ”เธเนเธญเธเธดเธ”เธเธฅเธฒเธ”</AlertTitle>
+            <AlertTitle>เกิดข้อผิดพลาด</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
         {success ? (
           <Alert>
-            <AlertTitle>เธชเธณเน€เธฃเนเธ</AlertTitle>
+            <AlertTitle>สำเร็จ</AlertTitle>
             <AlertDescription>{success}</AlertDescription>
           </Alert>
         ) : null}
@@ -143,32 +143,34 @@ export const CaregiverLinkManager = ({
         <section className="space-y-3 rounded-xl border p-3">
           <div className="grid gap-3 lg:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="caregiver-patient-id">Patient ID (เธ–เนเธฒเธกเธต)</Label>
+              <Label htmlFor="caregiver-patient-id">Patient ID (ถ้ามี)</Label>
               <Input
                 id="caregiver-patient-id"
                 value={patientId}
                 onChange={(event) => setPatientId(event.target.value)}
-                placeholder="เธงเธฒเธ UUID เธเธนเนเธเนเธงเธข"
+                placeholder="วาง UUID ของผู้ป่วย"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="caregiver-patient-phone">เน€เธเธญเธฃเนเนเธ—เธฃเธเธนเนเธเนเธงเธข (เธ–เนเธฒเนเธกเนเธ—เธฃเธฒเธ ID)</Label>
+              <Label htmlFor="caregiver-patient-phone">
+                เบอร์โทรผู้ป่วย (ถ้าไม่ทราบ Patient ID)
+              </Label>
               <Input
                 id="caregiver-patient-phone"
                 value={patientPhone}
                 onChange={(event) => setPatientPhone(event.target.value)}
-                placeholder="เน€เธเนเธ 0812345678"
+                placeholder="เช่น 0812345678"
               />
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="caregiver-notes">เธซเธกเธฒเธขเน€เธซเธ•เธธเธเธฒเธฃเธ”เธนเนเธฅ (optional)</Label>
+            <Label htmlFor="caregiver-notes">หมายเหตุการดูแล (ถ้ามี)</Label>
             <Textarea
               id="caregiver-notes"
               rows={2}
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              placeholder="เน€เธเนเธ เธฅเธนเธเธซเธฅเธฒเธเธ”เธนเนเธฅเธฃเนเธงเธกเธเธฑเธเธเนเธงเธเน€เธขเนเธ"
+              placeholder="เช่น ลูกหลานดูแลร่วมกันช่วงเย็น"
             />
           </div>
           <Button
@@ -177,32 +179,32 @@ export const CaregiverLinkManager = ({
             disabled={loading || (!patientId.trim() && !patientPhone.trim())}
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            เธฃเธฑเธเธเธนเนเธเนเธงเธขเน€เธเนเธฒเธ”เธนเนเธฅ
+            รับผู้ป่วยเข้าสู่ความดูแล
           </Button>
         </section>
 
         <section className="space-y-3 rounded-xl border p-3">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">เธเธนเนเธเนเธงเธขเธ—เธตเนเธเธณเธฅเธฑเธเธ”เธนเนเธฅ ({links.length})</h3>
+            <h3 className="text-sm font-semibold">ผู้ป่วยที่กำลังดูแล ({links.length})</h3>
             <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
               <RefreshCcw className="h-4 w-4" />
-              เธฃเธตเน€เธเธฃเธ
+              รีเฟรช
             </Button>
           </div>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>เธเธนเนเธเนเธงเธข</TableHead>
-                <TableHead>เธฃเธฐเธ”เธฑเธเธเธงเธฒเธกเธฃเธธเธเนเธฃเธ</TableHead>
-                <TableHead>เน€เธฃเธดเนเธกเธ”เธนเนเธฅเน€เธกเธทเนเธญ</TableHead>
-                <TableHead className="text-right">เธเธฒเธฃเธ—เธณเธเธฒเธ</TableHead>
+                <TableHead>ผู้ป่วย</TableHead>
+                <TableHead>ระดับความรุนแรง</TableHead>
+                <TableHead>เริ่มดูแลเมื่อ</TableHead>
+                <TableHead className="text-right">การทำงาน</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {links.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    เธขเธฑเธเนเธกเนเธกเธตเธเธนเนเธเนเธงเธขเนเธเธเธงเธฒเธกเธ”เธนเนเธฅ
+                    ยังไม่มีผู้ป่วยในความดูแล
                   </TableCell>
                 </TableRow>
               ) : (
@@ -214,7 +216,7 @@ export const CaregiverLinkManager = ({
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">
-                        {severityLabel[link.onboarding?.disabilitySeverity ?? ""] ?? "เนเธกเนเธฃเธฐเธเธธ"}
+                        {severityLabel[link.onboarding?.disabilitySeverity ?? ""] ?? "ไม่ระบุ"}
                       </Badge>
                     </TableCell>
                     <TableCell>{formatDateTime(link.createdAt)}</TableCell>
@@ -241,7 +243,7 @@ export const CaregiverLinkManager = ({
                           ) : (
                             <Trash2 className="h-4 w-4" />
                           )}
-                          เธขเธเน€เธฅเธดเธ
+                          ยกเลิก
                         </Button>
                       </div>
                     </TableCell>
@@ -255,5 +257,4 @@ export const CaregiverLinkManager = ({
     </Card>
   );
 };
-
 
