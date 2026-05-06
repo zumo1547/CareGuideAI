@@ -3,7 +3,10 @@ import { z } from "zod";
 
 import { logAdminAction } from "@/lib/api/admin-audit";
 import { badRequest, getApiAuthContext } from "@/lib/api/auth-helpers";
-import { ensureCaregiverSchema } from "@/lib/caregiver-schema-bootstrap";
+import {
+  ensureCaregiverSchema,
+  getCaregiverSchemaDiagnostics,
+} from "@/lib/caregiver-schema-bootstrap";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Role } from "@/types/domain";
@@ -50,10 +53,15 @@ export async function POST(request: Request) {
 
   if (profileError) {
     if (role === "caregiver" && isRoleEnumError(profileError.message)) {
+      const diagnostics = getCaregiverSchemaDiagnostics();
+      const hint = diagnostics.hasRefMismatch
+        ? `ตรวจพบ env ไม่ตรงกัน: Supabase ref=${diagnostics.supabaseRef || "-"} แต่ Postgres ref=${diagnostics.postgresRefs.join(",") || "-"}`
+        : "กรุณาตรวจว่า Vercel env ใช้ Supabase โปรเจกต์เดียวกันทุกตัวแปร";
       return NextResponse.json(
         {
           error:
             "ระบบ Caregiver ของฐานข้อมูลที่เว็บกำลังเชื่อมต่อยังไม่พร้อม กรุณารัน 0012_caregiver_mode.sql ใน Supabase โปรเจกต์เดียวกับเว็บนี้ แล้วรัน NOTIFY pgrst, 'reload schema'; จากนั้นลองใหม่",
+          hint,
         },
         { status: 500 },
       );

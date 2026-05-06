@@ -3,7 +3,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest } from "@/lib/api/auth-helpers";
-import { ensureCaregiverSchema } from "@/lib/caregiver-schema-bootstrap";
+import {
+  ensureCaregiverSchema,
+  getCaregiverSchemaDiagnostics,
+} from "@/lib/caregiver-schema-bootstrap";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const schema = z.object({
@@ -23,13 +26,20 @@ const isRoleEnumError = (message: string | undefined) =>
   );
 
 const caregiverSchemaNotReadyResponse = () =>
-  NextResponse.json(
-    {
-      error:
-        "ระบบ Caregiver ของฐานข้อมูลที่เว็บกำลังเชื่อมต่อยังไม่พร้อม กรุณารัน 0012_caregiver_mode.sql ใน Supabase โปรเจกต์เดียวกับเว็บนี้ แล้วรัน NOTIFY pgrst, 'reload schema'; จากนั้นลองใหม่อีกครั้ง",
-    },
-    { status: 500 },
-  );
+  {
+    const diagnostics = getCaregiverSchemaDiagnostics();
+    const hint = diagnostics.hasRefMismatch
+      ? `ตรวจพบ env ไม่ตรงกัน: Supabase ref=${diagnostics.supabaseRef || "-"} แต่ Postgres ref=${diagnostics.postgresRefs.join(",") || "-"}`
+      : "กรุณาตรวจว่า Vercel env ใช้ Supabase โปรเจกต์เดียวกันทุกตัวแปร";
+    return NextResponse.json(
+      {
+        error:
+          "ระบบ Caregiver ของฐานข้อมูลที่เว็บกำลังเชื่อมต่อยังไม่พร้อม กรุณารัน 0012_caregiver_mode.sql ใน Supabase โปรเจกต์เดียวกับเว็บนี้ แล้วรัน NOTIFY pgrst, 'reload schema'; จากนั้นลองใหม่อีกครั้ง",
+        hint,
+      },
+      { status: 500 },
+    );
+  };
 
 export async function POST(request: Request) {
   const parsed = schema.safeParse(await request.json());
@@ -162,4 +172,3 @@ export async function POST(request: Request) {
     role,
   });
 }
-
