@@ -119,6 +119,7 @@ export async function POST(request: Request) {
   }
 
   if (profileError) {
+    await admin.auth.admin.deleteUser(userId).catch(() => undefined);
     return NextResponse.json({ error: profileError.message }, { status: 500 });
   }
 
