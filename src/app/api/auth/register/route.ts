@@ -15,6 +15,22 @@ const schema = z.object({
   inviteToken: z.string().optional(),
 });
 
+const isRoleEnumError = (message: string | undefined) =>
+  Boolean(
+    message &&
+      (message.includes("invalid input value for enum user_role") ||
+        message.includes("invalid input value for enum public.user_role")),
+  );
+
+const caregiverSchemaNotReadyResponse = () =>
+  NextResponse.json(
+    {
+      error:
+        "ระบบ Caregiver ของฐานข้อมูลที่เว็บกำลังเชื่อมต่อยังไม่พร้อม กรุณารัน 0012_caregiver_mode.sql ใน Supabase โปรเจกต์เดียวกับเว็บนี้ แล้วรัน NOTIFY pgrst, 'reload schema'; จากนั้นลองใหม่อีกครั้ง",
+    },
+    { status: 500 },
+  );
+
 export async function POST(request: Request) {
   const parsed = schema.safeParse(await request.json());
   if (!parsed.success) {
@@ -39,7 +55,10 @@ export async function POST(request: Request) {
     }
 
     if (invite.status !== "pending") {
-      return NextResponse.json({ error: "Invite token ถูกใช้งานแล้วหรือยกเลิกแล้ว" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invite token ถูกใช้งานแล้วหรือถูกยกเลิกแล้ว" },
+        { status: 400 },
+      );
     }
 
     if (invite.email.toLowerCase() !== email.toLowerCase()) {
@@ -57,26 +76,7 @@ export async function POST(request: Request) {
     inviteId = invite.id;
   }
 
-  if (role === "caregiver") {
-    try {
-      await ensureCaregiverSchema();
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Caregiver schema bootstrap failed.";
-      return NextResponse.json(
-        {
-          error:
-            "ระบบ Caregiver ยังไม่พร้อมในฐานข้อมูล กรุณารัน migration `0012_caregiver_mode.sql` และลองใหม่",
-          details: message,
-        },
-        { status: 500 },
-      );
-    }
-  }
-
-  const { data: createdUser, error: createUserError } = await admin.auth.admin.createUser({
+  let { data: createdUser, error: createUserError } = await admin.auth.admin.createUser({
     email,
     password,
     email_confirm: true,
@@ -87,7 +87,30 @@ export async function POST(request: Request) {
     },
   });
 
-  if (createUserError || !createdUser.user) {
+  if (
+    (createUserError || !createdUser?.user) &&
+    role === "caregiver" &&
+    isRoleEnumError(createUserError?.message)
+  ) {
+    await ensureCaregiverSchema().catch(() => undefined);
+    const retryCreate = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: fullName,
+        phone,
+        role,
+      },
+    });
+    createdUser = retryCreate.data;
+    createUserError = retryCreate.error;
+  }
+
+  if (createUserError || !createdUser?.user) {
+    if (role === "caregiver" && isRoleEnumError(createUserError?.message)) {
+      return caregiverSchemaNotReadyResponse();
+    }
     return NextResponse.json(
       { error: createUserError?.message ?? "สร้างผู้ใช้ไม่สำเร็จ" },
       { status: 400 },
@@ -103,23 +126,22 @@ export async function POST(request: Request) {
     role,
   });
 
-  if (
-    profileError &&
-    role === "caregiver" &&
-    profileError.message.includes("invalid input value for enum user_role")
-  ) {
+  if (profileError && role === "caregiver" && isRoleEnumError(profileError.message)) {
     await ensureCaregiverSchema().catch(() => undefined);
-    const retry = await admin.from("profiles").upsert({
+    const retryUpsert = await admin.from("profiles").upsert({
       id: userId,
       full_name: fullName,
       phone,
       role,
     });
-    profileError = retry.error;
+    profileError = retryUpsert.error;
   }
 
   if (profileError) {
     await admin.auth.admin.deleteUser(userId).catch(() => undefined);
+    if (role === "caregiver" && isRoleEnumError(profileError.message)) {
+      return caregiverSchemaNotReadyResponse();
+    }
     return NextResponse.json({ error: profileError.message }, { status: 500 });
   }
 
@@ -140,3 +162,4 @@ export async function POST(request: Request) {
     role,
   });
 }
+
