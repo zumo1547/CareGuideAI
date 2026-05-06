@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest } from "@/lib/api/auth-helpers";
+import { ensureCaregiverSchema } from "@/lib/caregiver-schema-bootstrap";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const schema = z.object({
@@ -56,6 +57,25 @@ export async function POST(request: Request) {
     inviteId = invite.id;
   }
 
+  if (role === "caregiver") {
+    try {
+      await ensureCaregiverSchema();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Caregiver schema bootstrap failed.";
+      return NextResponse.json(
+        {
+          error:
+            "ระบบ Caregiver ยังไม่พร้อมในฐานข้อมูล กรุณารัน migration `0012_caregiver_mode.sql` และลองใหม่",
+          details: message,
+        },
+        { status: 500 },
+      );
+    }
+  }
+
   const { data: createdUser, error: createUserError } = await admin.auth.admin.createUser({
     email,
     password,
@@ -76,12 +96,27 @@ export async function POST(request: Request) {
 
   const userId = createdUser.user.id;
 
-  const { error: profileError } = await admin.from("profiles").upsert({
+  let { error: profileError } = await admin.from("profiles").upsert({
     id: userId,
     full_name: fullName,
     phone,
     role,
   });
+
+  if (
+    profileError &&
+    role === "caregiver" &&
+    profileError.message.includes("invalid input value for enum user_role")
+  ) {
+    await ensureCaregiverSchema().catch(() => undefined);
+    const retry = await admin.from("profiles").upsert({
+      id: userId,
+      full_name: fullName,
+      phone,
+      role,
+    });
+    profileError = retry.error;
+  }
 
   if (profileError) {
     return NextResponse.json({ error: profileError.message }, { status: 500 });
