@@ -85,6 +85,9 @@ export default async function PatientDashboardPage() {
     onboardingProfile?.biological_sex && Number.isFinite(bmiValue) && bmiValue > 0
       ? getBmiTrend(bmiValue, onboardingProfile.biological_sex)
       : null;
+  const reminderSyncKey = (reminderEvents ?? [])
+    .map((event) => `${event.id}:${event.status}:${event.due_at}`)
+    .join("|");
 
   return (
     <div className="space-y-6">
@@ -253,6 +256,8 @@ export default async function PatientDashboardPage() {
               </div>
             </div>
             <ReminderEventsTable
+              key={`patient-reminder-${session.userId}-${reminderSyncKey}`}
+              patientId={session.userId}
               initialEvents={(reminderEvents ?? []).map((event) => ({
                 id: event.id,
                 dueAt: event.due_at,

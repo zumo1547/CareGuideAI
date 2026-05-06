@@ -74,7 +74,12 @@ export const CaregiverLinkManager = ({
           notes: notes.trim() || undefined,
         }),
       });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as {
+        error?: string;
+        link?: {
+          patientId?: string;
+        };
+      };
       if (!response.ok) {
         setError(payload.error ?? "เพิ่มผู้ป่วยไม่สำเร็จ");
         return;
@@ -83,6 +88,9 @@ export const CaregiverLinkManager = ({
       setPatientId("");
       setPatientPhone("");
       setNotes("");
+      if (payload.link?.patientId) {
+        router.push(`/app/caregiver?patientId=${payload.link.patientId}`);
+      }
       router.refresh();
     } catch {
       setError("เพิ่มผู้ป่วยไม่สำเร็จ");
@@ -257,4 +265,3 @@ export const CaregiverLinkManager = ({
     </Card>
   );
 };
-

@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
@@ -31,6 +32,7 @@ interface MedicationPlanFormProps {
 }
 
 export const MedicationPlanForm = ({ patientId }: MedicationPlanFormProps) => {
+  const router = useRouter();
   const [isLoading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -127,6 +129,7 @@ export const MedicationPlanForm = ({ patientId }: MedicationPlanFormProps) => {
       noon: false,
       evening: true,
     });
+    router.refresh();
   });
 
   return (

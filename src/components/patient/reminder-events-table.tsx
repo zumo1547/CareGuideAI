@@ -1,9 +1,9 @@
 "use client";
 
 import { format } from "date-fns";
-import { Loader2, XCircle } from "lucide-react";
+import { Loader2, RefreshCcw, XCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -48,12 +48,55 @@ const getDisplayStatus = (event: ReminderEventRow) => {
   return event.status;
 };
 
-export const ReminderEventsTable = ({ initialEvents, patientId }: ReminderEventsTableProps) => {
+export const ReminderEventsTable = ({
+  initialEvents,
+  patientId,
+}: ReminderEventsTableProps) => {
   const router = useRouter();
   const [events, setEvents] = useState(initialEvents);
   const [isCancellingId, setCancellingId] = useState<string | null>(null);
+  const [isRefreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const refreshEvents = useCallback(
+    async (silent = false) => {
+      if (!patientId) return;
+      if (!silent) {
+        setRefreshing(true);
+        setError(null);
+      }
+
+      try {
+        const response = await fetch(
+          `/api/reminders/list?patientId=${encodeURIComponent(patientId)}&limit=50`,
+          { cache: "no-store" },
+        );
+        const payload = (await response.json()) as {
+          error?: string;
+          events?: ReminderEventRow[];
+        };
+
+        if (!response.ok) {
+          if (!silent) {
+            setError(payload.error ?? "โหลดรายการแจ้งเตือนไม่สำเร็จ");
+          }
+          return;
+        }
+
+        setEvents(payload.events ?? []);
+      } catch {
+        if (!silent) {
+          setError("โหลดรายการแจ้งเตือนไม่สำเร็จ");
+        }
+      } finally {
+        if (!silent) {
+          setRefreshing(false);
+        }
+      }
+    },
+    [patientId],
+  );
 
   const cancelReminder = async (eventId: string) => {
     setCancellingId(eventId);
@@ -88,6 +131,7 @@ export const ReminderEventsTable = ({ initialEvents, patientId }: ReminderEvents
         ),
       );
       setSuccess("Cancel reminder success");
+      await refreshEvents(true);
       router.refresh();
     } catch {
       setError("Cancel reminder failed");
@@ -110,6 +154,21 @@ export const ReminderEventsTable = ({ initialEvents, patientId }: ReminderEvents
           <AlertTitle>Done</AlertTitle>
           <AlertDescription>{success}</AlertDescription>
         </Alert>
+      ) : null}
+
+      {patientId ? (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void refreshEvents()}
+            disabled={isRefreshing}
+          >
+            {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+            Refresh
+          </Button>
+        </div>
       ) : null}
 
       <Table>

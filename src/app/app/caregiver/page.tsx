@@ -304,6 +304,9 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
 
   const medicineMap = new Map(medicines.map((medicine) => [medicine.id, medicine]));
   const pendingReminderCount = reminders.filter((item) => item.status === "pending").length;
+  const reminderSyncKey = reminders
+    .map((item) => `${item.id}:${item.status}:${item.due_at}`)
+    .join("|");
   const completedRoutinesCount = routines.filter((item) => item.is_done).length;
   const remainingRoutinesCount = Math.max(0, routines.length - completedRoutinesCount);
   const severeCaseCount = linksForManager.filter(
@@ -528,7 +531,7 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
               </CardHeader>
               <CardContent>
                 <ReminderEventsTable
-                  key={`reminder-${safeSelectedPatientId}`}
+                  key={`reminder-${safeSelectedPatientId}-${reminderSyncKey}`}
                   patientId={safeSelectedPatientId}
                   initialEvents={reminders.map((event) => ({
                     id: event.id,
