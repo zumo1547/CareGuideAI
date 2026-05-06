@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { withCaregiverSchemaRecovery } from "@/lib/caregiver-schema-retry";
 import type { Role } from "@/types/domain";
 
 type LinkScope = "doctor" | "caregiver";
@@ -25,12 +26,14 @@ const hasScopedLink = async ({
     return Boolean(data);
   }
 
-  const { data } = await supabase
-    .from("caregiver_patient_links")
-    .select("id")
-    .eq("caregiver_id", actorId)
-    .eq("patient_id", patientId)
-    .maybeSingle();
+  const { data } = await withCaregiverSchemaRecovery(() =>
+    supabase
+      .from("caregiver_patient_links")
+      .select("id")
+      .eq("caregiver_id", actorId)
+      .eq("patient_id", patientId)
+      .maybeSingle(),
+  );
   return Boolean(data);
 };
 
@@ -64,15 +67,16 @@ export const getLinkedPatientIdsForCaregiver = async ({
   supabase: SupabaseClient;
   caregiverId: string;
 }) => {
-  const { data } = await supabase
-    .from("caregiver_patient_links")
-    .select("patient_id")
-    .eq("caregiver_id", caregiverId)
-    .order("created_at", { ascending: false })
-    .limit(500);
+  const { data } = await withCaregiverSchemaRecovery(() =>
+    supabase
+      .from("caregiver_patient_links")
+      .select("patient_id")
+      .eq("caregiver_id", caregiverId)
+      .order("created_at", { ascending: false })
+      .limit(500),
+  );
 
   return (data ?? [])
     .map((row) => row.patient_id)
     .filter((value): value is string => typeof value === "string" && value.length > 0);
 };
-

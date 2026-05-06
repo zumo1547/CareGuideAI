@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import { getCaregiverSchemaDiagnostics } from "@/lib/caregiver-schema-bootstrap";
+import {
+  CAREGIVER_SCHEMA_CACHE_MESSAGE,
+  getSupabaseProjectRefFromEnv,
+  isCaregiverSchemaCacheError,
+} from "@/lib/caregiver-schema-errors";
+import { withCaregiverSchemaRecovery } from "@/lib/caregiver-schema-retry";
 import { env } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -31,6 +38,14 @@ const deleteLinkSchema = z
 
 const normalizePhone = (value: string) => value.replace(/[^\d+]/g, "");
 
+type CaregiverLinkDataRow = {
+  id: string;
+  caregiver_id: string;
+  patient_id: string;
+  notes: string | null;
+  created_at: string;
+};
+
 const getVerifierClient = async () => {
   if (env.SUPABASE_SERVICE_ROLE_KEY) {
     return createSupabaseAdminClient();
@@ -46,13 +61,31 @@ const resolveCaregiverId = (
   return requestedCaregiverId ?? auth.userId;
 };
 
+const caregiverSchemaNotReadyResponse = (rawErrorMessage?: string) => {
+  const diagnostics = getCaregiverSchemaDiagnostics();
+  return NextResponse.json(
+    {
+      error: CAREGIVER_SCHEMA_CACHE_MESSAGE,
+      code: "CAREGIVER_SCHEMA_CACHE_NOT_READY",
+      schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
+      projectRefHint: getSupabaseProjectRefFromEnv(),
+      envHint:
+        diagnostics.hasRefMismatch && diagnostics.supabaseRef
+          ? `Supabase ref=${diagnostics.supabaseRef}, Postgres ref=${diagnostics.postgresRefs.join(",") || "-"}`
+          : null,
+      rawErrorMessage: rawErrorMessage ?? null,
+    },
+    { status: 503 },
+  );
+};
+
 export async function GET(request: Request) {
   const auth = await getApiAuthContext(["caregiver", "admin"]);
   if (auth instanceof NextResponse) {
     return auth;
   }
 
-  const supabase = await createSupabaseServerClient();
+  const readClient = await getVerifierClient();
   const { searchParams } = new URL(request.url);
   const requestedCaregiverId = searchParams.get("caregiverId");
   const caregiverId = resolveCaregiverId(
@@ -64,14 +97,20 @@ export async function GET(request: Request) {
     return forbidden("Cannot read links of other caregivers");
   }
 
-  const { data: links, error: linksError } = await supabase
-    .from("caregiver_patient_links")
-    .select("id, caregiver_id, patient_id, notes, created_at")
-    .eq("caregiver_id", caregiverId)
-    .order("created_at", { ascending: false })
-    .limit(300);
+  const { data: links, error: linksError } = await withCaregiverSchemaRecovery<CaregiverLinkDataRow[]>(
+    () =>
+    readClient
+      .from("caregiver_patient_links")
+      .select("id, caregiver_id, patient_id, notes, created_at")
+      .eq("caregiver_id", caregiverId)
+      .order("created_at", { ascending: false })
+      .limit(300),
+  );
 
   if (linksError) {
+    if (isCaregiverSchemaCacheError(linksError)) {
+      return caregiverSchemaNotReadyResponse(linksError.message);
+    }
     return NextResponse.json({ error: linksError.message }, { status: 400 });
   }
 
@@ -81,7 +120,7 @@ export async function GET(request: Request) {
 
   const [profilesResult, onboardingResult] = await Promise.all([
     patientIds.length
-      ? supabase
+      ? readClient
           .from("profiles")
           .select("id, full_name, phone, role")
           .in("id", patientIds)
@@ -95,7 +134,7 @@ export async function GET(request: Request) {
           error: null,
         }),
     patientIds.length
-      ? supabase
+      ? readClient
           .from("user_onboarding_profiles")
           .select("user_id, disability_type, disability_severity, need_tts, need_navigation_guidance")
           .in("user_id", patientIds)
@@ -112,9 +151,15 @@ export async function GET(request: Request) {
   ]);
 
   if (profilesResult.error) {
+    if (isCaregiverSchemaCacheError(profilesResult.error)) {
+      return caregiverSchemaNotReadyResponse(profilesResult.error.message);
+    }
     return NextResponse.json({ error: profilesResult.error.message }, { status: 400 });
   }
   if (onboardingResult.error) {
+    if (isCaregiverSchemaCacheError(onboardingResult.error)) {
+      return caregiverSchemaNotReadyResponse(onboardingResult.error.message);
+    }
     return NextResponse.json({ error: onboardingResult.error.message }, { status: 400 });
   }
 
@@ -209,22 +254,27 @@ export async function POST(request: Request) {
     return badRequest("Selected account is not a patient");
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("caregiver_patient_links")
-    .upsert(
-      {
-        caregiver_id: caregiverId,
-        patient_id: resolvedPatientId,
-        assigned_by: auth.userId,
-        notes: notes || null,
-      },
-      { onConflict: "caregiver_id,patient_id" },
-    )
-    .select("id, caregiver_id, patient_id, notes, created_at")
-    .single();
+  const writeClient = await getVerifierClient();
+  const { data, error } = await withCaregiverSchemaRecovery<CaregiverLinkDataRow>(() =>
+    writeClient
+      .from("caregiver_patient_links")
+      .upsert(
+        {
+          caregiver_id: caregiverId,
+          patient_id: resolvedPatientId,
+          assigned_by: auth.userId,
+          notes: notes || null,
+        },
+        { onConflict: "caregiver_id,patient_id" },
+      )
+      .select("id, caregiver_id, patient_id, notes, created_at")
+      .single(),
+  );
 
   if (error || !data) {
+    if (isCaregiverSchemaCacheError(error)) {
+      return caregiverSchemaNotReadyResponse(error?.message);
+    }
     return NextResponse.json({ error: error?.message ?? "Cannot create caregiver link" }, { status: 400 });
   }
 
@@ -260,8 +310,8 @@ export async function DELETE(request: Request) {
     return forbidden("Cannot delete link for other caregivers");
   }
 
-  const supabase = await createSupabaseServerClient();
-  let query = supabase.from("caregiver_patient_links").delete().eq("caregiver_id", caregiverId);
+  const writeClient = await getVerifierClient();
+  let query = writeClient.from("caregiver_patient_links").delete().eq("caregiver_id", caregiverId);
 
   if (parsed.data.linkId) {
     query = query.eq("id", parsed.data.linkId);
@@ -269,8 +319,11 @@ export async function DELETE(request: Request) {
     query = query.eq("patient_id", parsed.data.patientId);
   }
 
-  const { error } = await query;
+  const { error } = await withCaregiverSchemaRecovery(() => query);
   if (error) {
+    if (isCaregiverSchemaCacheError(error)) {
+      return caregiverSchemaNotReadyResponse(error.message);
+    }
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 

@@ -49,6 +49,193 @@ end;
 $$;
 `;
 
+const CAREGIVER_TABLES_AND_POLICIES_SQL = `
+create extension if not exists pgcrypto;
+
+create table if not exists public.caregiver_patient_links (
+  id uuid primary key default gen_random_uuid(),
+  caregiver_id uuid not null references public.profiles(id) on delete cascade,
+  patient_id uuid not null references public.profiles(id) on delete cascade,
+  assigned_by uuid references public.profiles(id) on delete set null,
+  notes text,
+  created_at timestamptz not null default now(),
+  unique (caregiver_id, patient_id)
+);
+
+create index if not exists idx_caregiver_links_caregiver
+  on public.caregiver_patient_links(caregiver_id, created_at desc);
+create index if not exists idx_caregiver_links_patient
+  on public.caregiver_patient_links(patient_id, created_at desc);
+
+create table if not exists public.caregiver_daily_routines (
+  id uuid primary key default gen_random_uuid(),
+  caregiver_id uuid not null references public.profiles(id) on delete cascade,
+  patient_id uuid not null references public.profiles(id) on delete cascade,
+  routine_date date not null default current_date,
+  time_slot text not null check (time_slot in ('morning', 'noon', 'evening', 'night', 'custom')),
+  time_text text,
+  task_text text not null check (char_length(btrim(task_text)) > 0),
+  is_done boolean not null default false,
+  done_at timestamptz,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_caregiver_routines_scope
+  on public.caregiver_daily_routines(caregiver_id, patient_id, routine_date);
+create index if not exists idx_caregiver_routines_patient_date
+  on public.caregiver_daily_routines(patient_id, routine_date, created_at desc);
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where p.proname = 'handle_profile_update_timestamp'
+      and n.nspname = 'public'
+  ) then
+    drop trigger if exists caregiver_daily_routines_set_updated_at on public.caregiver_daily_routines;
+    create trigger caregiver_daily_routines_set_updated_at
+    before update on public.caregiver_daily_routines
+    for each row execute procedure public.handle_profile_update_timestamp();
+  end if;
+end
+$$;
+
+create or replace function public.is_linked_caregiver(target_patient_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.caregiver_patient_links cpl
+    where cpl.patient_id = target_patient_id
+      and cpl.caregiver_id = auth.uid()
+  );
+$$;
+
+alter table public.caregiver_patient_links enable row level security;
+alter table public.caregiver_daily_routines enable row level security;
+
+drop policy if exists "caregiver_links_select_scope" on public.caregiver_patient_links;
+create policy "caregiver_links_select_scope"
+on public.caregiver_patient_links
+for select
+using (
+  public.current_user_role()::text = 'admin'
+  or caregiver_id = auth.uid()
+  or patient_id = auth.uid()
+  or (public.current_user_role()::text = 'doctor' and public.is_linked_patient(patient_id))
+);
+
+drop policy if exists "caregiver_links_insert_scope" on public.caregiver_patient_links;
+create policy "caregiver_links_insert_scope"
+on public.caregiver_patient_links
+for insert
+with check (
+  public.current_user_role()::text = 'admin'
+  or (
+    public.current_user_role()::text = 'caregiver'
+    and caregiver_id = auth.uid()
+  )
+);
+
+drop policy if exists "caregiver_links_delete_scope" on public.caregiver_patient_links;
+create policy "caregiver_links_delete_scope"
+on public.caregiver_patient_links
+for delete
+using (
+  public.current_user_role()::text = 'admin'
+  or (
+    public.current_user_role()::text = 'caregiver'
+    and caregiver_id = auth.uid()
+  )
+);
+
+drop policy if exists "caregiver_routines_select_scope" on public.caregiver_daily_routines;
+create policy "caregiver_routines_select_scope"
+on public.caregiver_daily_routines
+for select
+using (
+  public.current_user_role()::text = 'admin'
+  or caregiver_id = auth.uid()
+  or patient_id = auth.uid()
+  or (public.current_user_role()::text = 'doctor' and public.is_linked_patient(patient_id))
+);
+
+drop policy if exists "caregiver_routines_insert_scope" on public.caregiver_daily_routines;
+create policy "caregiver_routines_insert_scope"
+on public.caregiver_daily_routines
+for insert
+with check (
+  public.current_user_role()::text = 'admin'
+  or (
+    public.current_user_role()::text = 'caregiver'
+    and caregiver_id = auth.uid()
+    and public.is_linked_caregiver(patient_id)
+  )
+);
+
+drop policy if exists "caregiver_routines_update_scope" on public.caregiver_daily_routines;
+create policy "caregiver_routines_update_scope"
+on public.caregiver_daily_routines
+for update
+using (
+  public.current_user_role()::text = 'admin'
+  or (
+    public.current_user_role()::text = 'caregiver'
+    and caregiver_id = auth.uid()
+    and public.is_linked_caregiver(patient_id)
+  )
+  or patient_id = auth.uid()
+)
+with check (
+  public.current_user_role()::text = 'admin'
+  or (
+    public.current_user_role()::text = 'caregiver'
+    and caregiver_id = auth.uid()
+    and public.is_linked_caregiver(patient_id)
+  )
+  or patient_id = auth.uid()
+);
+
+drop policy if exists "caregiver_routines_delete_scope" on public.caregiver_daily_routines;
+create policy "caregiver_routines_delete_scope"
+on public.caregiver_daily_routines
+for delete
+using (
+  public.current_user_role()::text = 'admin'
+  or (
+    public.current_user_role()::text = 'caregiver'
+    and caregiver_id = auth.uid()
+    and public.is_linked_caregiver(patient_id)
+  )
+);
+
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    grant usage on schema public to authenticated;
+    grant select, insert, update, delete on public.caregiver_patient_links to authenticated;
+    grant select, insert, update, delete on public.caregiver_daily_routines to authenticated;
+    grant execute on function public.is_linked_caregiver(uuid) to authenticated;
+  end if;
+
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant usage on schema public to service_role;
+    grant select, insert, update, delete on public.caregiver_patient_links to service_role;
+    grant select, insert, update, delete on public.caregiver_daily_routines to service_role;
+    grant execute on function public.is_linked_caregiver(uuid) to service_role;
+  end if;
+end
+$$;
+`;
+
 const CAREGIVER_SCHEMA_RELOAD_SQL = "notify pgrst, 'reload schema';";
 
 const parseProjectRefFromSupabaseUrl = (url: string) => {
@@ -120,6 +307,7 @@ const runCaregiverBootstrap = async () => {
       await client.connect();
       await client.query(CAREGIVER_ENUM_SQL);
       await client.query(CAREGIVER_HANDLE_NEW_USER_SQL);
+      await client.query(CAREGIVER_TABLES_AND_POLICIES_SQL);
       await client.query(CAREGIVER_SCHEMA_RELOAD_SQL);
       hasBootstrappedCaregiverSchema = true;
       await client.end().catch(() => undefined);
@@ -160,7 +348,7 @@ export const getCaregiverSchemaDiagnostics = () => {
       Boolean(supabaseRef) &&
       pgRefs.length > 0 &&
       pgRefs.every((ref) => ref !== supabaseRef),
-  }
+  };
 };
 
 export const ensureCaregiverSchema = async () => {

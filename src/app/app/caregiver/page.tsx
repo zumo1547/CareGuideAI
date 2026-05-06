@@ -13,6 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/session";
+import { withCaregiverSchemaRecovery } from "@/lib/caregiver-schema-retry";
+import { env } from "@/lib/env";
 import type { BiologicalSex } from "@/lib/onboarding";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -121,18 +123,23 @@ const formatDateTime = (value: string | null) =>
 export default async function CaregiverDashboardPage({ searchParams }: CaregiverPageProps) {
   const session = await requireRole(["caregiver"]);
   const supabase = await createSupabaseServerClient();
+  const caregiverLinkReader = env.SUPABASE_SERVICE_ROLE_KEY
+    ? createSupabaseAdminClient()
+    : supabase;
   const resolvedSearchParams = await searchParams;
   const requestedPatientId = toSingle(resolvedSearchParams.patientId);
   const todayDate = format(new Date(), "yyyy-MM-dd");
 
-  const { data: rawLinks } = await supabase
-    .from("caregiver_patient_links")
-    .select("id, caregiver_id, patient_id, notes, created_at")
-    .eq("caregiver_id", session.userId)
-    .order("created_at", { ascending: false })
-    .limit(300);
+  const { data: rawLinks, error: caregiverLinksError } = await withCaregiverSchemaRecovery(() =>
+    caregiverLinkReader
+      .from("caregiver_patient_links")
+      .select("id, caregiver_id, patient_id, notes, created_at")
+      .eq("caregiver_id", session.userId)
+      .order("created_at", { ascending: false })
+      .limit(300),
+  );
 
-  const linkRows = (rawLinks ?? []) as CaregiverLinkRow[];
+  const linkRows = (caregiverLinksError ? [] : (rawLinks ?? [])) as CaregiverLinkRow[];
   const linkedPatientIds = [
     ...new Set(
       linkRows
@@ -540,4 +547,3 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
     </div>
   );
 }
-

@@ -3,7 +3,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
+import { getCaregiverSchemaDiagnostics } from "@/lib/caregiver-schema-bootstrap";
 import { canAccessPatientScope } from "@/lib/caregiver/access";
+import {
+  CAREGIVER_SCHEMA_CACHE_MESSAGE,
+  getSupabaseProjectRefFromEnv,
+  isCaregiverSchemaCacheError,
+} from "@/lib/caregiver-schema-errors";
+import { withCaregiverSchemaRecovery } from "@/lib/caregiver-schema-retry";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -28,6 +35,33 @@ const deleteRoutineSchema = z.object({
   routineId: z.uuid(),
 });
 
+type CaregiverRoutineRow = {
+  id: string;
+  caregiver_id: string;
+  patient_id: string;
+  routine_date: string;
+  time_slot: "morning" | "noon" | "evening" | "night" | "custom";
+  time_text: string | null;
+  task_text: string;
+  is_done: boolean;
+  done_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type CaregiverRoutineCheckRow = {
+  id: string;
+  caregiver_id: string;
+  patient_id: string;
+  is_done: boolean;
+};
+
+type CaregiverRoutineDeleteRow = {
+  id: string;
+  caregiver_id: string;
+  patient_id: string;
+};
+
 const toDateValue = (input: string | null | undefined) => {
   if (!input || !DATE_ONLY_REGEX.test(input)) return format(new Date(), "yyyy-MM-dd");
   return input;
@@ -39,6 +73,24 @@ const timeSlotOrder: Record<string, number> = {
   evening: 3,
   night: 4,
   custom: 5,
+};
+
+const caregiverSchemaNotReadyResponse = (rawErrorMessage?: string) => {
+  const diagnostics = getCaregiverSchemaDiagnostics();
+  return NextResponse.json(
+    {
+      error: CAREGIVER_SCHEMA_CACHE_MESSAGE,
+      code: "CAREGIVER_SCHEMA_CACHE_NOT_READY",
+      schemaReloadSql: "NOTIFY pgrst, 'reload schema';",
+      projectRefHint: getSupabaseProjectRefFromEnv(),
+      envHint:
+        diagnostics.hasRefMismatch && diagnostics.supabaseRef
+          ? `Supabase ref=${diagnostics.supabaseRef}, Postgres ref=${diagnostics.postgresRefs.join(",") || "-"}`
+          : null,
+      rawErrorMessage: rawErrorMessage ?? null,
+    },
+    { status: 503 },
+  );
 };
 
 export async function GET(request: Request) {
@@ -76,8 +128,11 @@ export async function GET(request: Request) {
     query = query.eq("caregiver_id", caregiverId);
   }
 
-  const { data, error } = await query;
+  const { data, error } = await withCaregiverSchemaRecovery<CaregiverRoutineRow[]>(() => query);
   if (error) {
+    if (isCaregiverSchemaCacheError(error)) {
+      return caregiverSchemaNotReadyResponse(error.message);
+    }
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
@@ -130,23 +185,28 @@ export async function POST(request: Request) {
   const caregiverId = auth.userId;
   const routineDate = toDateValue(payload.routineDate);
 
-  const { data, error } = await supabase
-    .from("caregiver_daily_routines")
-    .insert({
-      caregiver_id: caregiverId,
-      patient_id: payload.patientId,
-      routine_date: routineDate,
-      time_slot: payload.timeSlot,
-      time_text: payload.timeText || null,
-      task_text: payload.taskText,
-      created_by: auth.userId,
-      is_done: false,
-      done_at: null,
-    })
-    .select("id, caregiver_id, patient_id, routine_date, time_slot, time_text, task_text, is_done, done_at, created_at, updated_at")
-    .single();
+  const { data, error } = await withCaregiverSchemaRecovery<CaregiverRoutineRow>(() =>
+    supabase
+      .from("caregiver_daily_routines")
+      .insert({
+        caregiver_id: caregiverId,
+        patient_id: payload.patientId,
+        routine_date: routineDate,
+        time_slot: payload.timeSlot,
+        time_text: payload.timeText || null,
+        task_text: payload.taskText,
+        created_by: auth.userId,
+        is_done: false,
+        done_at: null,
+      })
+      .select("id, caregiver_id, patient_id, routine_date, time_slot, time_text, task_text, is_done, done_at, created_at, updated_at")
+      .single(),
+  );
 
   if (error || !data) {
+    if (isCaregiverSchemaCacheError(error)) {
+      return caregiverSchemaNotReadyResponse(error?.message);
+    }
     return NextResponse.json({ error: error?.message ?? "Cannot create routine" }, { status: 400 });
   }
 
@@ -182,13 +242,18 @@ export async function PATCH(request: Request) {
   const payload = parsed.data;
   const supabase = await createSupabaseServerClient();
 
-  const { data: routine, error: routineError } = await supabase
-    .from("caregiver_daily_routines")
-    .select("id, caregiver_id, patient_id, is_done")
-    .eq("id", payload.routineId)
-    .maybeSingle();
+  const { data: routine, error: routineError } = await withCaregiverSchemaRecovery<CaregiverRoutineCheckRow | null>(() =>
+    supabase
+      .from("caregiver_daily_routines")
+      .select("id, caregiver_id, patient_id, is_done")
+      .eq("id", payload.routineId)
+      .maybeSingle(),
+  );
 
   if (routineError) {
+    if (isCaregiverSchemaCacheError(routineError)) {
+      return caregiverSchemaNotReadyResponse(routineError.message);
+    }
     return NextResponse.json({ error: routineError.message }, { status: 400 });
   }
   if (!routine) {
@@ -210,18 +275,23 @@ export async function PATCH(request: Request) {
   }
 
   const nextIsDone = payload.isDone ?? routine.is_done;
-  const { error } = await supabase
-    .from("caregiver_daily_routines")
-    .update({
-      is_done: nextIsDone,
-      done_at: nextIsDone ? new Date().toISOString() : null,
-      time_slot: payload.timeSlot,
-      time_text: payload.timeText || null,
-      task_text: payload.taskText,
-    })
-    .eq("id", payload.routineId);
+  const { error } = await withCaregiverSchemaRecovery(() =>
+    supabase
+      .from("caregiver_daily_routines")
+      .update({
+        is_done: nextIsDone,
+        done_at: nextIsDone ? new Date().toISOString() : null,
+        time_slot: payload.timeSlot,
+        time_text: payload.timeText || null,
+        task_text: payload.taskText,
+      })
+      .eq("id", payload.routineId),
+  );
 
   if (error) {
+    if (isCaregiverSchemaCacheError(error)) {
+      return caregiverSchemaNotReadyResponse(error.message);
+    }
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
@@ -240,13 +310,18 @@ export async function DELETE(request: Request) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const { data: routine, error: routineError } = await supabase
-    .from("caregiver_daily_routines")
-    .select("id, caregiver_id, patient_id")
-    .eq("id", parsed.data.routineId)
-    .maybeSingle();
+  const { data: routine, error: routineError } = await withCaregiverSchemaRecovery<CaregiverRoutineDeleteRow | null>(() =>
+    supabase
+      .from("caregiver_daily_routines")
+      .select("id, caregiver_id, patient_id")
+      .eq("id", parsed.data.routineId)
+      .maybeSingle(),
+  );
 
   if (routineError) {
+    if (isCaregiverSchemaCacheError(routineError)) {
+      return caregiverSchemaNotReadyResponse(routineError.message);
+    }
     return NextResponse.json({ error: routineError.message }, { status: 400 });
   }
   if (!routine) {
@@ -267,12 +342,17 @@ export async function DELETE(request: Request) {
     return forbidden("Cannot delete routines created by other caregivers");
   }
 
-  const { error } = await supabase
-    .from("caregiver_daily_routines")
-    .delete()
-    .eq("id", parsed.data.routineId);
+  const { error } = await withCaregiverSchemaRecovery(() =>
+    supabase
+      .from("caregiver_daily_routines")
+      .delete()
+      .eq("id", parsed.data.routineId),
+  );
 
   if (error) {
+    if (isCaregiverSchemaCacheError(error)) {
+      return caregiverSchemaNotReadyResponse(error.message);
+    }
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
