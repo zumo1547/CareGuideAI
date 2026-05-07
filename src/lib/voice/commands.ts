@@ -73,6 +73,18 @@ export const isNegativeSpeech = (text: string) =>
 export const isRepeatSpeech = (text: string) =>
   includesAny(stripNoise(text), ["ทบทวน", "ทวน", "พูดอีกครั้ง", "อีกครั้ง", "repeat"]);
 
+export const isVoiceModeStopSpeech = (text: string) =>
+  includesAny(stripNoise(text), [
+    "ปิดการใช้งาน",
+    "ปิดโหมดเสียง",
+    "หยุดโหมดเสียง",
+    "หยุดฟังเสียง",
+    "ปิดผู้ช่วยเสียง",
+    "ปิดไมค์",
+    "ปิดไมโครโฟน",
+    "หยุดฟัง",
+  ]);
+
 export const isMedicationTakenSpeech = (text: string) =>
   includesAny(stripNoise(text), ["กินแล้ว", "ทานแล้ว", "รับประทานแล้ว", "เรียบร้อย", "กินยาแล้ว"]);
 

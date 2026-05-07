@@ -19,6 +19,7 @@ import {
   isAffirmativeSpeech,
   isNegativeSpeech,
   isRepeatSpeech,
+  isVoiceModeStopSpeech,
   parseVoiceIntent,
   type VoiceIntent,
 } from "@/lib/voice/commands";
@@ -194,6 +195,8 @@ export const AccessibilityAssistant = () => {
   const shouldRunVoiceLoopRef = useRef(false);
   const voiceEnabledRef = useRef(prefs.voiceEnabled);
   const noMatchStreakRef = useRef(0);
+  const noIntentStreakRef = useRef(0);
+  const lastGuidanceSpokenAtRef = useRef(0);
   const routeFlagsRef = useRef({
     isHomeRoute,
     isLoginRoute,
@@ -219,6 +222,40 @@ export const AccessibilityAssistant = () => {
       lastSpokenRef.current = { text: normalized, at: now };
     },
     [prefs.voiceEnabled],
+  );
+
+  const speakGuidanceWithCooldown = useCallback(
+    (text: string, minIntervalMs = 3500) => {
+      const now = Date.now();
+      if (now - lastGuidanceSpokenAtRef.current < minIntervalMs) {
+        return;
+      }
+      lastGuidanceSpokenAtRef.current = now;
+      speakFeedback(text, true);
+    },
+    [speakFeedback],
+  );
+
+  const deactivateVoiceMode = useCallback(
+    (speakAfterStop = false) => {
+      shouldRunVoiceLoopRef.current = false;
+      recognitionAbortRef.current?.abort();
+      recognitionAbortRef.current = null;
+      noMatchStreakRef.current = 0;
+      noIntentStreakRef.current = 0;
+      setVoiceModeEnabled(false);
+      setVoiceListening(false);
+      setPendingConfirmation(null);
+      stopThaiSpeech();
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(VOICE_AUTOSTART_KEY);
+      }
+      setVoiceStatusText("ปิดโหมดใช้งานด้วยเสียงแล้ว");
+      if (speakAfterStop) {
+        speakFeedback("ปิดโหมดใช้งานด้วยเสียงแล้ว", true);
+      }
+    },
+    [speakFeedback],
   );
 
   const clickBySelector = useCallback((selector: string) => {
@@ -407,12 +444,18 @@ export const AccessibilityAssistant = () => {
         return;
       }
 
+      if (isVoiceModeStopSpeech(normalized)) {
+        deactivateVoiceMode(true);
+        return;
+      }
+
       setVoiceStatusText(`ได้ยิน: ${normalized}`);
 
       if (pendingConfirmation) {
         if (isAffirmativeSpeech(normalized)) {
           const confirmedIntent = pendingConfirmation.intent;
           setPendingConfirmation(null);
+          noIntentStreakRef.current = 0;
           setVoiceStatusText("ยืนยันคำสั่งแล้ว กำลังดำเนินการ");
           speakFeedback("ยืนยันแล้ว กำลังดำเนินการ");
           executeIntent(confirmedIntent);
@@ -421,12 +464,14 @@ export const AccessibilityAssistant = () => {
 
         if (isNegativeSpeech(normalized)) {
           setPendingConfirmation(null);
+          noIntentStreakRef.current = 0;
           setVoiceStatusText("ยกเลิกคำสั่งแล้ว");
           speakFeedback("ยกเลิกคำสั่งแล้ว");
           return;
         }
 
         if (isRepeatSpeech(normalized)) {
+          noIntentStreakRef.current = 0;
           setVoiceStatusText("กำลังทวนคำสั่ง");
           speakFeedback(pendingConfirmation.prompt, true);
           return;
@@ -439,17 +484,26 @@ export const AccessibilityAssistant = () => {
 
       const intent = parseVoiceIntent(normalized);
       if (!intent) {
+        noIntentStreakRef.current += 1;
         const currentFlags = routeFlagsRef.current;
         const message = currentFlags.isPreAuthRoute
           ? currentFlags.isRegisterRoute
             ? "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สมัครสมาชิก วิธีสมัครสมาชิก หรือ เข้าสู่ระบบ"
             : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก"
           : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา นัดหมอ หรือ แชทหมอ";
+
+        if (noIntentStreakRef.current < 2) {
+          setVoiceStatusText("กำลังฟังอยู่ ลองพูดช้าๆ อีกครั้ง");
+          return;
+        }
+
         setVoiceStatusText(message);
-        speakFeedback(message);
+        speakGuidanceWithCooldown(message);
+        noIntentStreakRef.current = 0;
         return;
       }
 
+      noIntentStreakRef.current = 0;
       if (intent.requiresConfirmation) {
         const prompt = buildConfirmationPrompt(intent);
         setPendingConfirmation({ intent, prompt });
@@ -462,7 +516,9 @@ export const AccessibilityAssistant = () => {
     },
     [
       buildConfirmationPrompt,
+      deactivateVoiceMode,
       executeIntent,
+      speakGuidanceWithCooldown,
       pendingConfirmation,
       speakFeedback,
     ],
@@ -487,7 +543,7 @@ export const AccessibilityAssistant = () => {
       recognitionAbortRef.current = abortController;
       const currentFlags = routeFlagsRef.current;
       const heard = await listenForSpeechOnce({
-        timeoutMs: currentFlags.isPreAuthRoute ? 12_000 : 8_000,
+        timeoutMs: currentFlags.isPreAuthRoute ? 12_000 : 10_500,
         maxAlternatives: 3,
         signal: abortController.signal,
       });
@@ -500,7 +556,8 @@ export const AccessibilityAssistant = () => {
 
       if (!heard.text.trim() || normalizeText(heard.text).length < 2) {
         noMatchStreakRef.current += 1;
-        if (noMatchStreakRef.current >= 2) {
+        const noMatchThreshold = currentFlags.isPreAuthRoute ? 2 : 3;
+        if (noMatchStreakRef.current >= noMatchThreshold) {
           const dynamicFlags = routeFlagsRef.current;
           const retryMessage = dynamicFlags.isPreAuthRoute
             ? dynamicFlags.isRegisterRoute
@@ -508,7 +565,7 @@ export const AccessibilityAssistant = () => {
               : "ยังฟังไม่ชัด ลองพูดช้าๆ ว่า เข้าสู่ระบบ หรือ สมัครสมาชิก"
             : "ยังฟังไม่ชัด ลองพูดสั้นๆ เช่น สแกนยา นัดหมอ หรือ แชทหมอ";
           setVoiceStatusText(retryMessage);
-          speakFeedback(retryMessage, true);
+          speakGuidanceWithCooldown(retryMessage, 4500);
           noMatchStreakRef.current = 0;
         }
         continue;
@@ -517,7 +574,7 @@ export const AccessibilityAssistant = () => {
       noMatchStreakRef.current = 0;
       await handleHeardSpeech(heard.text);
     }
-  }, [handleHeardSpeech, speakFeedback]);
+  }, [handleHeardSpeech, speakGuidanceWithCooldown, speakFeedback]);
 
   const startVoiceMode = useCallback((options?: StartVoiceModeOptions) => {
     if (options?.forceEnableVoice && !voiceEnabledRef.current) {
@@ -548,18 +605,8 @@ export const AccessibilityAssistant = () => {
   }, [runVoiceLoop, speakFeedback]);
 
   const stopVoiceMode = useCallback(() => {
-    shouldRunVoiceLoopRef.current = false;
-    recognitionAbortRef.current?.abort();
-    recognitionAbortRef.current = null;
-    setVoiceModeEnabled(false);
-    setVoiceListening(false);
-    setPendingConfirmation(null);
-    stopThaiSpeech();
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(VOICE_AUTOSTART_KEY);
-    }
-    setVoiceStatusText("ปิดโหมดใช้งานด้วยเสียงแล้ว");
-  }, []);
+    deactivateVoiceMode(false);
+  }, [deactivateVoiceMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
