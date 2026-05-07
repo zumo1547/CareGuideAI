@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DEFAULT_APP_TIMEZONE, formatDateTimeInTimeZone } from "@/lib/time";
 
 interface PersonOption {
   id: string;
@@ -33,11 +34,7 @@ interface AssignPatientFormProps {
 }
 
 const formatDateTime = (value: string | null) => {
-  if (!value) return "-";
-  return new Intl.DateTimeFormat("th-TH", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatDateTimeInTimeZone(value, DEFAULT_APP_TIMEZONE, "dd/MM/yy HH:mm");
 };
 
 export const AssignPatientForm = ({

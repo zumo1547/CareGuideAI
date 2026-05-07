@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { DEFAULT_APP_TIMEZONE, formatDateTimeInTimeZone } from "@/lib/time";
 import type {
   SupportCaseMessage,
   SupportCaseStatus,
@@ -47,11 +48,7 @@ const statusLabel: Record<SupportCaseStatus, string> = {
 };
 
 const formatDateTime = (value: string | null) => {
-  if (!value) return "-";
-  return new Intl.DateTimeFormat("th-TH", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatDateTimeInTimeZone(value, DEFAULT_APP_TIMEZONE, "dd/MM/yy HH:mm");
 };
 
 const chooseDefaultCaseId = (

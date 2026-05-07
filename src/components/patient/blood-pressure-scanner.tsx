@@ -29,6 +29,7 @@ import {
   parseBloodPressureFromText,
   type ParsedBloodPressureReading,
 } from "@/lib/scan/blood-pressure";
+import { DEFAULT_APP_TIMEZONE, formatDateTimeInTimeZone } from "@/lib/time";
 import { speakThai, stopThaiSpeech, warmupSpeechSynthesis } from "@/lib/voice/speak";
 
 interface BloodPressureScannerProps {
@@ -102,10 +103,7 @@ const COMPLETION_MAX_DROP_PER_TICK = 3;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const formatDateTimeTh = (iso: string) =>
-  new Intl.DateTimeFormat("th-TH", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(iso));
+  formatDateTimeInTimeZone(iso, DEFAULT_APP_TIMEZONE, "dd/MM/yy HH:mm");
 
 const toNullableNumber = (value: string) => {
   const trimmed = value.trim();

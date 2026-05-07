@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { DEFAULT_APP_TIMEZONE, formatDateTimeInTimeZone } from "@/lib/time";
 import type {
   SupportCaseMessage,
   SupportCaseStatus,
@@ -34,11 +35,7 @@ const statusLabel: Record<SupportCaseStatus, string> = {
 };
 
 const formatDateTime = (value: string | null) => {
-  if (!value) return "-";
-  return new Intl.DateTimeFormat("th-TH", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatDateTimeInTimeZone(value, DEFAULT_APP_TIMEZONE, "dd/MM/yy HH:mm");
 };
 
 const chooseDefaultCaseId = (

@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
 import { canAccessPatientScope } from "@/lib/caregiver/access";
+import { env } from "@/lib/env";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const querySchema = z.object({
@@ -50,6 +52,8 @@ export async function GET(request: Request) {
   const patientId = parsed.data.patientId ?? auth.userId;
   const limit = parsed.data.limit ?? 40;
   const supabase = await createSupabaseServerClient();
+  const adminSupabase = env.SUPABASE_SERVICE_ROLE_KEY ? createSupabaseAdminClient() : null;
+  const reader = adminSupabase ?? supabase;
 
   const canAccess = await canAccessPatientScope({
     supabase,
@@ -61,7 +65,7 @@ export async function GET(request: Request) {
     return forbidden("Cannot view reminder events for this patient");
   }
 
-  const primary = await supabase
+  const primary = await reader
     .from("reminder_events")
     .select("id, due_at, channel, status, provider, cancelled_at")
     .eq("patient_id", patientId)
@@ -80,7 +84,7 @@ export async function GET(request: Request) {
   let error = primary.error;
 
   if (isCancelledAtColumnMissing(error?.message)) {
-    const fallback = await supabase
+    const fallback = await reader
       .from("reminder_events")
       .select("id, due_at, channel, status, provider")
       .eq("patient_id", patientId)

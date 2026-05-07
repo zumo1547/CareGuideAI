@@ -1,4 +1,3 @@
-import { format } from "date-fns";
 import {
   AlertTriangle,
   BellRing,
@@ -18,11 +17,13 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/session";
+import { env } from "@/lib/env";
 import { isSchemaCacheMissingError } from "@/lib/onboarding-storage";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { formatDateTimeInTimeZone } from "@/lib/time";
 import type { Role } from "@/types/domain";
 
-const fmt = (value: string | null) => (value ? format(new Date(value), "dd/MM/yyyy HH:mm") : "-");
+const fmt = (value: string | null) => formatDateTimeInTimeZone(value, env.APP_TIMEZONE);
 const num = (value: number | null) => value ?? 0;
 
 const roleBadgeVariant = (role: Role) => {

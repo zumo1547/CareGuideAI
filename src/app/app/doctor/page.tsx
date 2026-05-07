@@ -1,4 +1,5 @@
-import { format } from "date-fns";
+import { addDays } from "date-fns";
+import { formatInTimeZone } from "date-fns-tz";
 import { MessageSquareText, TrendingUp } from "lucide-react";
 
 import { AdherenceChart } from "@/components/doctor/adherence-chart";
@@ -7,10 +8,13 @@ import { DoctorSupportDesk } from "@/components/doctor/doctor-support-desk";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/session";
+import { env } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { combineDateAndTime, todayInTimeZone } from "@/lib/time";
 
-const fmt = (value: string | null) => (value ? format(new Date(value), "dd/MM/yyyy HH:mm") : "-");
+const fmt = (value: string | null) =>
+  value ? formatInTimeZone(new Date(value), env.APP_TIMEZONE, "dd/MM/yyyy HH:mm") : "-";
 
 export default async function DoctorDashboardPage() {
   const session = await requireRole(["doctor", "admin"]);
@@ -43,6 +47,13 @@ export default async function DoctorDashboardPage() {
       ].filter((value): value is string => typeof value === "string" && value.length > 0),
     ),
   ];
+  const chartWindowDays = 14;
+  const todayDateIso = todayInTimeZone(env.APP_TIMEZONE);
+  const chartStart = addDays(
+    combineDateAndTime(todayDateIso, "00:00", env.APP_TIMEZONE),
+    -(chartWindowDays - 1),
+  );
+  const chartWindowStartIso = chartStart.toISOString();
 
   const adminSupabase = createSupabaseAdminClient();
   const { data: patients } = patientIds.length
@@ -51,12 +62,13 @@ export default async function DoctorDashboardPage() {
 
   const [{ data: adherenceLogs }, { data: messages }] = await Promise.all([
     patientIds.length
-      ? supabase
-          .from("adherence_logs")
-          .select("id, patient_id, status, scheduled_for, taken_at")
-          .in("patient_id", patientIds)
-          .order("scheduled_for", { ascending: false })
-          .limit(120)
+        ? supabase
+            .from("adherence_logs")
+            .select("id, patient_id, status, scheduled_for, taken_at")
+            .in("patient_id", patientIds)
+            .gte("scheduled_for", chartWindowStartIso)
+            .order("scheduled_for", { ascending: false })
+            .limit(5000)
       : Promise.resolve({
           data: [] as {
             id: string;
@@ -76,18 +88,32 @@ export default async function DoctorDashboardPage() {
 
   const patientMap = new Map((patients ?? []).map((patient) => [patient.id, patient]));
 
-  const chartDataMap = new Map<string, { taken: number; missed: number }>();
+  const chartDataMap = new Map<string, { day: string; taken: number; missed: number }>();
+
+  for (let index = 0; index < chartWindowDays; index += 1) {
+    const date = addDays(chartStart, index);
+    const dayKey = formatInTimeZone(date, env.APP_TIMEZONE, "yyyy-MM-dd");
+    chartDataMap.set(dayKey, {
+      day: formatInTimeZone(date, env.APP_TIMEZONE, "dd/MM"),
+      taken: 0,
+      missed: 0,
+    });
+  }
+
   (adherenceLogs ?? []).forEach((log) => {
-    const day = format(new Date(log.scheduled_for), "dd/MM");
-    const entry = chartDataMap.get(day) ?? { taken: 0, missed: 0 };
+    if (log.status !== "taken" && log.status !== "missed") {
+      return;
+    }
+    const dayKey = formatInTimeZone(new Date(log.scheduled_for), env.APP_TIMEZONE, "yyyy-MM-dd");
+    const entry = chartDataMap.get(dayKey);
+    if (!entry) {
+      return;
+    }
     if (log.status === "taken") entry.taken += 1;
     if (log.status === "missed") entry.missed += 1;
-    chartDataMap.set(day, entry);
   });
 
-  const chartData = [...chartDataMap.entries()]
-    .map(([day, counts]) => ({ day, ...counts }))
-    .slice(-14);
+  const chartData = [...chartDataMap.values()];
 
   return (
     <div className="space-y-6">

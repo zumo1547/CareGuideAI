@@ -1,6 +1,5 @@
 "use client";
 
-import { format } from "date-fns";
 import { Loader2, RefreshCcw, XCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
@@ -9,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DEFAULT_APP_TIMEZONE, formatDateTimeInTimeZone } from "@/lib/time";
 
 type ReminderEventRow = {
   id: string;
@@ -25,7 +25,7 @@ interface ReminderEventsTableProps {
 }
 
 const formatDateTime = (dateValue: string | null) =>
-  dateValue ? format(new Date(dateValue), "dd/MM/yyyy HH:mm") : "-";
+  formatDateTimeInTimeZone(dateValue, DEFAULT_APP_TIMEZONE);
 
 const statusLabelMap: Record<string, string> = {
   pending: "pending",

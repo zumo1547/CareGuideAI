@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
 import { canAccessPatientScope } from "@/lib/caregiver/access";
+import { env } from "@/lib/env";
 import { getBmiTrend, type BiologicalSex } from "@/lib/onboarding";
 import { isSchemaCacheMissingError } from "@/lib/onboarding-storage";
 import {
@@ -11,6 +12,7 @@ import {
   parseBloodPressureFromText,
   type ParsedBloodPressureReading,
 } from "@/lib/scan/blood-pressure";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type PostgrestErrorLike = { message?: string; code?: string | null } | null | undefined;
@@ -48,6 +50,17 @@ const isBloodPressureSchemaError = (error: PostgrestErrorLike) => {
     message: error.message,
     code: error.code ?? null,
   });
+};
+
+const shouldRetryWithSessionClient = (error: PostgrestErrorLike) => {
+  if (!error?.message) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("jwt") ||
+    message.includes("permission denied") ||
+    message.includes("not authorized") ||
+    message.includes("invalid api key")
+  );
 };
 
 const normalizePulse = (value: number | null | undefined) => {
@@ -114,6 +127,8 @@ export async function POST(request: Request) {
   const payload = parsed.data;
   const patientId = payload.patientId ?? auth.userId;
   const supabase = await createSupabaseServerClient();
+  const adminSupabase = env.SUPABASE_SERVICE_ROLE_KEY ? createSupabaseAdminClient() : null;
+  const writer = adminSupabase ?? supabase;
   const canAccess = await canAccessPatientScope({
     supabase,
     role: auth.role,
@@ -134,11 +149,19 @@ export async function POST(request: Request) {
 
   const assessment = assessBloodPressure(reading.systolic, reading.diastolic);
 
-  const { data: onboardingProfile } = await supabase
+  let onboardingResult = await writer
     .from("user_onboarding_profiles")
     .select("biological_sex, bmi")
     .eq("user_id", patientId)
     .maybeSingle();
+  if (adminSupabase && shouldRetryWithSessionClient(onboardingResult.error)) {
+    onboardingResult = await supabase
+      .from("user_onboarding_profiles")
+      .select("biological_sex, bmi")
+      .eq("user_id", patientId)
+      .maybeSingle();
+  }
+  const onboardingProfile = onboardingResult.data ?? null;
 
   const biologicalSex = onboardingProfile?.biological_sex as BiologicalSex | null;
   const bmiValue = Number(onboardingProfile?.bmi ?? 0);
@@ -197,19 +220,28 @@ export async function POST(request: Request) {
     | null;
 
   {
-    const inserted = await supabase
+    let inserted = await writer
       .from("blood_pressure_readings")
       .insert(insertPayload)
       .select(
         "id, measured_at, systolic, diastolic, pulse, category, category_label_th, trend_summary_th, bmi_at_measurement, bmi_trend_label, source, ocr_confidence",
       )
       .single();
+    if (adminSupabase && shouldRetryWithSessionClient(inserted.error)) {
+      inserted = await supabase
+        .from("blood_pressure_readings")
+        .insert(insertPayload)
+        .select(
+          "id, measured_at, systolic, diastolic, pulse, category, category_label_th, trend_summary_th, bmi_at_measurement, bmi_trend_label, source, ocr_confidence",
+        )
+        .single();
+    }
 
     if (!inserted.error && inserted.data) {
       responseReading = serializeReading(inserted.data);
     } else if (isBloodPressureSchemaError(inserted.error)) {
       storage = "scan_sessions_fallback";
-      const fallbackInsert = await supabase.from("scan_sessions").insert({
+      let fallbackInsert = await writer.from("scan_sessions").insert({
         patient_id: patientId,
         medicine_id: null,
         guidance_state: "hold_steady",
@@ -225,6 +257,24 @@ export async function POST(request: Request) {
           source: payload.source ?? "ocr_camera",
         },
       });
+      if (adminSupabase && shouldRetryWithSessionClient(fallbackInsert.error)) {
+        fallbackInsert = await supabase.from("scan_sessions").insert({
+          patient_id: patientId,
+          medicine_id: null,
+          guidance_state: "hold_steady",
+          matched_via: "ocr",
+          confidence: Number(reading.confidence.toFixed(3)),
+          raw_payload: {
+            kind: "blood_pressure",
+            measuredAt,
+            reading,
+            assessment,
+            trendSummaryTh,
+            bmiTrend,
+            source: payload.source ?? "ocr_camera",
+          },
+        });
+      }
 
       if (fallbackInsert.error) {
         return NextResponse.json(
@@ -275,6 +325,8 @@ export async function GET(request: Request) {
   const patientId = patientIdParam || auth.userId;
 
   const supabase = await createSupabaseServerClient();
+  const adminSupabase = env.SUPABASE_SERVICE_ROLE_KEY ? createSupabaseAdminClient() : null;
+  const reader = adminSupabase ?? supabase;
   const canAccess = await canAccessPatientScope({
     supabase,
     role: auth.role,
@@ -285,7 +337,7 @@ export async function GET(request: Request) {
     return forbidden("Cannot read blood pressure for this patient");
   }
 
-  const listQuery = await supabase
+  let listQuery = await reader
     .from("blood_pressure_readings")
     .select(
       "id, measured_at, systolic, diastolic, pulse, category, category_label_th, trend_summary_th, bmi_at_measurement, bmi_trend_label, source, ocr_confidence",
@@ -293,6 +345,16 @@ export async function GET(request: Request) {
     .eq("patient_id", patientId)
     .order("measured_at", { ascending: false })
     .limit(20);
+  if (adminSupabase && shouldRetryWithSessionClient(listQuery.error)) {
+    listQuery = await supabase
+      .from("blood_pressure_readings")
+      .select(
+        "id, measured_at, systolic, diastolic, pulse, category, category_label_th, trend_summary_th, bmi_at_measurement, bmi_trend_label, source, ocr_confidence",
+      )
+      .eq("patient_id", patientId)
+      .order("measured_at", { ascending: false })
+      .limit(20);
+  }
 
   if (!listQuery.error) {
     return NextResponse.json({
@@ -305,13 +367,22 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: listQuery.error.message }, { status: 400 });
   }
 
-  const fallback = await supabase
+  let fallback = await reader
     .from("scan_sessions")
     .select("id, confidence, raw_payload, created_at")
     .eq("patient_id", patientId)
     .contains("raw_payload", { kind: "blood_pressure" })
     .order("created_at", { ascending: false })
     .limit(20);
+  if (adminSupabase && shouldRetryWithSessionClient(fallback.error)) {
+    fallback = await supabase
+      .from("scan_sessions")
+      .select("id, confidence, raw_payload, created_at")
+      .eq("patient_id", patientId)
+      .contains("raw_payload", { kind: "blood_pressure" })
+      .order("created_at", { ascending: false })
+      .limit(20);
+  }
 
   if (fallback.error) {
     return NextResponse.json({ error: fallback.error.message }, { status: 400 });

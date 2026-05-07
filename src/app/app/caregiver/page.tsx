@@ -1,4 +1,3 @@
-import { format } from "date-fns";
 import { Activity, BellRing, CalendarClock, HeartPulse, Pill, ShieldAlert } from "lucide-react";
 
 import { CaregiverLinkManager } from "@/components/caregiver/caregiver-link-manager";
@@ -18,6 +17,7 @@ import { env } from "@/lib/env";
 import type { BiologicalSex } from "@/lib/onboarding";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { formatDateTimeInTimeZone, todayInTimeZone } from "@/lib/time";
 
 interface CaregiverPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -102,6 +102,11 @@ interface DoctorRow {
   phone: string | null;
 }
 
+type QueryResult<T> = {
+  data: T | null;
+  error: { message?: string } | null;
+};
+
 const toSingle = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
@@ -113,22 +118,46 @@ const severityLabelMap: Record<string, string> = {
 };
 
 const formatDateTime = (value: string | null) =>
-  value
-    ? new Intl.DateTimeFormat("th-TH", {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(new Date(value))
-    : "-";
+  formatDateTimeInTimeZone(value, env.APP_TIMEZONE, "dd/MM/yy HH:mm");
+
+const readWithFallback = async <T,>({
+  sessionRead,
+  adminRead,
+}: {
+  sessionRead: () => PromiseLike<QueryResult<T>>;
+  adminRead?: () => PromiseLike<QueryResult<T>>;
+}): Promise<QueryResult<T>> => {
+  const sessionResult = await sessionRead();
+  if (!adminRead) return sessionResult;
+
+  if (!sessionResult.error) {
+    const sessionData = sessionResult.data;
+    const hasSessionRows = Array.isArray(sessionData) ? sessionData.length > 0 : Boolean(sessionData);
+    if (hasSessionRows) {
+      return sessionResult;
+    }
+  }
+
+  const adminResult = await adminRead();
+  if (!adminResult.error) {
+    const adminData = adminResult.data;
+    const hasAdminRows = Array.isArray(adminData) ? adminData.length > 0 : Boolean(adminData);
+    if (hasAdminRows) {
+      return adminResult;
+    }
+  }
+
+  return sessionResult.error ? adminResult : sessionResult;
+};
 
 export default async function CaregiverDashboardPage({ searchParams }: CaregiverPageProps) {
   const session = await requireRole(["caregiver"]);
   const supabase = await createSupabaseServerClient();
-  const caregiverLinkReader = env.SUPABASE_SERVICE_ROLE_KEY
-    ? createSupabaseAdminClient()
-    : supabase;
+  const adminSupabase = env.SUPABASE_SERVICE_ROLE_KEY ? createSupabaseAdminClient() : null;
+  const caregiverLinkReader = adminSupabase ?? supabase;
   const resolvedSearchParams = await searchParams;
   const requestedPatientId = toSingle(resolvedSearchParams.patientId);
-  const todayDate = format(new Date(), "yyyy-MM-dd");
+  const todayDate = todayInTimeZone(env.APP_TIMEZONE);
 
   const { data: rawLinks, error: caregiverLinksError } = await withCaregiverSchemaRecovery(() =>
     caregiverLinkReader
@@ -155,13 +184,30 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
 
   const [{ data: patientProfiles }, { data: onboardingRows }] = await Promise.all([
     linkedPatientIds.length
-      ? supabase.from("profiles").select("id, full_name, phone").in("id", linkedPatientIds)
+      ? readWithFallback<ProfileRow[]>({
+          sessionRead: () =>
+            supabase.from("profiles").select("id, full_name, phone").in("id", linkedPatientIds),
+          adminRead: adminSupabase
+            ? () =>
+                adminSupabase.from("profiles").select("id, full_name, phone").in("id", linkedPatientIds)
+            : undefined,
+        })
       : Promise.resolve({ data: [] as ProfileRow[] }),
     linkedPatientIds.length
-      ? supabase
-          .from("user_onboarding_profiles")
-          .select("user_id, disability_type, disability_severity, biological_sex, bmi")
-          .in("user_id", linkedPatientIds)
+      ? readWithFallback<OnboardingRow[]>({
+          sessionRead: () =>
+            supabase
+              .from("user_onboarding_profiles")
+              .select("user_id, disability_type, disability_severity, biological_sex, bmi")
+              .in("user_id", linkedPatientIds),
+          adminRead: adminSupabase
+            ? () =>
+                adminSupabase
+                  .from("user_onboarding_profiles")
+                  .select("user_id, disability_type, disability_severity, biological_sex, bmi")
+                  .in("user_id", linkedPatientIds)
+            : undefined,
+        })
       : Promise.resolve({ data: [] as OnboardingRow[] }),
   ]);
 
@@ -211,31 +257,80 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
   if (safeSelectedPatientId) {
     const [{ data: rawPlans }, { data: rawReminders }, { data: rawAppointments }, { data: rawRoutines }] =
       await Promise.all([
-        supabase
-          .from("medication_plans")
-          .select("id, medicine_id, dosage, is_active")
-          .eq("patient_id", safeSelectedPatientId)
-          .order("created_at", { ascending: false })
-          .limit(20),
-        supabase
-          .from("reminder_events")
-          .select("id, due_at, channel, status, provider")
-          .eq("patient_id", safeSelectedPatientId)
-          .order("due_at", { ascending: false })
-          .limit(20),
-        supabase
-          .from("appointments")
-          .select("status, patient_response, scheduled_at, updated_at")
-          .eq("patient_id", safeSelectedPatientId)
-          .order("updated_at", { ascending: false })
-          .limit(1),
-        supabase
-          .from("caregiver_daily_routines")
-          .select("id, routine_date, time_slot, time_text, task_text, is_done, done_at")
-          .eq("caregiver_id", session.userId)
-          .eq("patient_id", safeSelectedPatientId)
-          .eq("routine_date", todayDate)
-          .order("created_at", { ascending: true }),
+        readWithFallback<PlanRow[]>({
+          sessionRead: () =>
+            supabase
+              .from("medication_plans")
+              .select("id, medicine_id, dosage, is_active")
+              .eq("patient_id", safeSelectedPatientId)
+              .order("created_at", { ascending: false })
+              .limit(20),
+          adminRead: adminSupabase
+            ? () =>
+                adminSupabase
+                  .from("medication_plans")
+                  .select("id, medicine_id, dosage, is_active")
+                  .eq("patient_id", safeSelectedPatientId)
+                  .order("created_at", { ascending: false })
+                  .limit(20)
+            : undefined,
+        }),
+        readWithFallback<ReminderRow[]>({
+          sessionRead: () =>
+            supabase
+              .from("reminder_events")
+              .select("id, due_at, channel, status, provider")
+              .eq("patient_id", safeSelectedPatientId)
+              .order("due_at", { ascending: false })
+              .limit(20),
+          adminRead: adminSupabase
+            ? () =>
+                adminSupabase
+                  .from("reminder_events")
+                  .select("id, due_at, channel, status, provider")
+                  .eq("patient_id", safeSelectedPatientId)
+                  .order("due_at", { ascending: false })
+                  .limit(20)
+            : undefined,
+        }),
+        readWithFallback<AppointmentRow[]>({
+          sessionRead: () =>
+            supabase
+              .from("appointments")
+              .select("status, patient_response, scheduled_at, updated_at")
+              .eq("patient_id", safeSelectedPatientId)
+              .order("updated_at", { ascending: false })
+              .limit(1),
+          adminRead: adminSupabase
+            ? () =>
+                adminSupabase
+                  .from("appointments")
+                  .select("status, patient_response, scheduled_at, updated_at")
+                  .eq("patient_id", safeSelectedPatientId)
+                  .order("updated_at", { ascending: false })
+                  .limit(1)
+            : undefined,
+        }),
+        readWithFallback<RoutineRow[]>({
+          sessionRead: () =>
+            supabase
+              .from("caregiver_daily_routines")
+              .select("id, routine_date, time_slot, time_text, task_text, is_done, done_at")
+              .eq("caregiver_id", session.userId)
+              .eq("patient_id", safeSelectedPatientId)
+              .eq("routine_date", todayDate)
+              .order("created_at", { ascending: true }),
+          adminRead: adminSupabase
+            ? () =>
+                adminSupabase
+                  .from("caregiver_daily_routines")
+                  .select("id, routine_date, time_slot, time_text, task_text, is_done, done_at")
+                  .eq("caregiver_id", session.userId)
+                  .eq("patient_id", safeSelectedPatientId)
+                  .eq("routine_date", todayDate)
+                  .order("created_at", { ascending: true })
+            : undefined,
+        }),
       ]);
 
     plans = (rawPlans ?? []) as PlanRow[];
@@ -254,36 +349,63 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
 
     const [{ data: rawMedicines }, { data: rawSchedules }] = await Promise.all([
       medicineIds.length
-        ? supabase.from("medicines").select("id, name, strength").in("id", medicineIds)
+        ? readWithFallback<MedicineRow[]>({
+            sessionRead: () => supabase.from("medicines").select("id, name, strength").in("id", medicineIds),
+            adminRead: adminSupabase
+              ? () => adminSupabase.from("medicines").select("id, name, strength").in("id", medicineIds)
+              : undefined,
+          })
         : Promise.resolve({ data: [] as MedicineRow[] }),
       planIds.length
-        ? supabase
-            .from("medication_schedule_times")
-            .select("plan_id, label, time_of_day")
-            .in("plan_id", planIds)
+        ? readWithFallback<ScheduleRow[]>({
+            sessionRead: () =>
+              supabase
+                .from("medication_schedule_times")
+                .select("plan_id, label, time_of_day")
+                .in("plan_id", planIds),
+            adminRead: adminSupabase
+              ? () =>
+                  adminSupabase
+                    .from("medication_schedule_times")
+                    .select("plan_id, label, time_of_day")
+                    .in("plan_id", planIds)
+              : undefined,
+          })
         : Promise.resolve({ data: [] as ScheduleRow[] }),
     ]);
 
     medicines = (rawMedicines ?? []) as MedicineRow[];
     schedules = (rawSchedules ?? []) as ScheduleRow[];
 
-    const { data: bpRows } = await supabase
-      .from("blood_pressure_readings")
-      .select("measured_at, systolic, diastolic, pulse, category_label_th")
-      .eq("patient_id", safeSelectedPatientId)
-      .order("measured_at", { ascending: false })
-      .limit(1);
+    const { data: bpRows } = await readWithFallback<BloodPressureRow[]>({
+      sessionRead: () =>
+        supabase
+          .from("blood_pressure_readings")
+          .select("measured_at, systolic, diastolic, pulse, category_label_th")
+          .eq("patient_id", safeSelectedPatientId)
+          .order("measured_at", { ascending: false })
+          .limit(1),
+      adminRead: adminSupabase
+        ? () =>
+            adminSupabase
+              .from("blood_pressure_readings")
+              .select("measured_at, systolic, diastolic, pulse, category_label_th")
+              .eq("patient_id", safeSelectedPatientId)
+              .order("measured_at", { ascending: false })
+              .limit(1)
+        : undefined,
+    });
     latestBp = ((bpRows ?? [])[0] ?? null) as BloodPressureRow | null;
 
     try {
-      const adminSupabase = createSupabaseAdminClient();
+      const doctorReader = adminSupabase ?? supabase;
       const [{ data: doctors }, { data: links }] = await Promise.all([
-        adminSupabase
+        doctorReader
           .from("profiles")
           .select("id, full_name, phone")
           .eq("role", "doctor")
           .order("full_name", { ascending: true }),
-        adminSupabase
+        doctorReader
           .from("patient_doctor_links")
           .select("doctor_id")
           .eq("patient_id", safeSelectedPatientId)

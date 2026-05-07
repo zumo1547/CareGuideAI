@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
 import { canAccessPatientScope } from "@/lib/caregiver/access";
+import { env } from "@/lib/env";
 import { resolveMedicationKnowledge } from "@/lib/medications/knowledge";
 import { searchOpenFdaMedicines } from "@/lib/openfda";
 import {
@@ -11,6 +12,7 @@ import {
   parseMedicationDetailsFromText,
   validateParsedMedicationDetails,
 } from "@/lib/scan/ocr";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { MedicineSearchResult } from "@/types/domain";
 
@@ -147,6 +149,8 @@ export async function POST(request: Request) {
 
   const safeQuery = sanitizeForIlike(searchQuery);
   const supabase = await createSupabaseServerClient();
+  const adminSupabase = env.SUPABASE_SERVICE_ROLE_KEY ? createSupabaseAdminClient() : null;
+  const writer = adminSupabase ?? supabase;
   const canAccess = await canAccessPatientScope({
     supabase,
     role: auth.role,
@@ -157,7 +161,7 @@ export async function POST(request: Request) {
     return forbidden("Cannot scan for this patient");
   }
 
-  const { data: localRows } = await supabase
+  const { data: localRows } = await writer
     .from("medicines")
     .select(
       "id, name, strength, generic_name, dosage_form, external_source, external_id, barcode, instructions",
@@ -225,7 +229,7 @@ export async function POST(request: Request) {
       const sourceId = chosenCandidate.sourceId;
       let existing: { id: string; name: string; strength: string | null } | null = null;
       if (sourceId) {
-        const { data } = await supabase
+        const { data } = await writer
           .from("medicines")
           .select("id, name, strength")
           .eq("external_source", "openfda")
@@ -237,7 +241,7 @@ export async function POST(request: Request) {
       if (existing) {
         matchedMedicine = existing;
       } else {
-        const { data: inserted } = await supabase
+        const { data: inserted } = await writer
           .from("medicines")
           .insert({
             external_source: "openfda",
@@ -281,7 +285,7 @@ export async function POST(request: Request) {
     ? Math.max(0.72, parsedDetails.confidence)
     : Math.min(parsedDetails.confidence, validation.score);
 
-  await supabase.from("scan_sessions").insert({
+  const { error: scanSessionError } = await writer.from("scan_sessions").insert({
     patient_id: resolvedPatientId,
     medicine_id: effectiveMedicine?.id ?? null,
     guidance_state: "hold_steady",
@@ -297,6 +301,14 @@ export async function POST(request: Request) {
       usage,
     },
   });
+  if (scanSessionError) {
+    return NextResponse.json(
+      {
+        error: `Cannot log scan session: ${scanSessionError.message}`,
+      },
+      { status: 400 },
+    );
+  }
 
   return NextResponse.json({
     guidance: effectiveCanConfirm ? "hold_steady" : "move_closer",

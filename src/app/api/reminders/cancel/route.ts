@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
 import { canAccessPatientScope } from "@/lib/caregiver/access";
+import { env } from "@/lib/env";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -31,9 +33,11 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createSupabaseServerClient();
+  const adminSupabase = env.SUPABASE_SERVICE_ROLE_KEY ? createSupabaseAdminClient() : null;
+  const writer = adminSupabase ?? supabase;
   const { eventId, patientId } = parsed.data;
 
-  const { data: event, error: eventError } = await supabase
+  const { data: event, error: eventError } = await writer
     .from("reminder_events")
     .select("id, patient_id, status")
     .eq("id", eventId)
@@ -87,14 +91,14 @@ export async function POST(request: Request) {
     cancelled_at: cancelledAt,
   };
 
-  let { error: updateError } = await supabase
+  let { error: updateError } = await writer
     .from("reminder_events")
     .update(withCancelledAtPayload)
     .eq("id", eventId);
 
   // Fallback for projects where PostgREST schema cache has not picked up cancelled_at yet.
   if (isMissingCancelledAtColumnError(updateError?.message)) {
-    const fallback = await supabase
+    const fallback = await writer
       .from("reminder_events")
       .update(baseUpdatePayload)
       .eq("id", eventId);
@@ -115,7 +119,7 @@ export async function POST(request: Request) {
         legacyCancelled: true,
       },
     };
-    const legacyFallback = await supabase
+    const legacyFallback = await writer
       .from("reminder_events")
       .update(legacyPayload)
       .eq("id", eventId);

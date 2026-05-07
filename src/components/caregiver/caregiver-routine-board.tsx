@@ -2,7 +2,6 @@
 
 import { CheckCircle2, Loader2, Plus, RefreshCcw, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { format } from "date-fns";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +10,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  DEFAULT_APP_TIMEZONE,
+  formatDateTimeInTimeZone,
+  todayInTimeZone,
+} from "@/lib/time";
 
 interface RoutineItem {
   id: string;
@@ -44,17 +48,13 @@ const timeSlotOrder: Record<RoutineItem["timeSlot"], number> = {
 };
 
 const formatDateTime = (value: string | null) =>
-  value
-    ? new Intl.DateTimeFormat("th-TH", { dateStyle: "short", timeStyle: "short" }).format(
-        new Date(value),
-      )
-    : "-";
+  formatDateTimeInTimeZone(value, DEFAULT_APP_TIMEZONE, "dd/MM/yy HH:mm");
 
 export const CaregiverRoutineBoard = ({
   patientId,
   initialRoutines,
 }: CaregiverRoutineBoardProps) => {
-  const today = useMemo(() => format(new Date(), "yyyy-MM-dd"), []);
+  const today = useMemo(() => todayInTimeZone(DEFAULT_APP_TIMEZONE), []);
   const [routines, setRoutines] = useState(initialRoutines);
   const [routineDate] = useState(today);
   const [timeSlot, setTimeSlot] = useState<RoutineItem["timeSlot"]>("morning");
@@ -371,4 +371,3 @@ export const CaregiverRoutineBoard = ({
     </Card>
   );
 };
-

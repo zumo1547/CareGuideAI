@@ -3,8 +3,10 @@ import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
 import { canAccessPatientScope } from "@/lib/caregiver/access";
+import { env } from "@/lib/env";
 import { searchOpenFdaMedicines } from "@/lib/openfda";
 import { computeScanGuidance } from "@/lib/scan/guidance";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -36,6 +38,8 @@ export async function POST(request: Request) {
   const { patientId, barcode, frame } = parsed.data;
   const resolvedPatientId = patientId ?? auth.userId;
   const supabase = await createSupabaseServerClient();
+  const adminSupabase = env.SUPABASE_SERVICE_ROLE_KEY ? createSupabaseAdminClient() : null;
+  const writer = adminSupabase ?? supabase;
   const canAccess = await canAccessPatientScope({
     supabase,
     role: auth.role,
@@ -50,7 +54,7 @@ export async function POST(request: Request) {
   let medicineId: string | null = null;
   let medicine: { id: string; name: string; strength: string | null } | null = null;
 
-  const { data: localMedicine } = await supabase
+  const { data: localMedicine } = await writer
     .from("medicines")
     .select("id, name, strength")
     .or(`barcode.eq.${barcode},external_id.eq.${barcode}`)
@@ -64,7 +68,7 @@ export async function POST(request: Request) {
     const first = fdaResults[0];
 
     if (first) {
-      const { data: created } = await supabase
+      const { data: created } = await writer
         .from("medicines")
         .insert({
           external_source: first.source,
@@ -86,7 +90,7 @@ export async function POST(request: Request) {
     }
   }
 
-  await supabase.from("scan_sessions").insert({
+  const { error: scanSessionError } = await writer.from("scan_sessions").insert({
     patient_id: resolvedPatientId,
     medicine_id: medicineId,
     guidance_state: guidance,
@@ -98,6 +102,14 @@ export async function POST(request: Request) {
       foundMedicine: Boolean(medicine),
     },
   });
+  if (scanSessionError) {
+    return NextResponse.json(
+      {
+        error: `Cannot log scan session: ${scanSessionError.message}`,
+      },
+      { status: 400 },
+    );
+  }
 
   return NextResponse.json({
     scannedBarcode: barcode,

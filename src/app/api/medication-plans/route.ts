@@ -1,9 +1,11 @@
-import { addDays, format, startOfDay } from "date-fns";
+import { addDays } from "date-fns";
+import { formatInTimeZone } from "date-fns-tz";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { badRequest, forbidden, getApiAuthContext } from "@/lib/api/auth-helpers";
 import { canAccessPatientScope } from "@/lib/caregiver/access";
+import { env } from "@/lib/env";
 import { normalizeScheduleInput, type NormalizedScheduleTime } from "@/lib/medications/schedule";
 import { searchOpenFdaMedicines } from "@/lib/openfda";
 import { hasTwilioConfig } from "@/lib/reminders/twilio-sms-provider";
@@ -11,7 +13,9 @@ import {
   parseMedicationDetailsFromText,
   validateParsedMedicationDetails,
 } from "@/lib/scan/ocr";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { combineDateAndTime, todayInTimeZone } from "@/lib/time";
 
 type MedicationType = "prescription" | "otc";
 type ReminderMode = "until_exhausted" | "until_date";
@@ -50,7 +54,7 @@ const schema = z.object({
   reminderUntilDate: z.string().regex(DATE_ONLY_REGEX).nullable().optional(),
 });
 
-const toDateIso = (date: Date) => format(date, "yyyy-MM-dd");
+const toDateIso = (date: Date) => formatInTimeZone(date, env.APP_TIMEZONE, "yyyy-MM-dd");
 
 const isMedicationPlansSchemaCacheError = (error: PostgrestLikeError) => {
   if (!error?.message) return false;
@@ -83,14 +87,12 @@ const parseDoseFromDosageText = (dosage: string) => {
   return 1;
 };
 
-const createDueAtFromLocalDateAndTime = (date: Date, time24: string) => {
-  const dateIso = toDateIso(date);
-  return new Date(`${dateIso}T${time24}:00`);
-};
+const createDueAtFromLocalDateAndTime = (dateIso: string, time24: string) =>
+  combineDateAndTime(dateIso, time24, env.APP_TIMEZONE);
 
 const isValidFutureDateOnly = (value: string | null | undefined) => {
   if (!value || !DATE_ONLY_REGEX.test(value)) return false;
-  const asDate = new Date(`${value}T23:59:59`);
+  const asDate = combineDateAndTime(value, "23:59", env.APP_TIMEZONE);
   return Number.isFinite(asDate.getTime());
 };
 
@@ -108,13 +110,15 @@ const buildDueSlotsUntilExhausted = ({
   const requiredDoses = Math.max(1, Math.ceil(totalPills / pillsPerDose));
   const slots: Date[] = [];
   const cutoff = now.getTime() - 60_000;
-  const todayStart = startOfDay(now);
+  const todayDateIso = todayInTimeZone(env.APP_TIMEZONE);
+  const todayAnchor = combineDateAndTime(todayDateIso, "00:00", env.APP_TIMEZONE);
 
   for (let dayOffset = 0; dayOffset < MAX_REMINDER_DAYS && slots.length < requiredDoses; dayOffset += 1) {
-    const date = addDays(todayStart, dayOffset);
+    const date = addDays(todayAnchor, dayOffset);
+    const dateIso = toDateIso(date);
 
     for (const scheduleTime of scheduleTimes) {
-      const dueAt = createDueAtFromLocalDateAndTime(date, scheduleTime.time24);
+      const dueAt = createDueAtFromLocalDateAndTime(dateIso, scheduleTime.time24);
       if (dueAt.getTime() <= cutoff) {
         continue;
       }
@@ -138,19 +142,21 @@ const buildDueSlotsUntilDate = ({
   scheduleTimes: NormalizedScheduleTime[];
   reminderUntilDate: string;
 }) => {
-  const untilBoundary = new Date(`${reminderUntilDate}T23:59:59`);
+  const untilBoundary = combineDateAndTime(reminderUntilDate, "23:59", env.APP_TIMEZONE);
   const slots: Date[] = [];
   const cutoff = now.getTime() - 60_000;
-  const todayStart = startOfDay(now);
+  const todayDateIso = todayInTimeZone(env.APP_TIMEZONE);
+  const todayAnchor = combineDateAndTime(todayDateIso, "00:00", env.APP_TIMEZONE);
 
   for (let dayOffset = 0; dayOffset < MAX_REMINDER_DAYS; dayOffset += 1) {
-    const date = addDays(todayStart, dayOffset);
-    if (date.getTime() > untilBoundary.getTime()) {
+    const date = addDays(todayAnchor, dayOffset);
+    const dateIso = toDateIso(date);
+    if (dateIso > reminderUntilDate) {
       break;
     }
 
     for (const scheduleTime of scheduleTimes) {
-      const dueAt = createDueAtFromLocalDateAndTime(date, scheduleTime.time24);
+      const dueAt = createDueAtFromLocalDateAndTime(dateIso, scheduleTime.time24);
       if (dueAt.getTime() <= cutoff || dueAt.getTime() > untilBoundary.getTime()) {
         continue;
       }
@@ -175,6 +181,8 @@ export async function POST(request: Request) {
   const payload = parsed.data;
   const patientId = payload.patientId ?? auth.userId;
   const supabase = await createSupabaseServerClient();
+  const adminSupabase = env.SUPABASE_SERVICE_ROLE_KEY ? createSupabaseAdminClient() : null;
+  const writer = adminSupabase ?? supabase;
 
   const canAccess = await canAccessPatientScope({
     supabase,
@@ -200,7 +208,7 @@ export async function POST(request: Request) {
 
   let medicine =
     (
-      await supabase
+      await writer
         .from("medicines")
         .select("id, name")
         .or(
@@ -221,7 +229,7 @@ export async function POST(request: Request) {
       null;
 
     if (picked) {
-      const inserted = await supabase
+      const inserted = await writer
         .from("medicines")
         .insert({
           external_source: picked.source,
@@ -237,7 +245,7 @@ export async function POST(request: Request) {
         .single();
       medicine = inserted.data ?? null;
     } else {
-      const inserted = await supabase
+      const inserted = await writer
         .from("medicines")
         .insert({
           name: payload.medicineQuery,
@@ -392,7 +400,7 @@ export async function POST(request: Request) {
   let planError: { message?: string; code?: string | null } | null = null;
 
   {
-    const firstAttempt = await supabase
+    const firstAttempt = await writer
       .from("medication_plans")
       .insert(advancedPlanInsert)
       .select("id")
@@ -402,7 +410,7 @@ export async function POST(request: Request) {
   }
 
   if ((planError || !plan) && hasMissingMedicationPlanColumn(planError)) {
-    const secondAttempt = await supabase
+    const secondAttempt = await writer
       .from("medication_plans")
       .insert(legacyPlanInsert)
       .select("id")
@@ -416,7 +424,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: planError?.message ?? "Cannot create medication plan" }, { status: 400 });
   }
 
-  const { error: scheduleError } = await supabase.from("medication_schedule_times").insert(
+  const { error: scheduleError } = await writer.from("medication_schedule_times").insert(
     scheduleTimes.map((item) => ({
       plan_id: plan.id,
       label: item.label,
@@ -434,7 +442,7 @@ export async function POST(request: Request) {
     plan_id: plan.id,
   }));
 
-  const { error: reminderInsertError } = await supabase.from("reminder_events").insert(reminderRowsWithPlan);
+  const { error: reminderInsertError } = await writer.from("reminder_events").insert(reminderRowsWithPlan);
   if (reminderInsertError) {
     return NextResponse.json(
       {

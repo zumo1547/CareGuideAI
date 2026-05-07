@@ -10,6 +10,7 @@ import { env } from "@/lib/env";
 import { isSchemaCacheMissingError } from "@/lib/onboarding-storage";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { parseDateTimeToUtcIso } from "@/lib/time";
 import type { AppointmentView } from "@/types/appointment";
 import type { AppointmentStatus } from "@/types/domain";
 
@@ -182,12 +183,7 @@ const normalizeText = (value: string | null | undefined) => {
 };
 
 const parseDateInput = (value: string | null | undefined) => {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-  return parsed.toISOString();
+  return parseDateTimeToUtcIso(value, env.APP_TIMEZONE);
 };
 
 const normalizeStatus = (value: string | null | undefined): AppointmentStatus => {
