@@ -194,6 +194,12 @@ export const AccessibilityAssistant = () => {
   const shouldRunVoiceLoopRef = useRef(false);
   const voiceEnabledRef = useRef(prefs.voiceEnabled);
   const noMatchStreakRef = useRef(0);
+  const routeFlagsRef = useRef({
+    isHomeRoute,
+    isLoginRoute,
+    isRegisterRoute,
+    isPreAuthRoute,
+  });
   const recognitionAbortRef = useRef<AbortController | null>(null);
   const lastSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
   const lastErrorSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
@@ -254,9 +260,10 @@ export const AccessibilityAssistant = () => {
 
   const executeIntent = useCallback(
     (intent: VoiceIntent) => {
+      const currentFlags = routeFlagsRef.current;
       if (intent.type === "navigate") {
-        if (isPreAuthRoute) {
-          const message = isRegisterRoute
+        if (currentFlags.isPreAuthRoute) {
+          const message = currentFlags.isRegisterRoute
             ? "หน้านี้ใช้คำสั่ง สมัครสมาชิก วิธีสมัครสมาชิก หรือ เข้าสู่ระบบ"
             : "หน้านี้ใช้คำสั่ง เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก";
           setVoiceStatusText(message);
@@ -276,7 +283,7 @@ export const AccessibilityAssistant = () => {
         return;
       }
 
-      if (isPreAuthRoute) {
+      if (currentFlags.isPreAuthRoute) {
         const unsupportedInPreAuth = new Set([
           "start-med-camera-scan",
           "confirm-med-plan",
@@ -311,7 +318,7 @@ export const AccessibilityAssistant = () => {
         return;
       }
 
-      if (intent.actionId === "submit-register" && isLoginRoute) {
+      if (intent.actionId === "submit-register" && currentFlags.isLoginRoute) {
         const moved = clickBySelector("[data-voice-action='go-register-page']");
         if (moved) {
           setVoiceStatusText("กำลังพาไปหน้าสมัครสมาชิก");
@@ -323,7 +330,7 @@ export const AccessibilityAssistant = () => {
         return;
       }
 
-      if (intent.actionId === "submit-login" && isRegisterRoute) {
+      if (intent.actionId === "submit-login" && currentFlags.isRegisterRoute) {
         const moved = clickBySelector("[data-voice-action='go-login-page']");
         if (moved) {
           setVoiceStatusText("กำลังพาไปหน้าเข้าสู่ระบบ");
@@ -335,7 +342,7 @@ export const AccessibilityAssistant = () => {
         return;
       }
 
-      if (intent.actionId === "submit-login" && isHomeRoute) {
+      if (intent.actionId === "submit-login" && currentFlags.isHomeRoute) {
         const moved = clickBySelector("[data-voice-action='go-login-page']");
         if (moved) {
           setVoiceStatusText("กำลังพาไปหน้าเข้าสู่ระบบ");
@@ -347,7 +354,7 @@ export const AccessibilityAssistant = () => {
         return;
       }
 
-      if (intent.actionId === "submit-register" && isHomeRoute) {
+      if (intent.actionId === "submit-register" && currentFlags.isHomeRoute) {
         const moved = clickBySelector("[data-voice-action='go-register-page']");
         if (moved) {
           setVoiceStatusText("กำลังพาไปหน้าสมัครสมาชิก");
@@ -371,10 +378,6 @@ export const AccessibilityAssistant = () => {
     },
     [
       clickBySelector,
-      isHomeRoute,
-      isPreAuthRoute,
-      isLoginRoute,
-      isRegisterRoute,
       moveToSection,
       speakFeedback,
     ],
@@ -436,8 +439,9 @@ export const AccessibilityAssistant = () => {
 
       const intent = parseVoiceIntent(normalized);
       if (!intent) {
-        const message = isPreAuthRoute
-          ? isRegisterRoute
+        const currentFlags = routeFlagsRef.current;
+        const message = currentFlags.isPreAuthRoute
+          ? currentFlags.isRegisterRoute
             ? "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สมัครสมาชิก วิธีสมัครสมาชิก หรือ เข้าสู่ระบบ"
             : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก"
           : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา นัดหมอ หรือ แชทหมอ";
@@ -459,8 +463,6 @@ export const AccessibilityAssistant = () => {
     [
       buildConfirmationPrompt,
       executeIntent,
-      isPreAuthRoute,
-      isRegisterRoute,
       pendingConfirmation,
       speakFeedback,
     ],
@@ -483,8 +485,9 @@ export const AccessibilityAssistant = () => {
       setVoiceListening(true);
       const abortController = new AbortController();
       recognitionAbortRef.current = abortController;
+      const currentFlags = routeFlagsRef.current;
       const heard = await listenForSpeechOnce({
-        timeoutMs: isPreAuthRoute ? 12_000 : 8_000,
+        timeoutMs: currentFlags.isPreAuthRoute ? 12_000 : 8_000,
         maxAlternatives: 3,
         signal: abortController.signal,
       });
@@ -498,8 +501,9 @@ export const AccessibilityAssistant = () => {
       if (!heard.text.trim() || normalizeText(heard.text).length < 2) {
         noMatchStreakRef.current += 1;
         if (noMatchStreakRef.current >= 2) {
-          const retryMessage = isPreAuthRoute
-            ? isRegisterRoute
+          const dynamicFlags = routeFlagsRef.current;
+          const retryMessage = dynamicFlags.isPreAuthRoute
+            ? dynamicFlags.isRegisterRoute
               ? "ยังฟังไม่ชัด ลองพูดช้าๆ ว่า สมัครสมาชิก หรือ เข้าสู่ระบบ"
               : "ยังฟังไม่ชัด ลองพูดช้าๆ ว่า เข้าสู่ระบบ หรือ สมัครสมาชิก"
             : "ยังฟังไม่ชัด ลองพูดสั้นๆ เช่น สแกนยา นัดหมอ หรือ แชทหมอ";
@@ -513,7 +517,7 @@ export const AccessibilityAssistant = () => {
       noMatchStreakRef.current = 0;
       await handleHeardSpeech(heard.text);
     }
-  }, [handleHeardSpeech, isPreAuthRoute, isRegisterRoute, speakFeedback]);
+  }, [handleHeardSpeech, speakFeedback]);
 
   const startVoiceMode = useCallback((options?: StartVoiceModeOptions) => {
     if (options?.forceEnableVoice && !voiceEnabledRef.current) {
@@ -530,8 +534,9 @@ export const AccessibilityAssistant = () => {
     warmupSpeechSynthesis();
     shouldRunVoiceLoopRef.current = true;
     setVoiceModeEnabled(true);
-    const startMessage = isPreAuthRoute
-      ? isRegisterRoute
+    const currentFlags = routeFlagsRef.current;
+    const startMessage = currentFlags.isPreAuthRoute
+      ? currentFlags.isRegisterRoute
         ? "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สมัครสมาชิก หรือ วิธีสมัครสมาชิก"
         : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น เข้าสู่ระบบ หรือ วิธีเข้าสู่ระบบ"
       : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา นัดหมอ แชทหมอ";
@@ -540,7 +545,7 @@ export const AccessibilityAssistant = () => {
     window.setTimeout(() => {
       void runVoiceLoop();
     }, 0);
-  }, [isPreAuthRoute, isRegisterRoute, runVoiceLoop, speakFeedback]);
+  }, [runVoiceLoop, speakFeedback]);
 
   const stopVoiceMode = useCallback(() => {
     shouldRunVoiceLoopRef.current = false;
@@ -564,6 +569,15 @@ export const AccessibilityAssistant = () => {
   useEffect(() => {
     voiceEnabledRef.current = prefs.voiceEnabled;
   }, [prefs.voiceEnabled]);
+
+  useEffect(() => {
+    routeFlagsRef.current = {
+      isHomeRoute,
+      isLoginRoute,
+      isRegisterRoute,
+      isPreAuthRoute,
+    };
+  }, [isHomeRoute, isLoginRoute, isRegisterRoute, isPreAuthRoute]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
