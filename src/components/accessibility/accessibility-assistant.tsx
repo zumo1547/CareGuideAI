@@ -171,6 +171,7 @@ export const AccessibilityAssistant = () => {
   const isAuthRoute = isLoginRoute || isRegisterRoute;
   const isPreAuthRoute = isHomeRoute || isAuthRoute;
   const showAssistantUi = isPreAuthRoute || (pathname?.startsWith("/app") ?? false);
+  const showVoiceModeControlsInAssistant = !isPreAuthRoute;
 
   const [prefs, setPrefs] = useState<AccessibilityPrefs>(readInitialPrefs);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -652,31 +653,35 @@ export const AccessibilityAssistant = () => {
             </p>
 
             <div className="mt-3 flex flex-col gap-2">
-              <Button
-                type="button"
-                variant={voiceModeEnabled ? "default" : "secondary"}
-                className="justify-start"
-                onClick={() => {
-                  if (voiceModeEnabled) {
-                    stopVoiceMode();
-                  } else {
-                    startVoiceMode();
-                  }
-                }}
-                aria-label={voiceModeEnabled ? "ปิดโหมดใช้งานด้วยเสียง" : "เริ่มโหมดใช้งานด้วยเสียง"}
-              >
-                {voiceModeEnabled ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                <span>{voiceModeEnabled ? "ปิดโหมดใช้งานด้วยเสียง" : "เริ่มโหมดใช้งานด้วยเสียง"}</span>
-              </Button>
+              {showVoiceModeControlsInAssistant ? (
+                <>
+                  <Button
+                    type="button"
+                    variant={voiceModeEnabled ? "default" : "secondary"}
+                    className="justify-start"
+                    onClick={() => {
+                      if (voiceModeEnabled) {
+                        stopVoiceMode();
+                      } else {
+                        startVoiceMode();
+                      }
+                    }}
+                    aria-label={voiceModeEnabled ? "ปิดโหมดใช้งานด้วยเสียง" : "เริ่มโหมดใช้งานด้วยเสียง"}
+                  >
+                    {voiceModeEnabled ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                    <span>{voiceModeEnabled ? "ปิดโหมดใช้งานด้วยเสียง" : "เริ่มโหมดใช้งานด้วยเสียง"}</span>
+                  </Button>
 
-              <div
-                className="rounded-lg border bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground"
-                aria-live="polite"
-              >
-                <p className="font-medium text-foreground">สถานะคำสั่งเสียง</p>
-                <p>{voiceListening ? "กำลังฟังคำสั่ง..." : "ยังไม่ได้ฟัง"}</p>
-                <p>{voiceStatusText}</p>
-              </div>
+                  <div
+                    className="rounded-lg border bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground"
+                    aria-live="polite"
+                  >
+                    <p className="font-medium text-foreground">สถานะคำสั่งเสียง</p>
+                    <p>{voiceListening ? "กำลังฟังคำสั่ง..." : "ยังไม่ได้ฟัง"}</p>
+                    <p>{voiceStatusText}</p>
+                  </div>
+                </>
+              ) : null}
 
               <Button
                 type="button"
