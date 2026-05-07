@@ -193,6 +193,7 @@ export const AccessibilityAssistant = () => {
 
   const shouldRunVoiceLoopRef = useRef(false);
   const voiceEnabledRef = useRef(prefs.voiceEnabled);
+  const noMatchStreakRef = useRef(0);
   const recognitionAbortRef = useRef<AbortController | null>(null);
   const lastSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
   const lastErrorSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
@@ -484,6 +485,7 @@ export const AccessibilityAssistant = () => {
       recognitionAbortRef.current = abortController;
       const heard = await listenForSpeechOnce({
         timeoutMs: isPreAuthRoute ? 12_000 : 8_000,
+        maxAlternatives: 3,
         signal: abortController.signal,
       });
       recognitionAbortRef.current = null;
@@ -494,12 +496,24 @@ export const AccessibilityAssistant = () => {
       }
 
       if (!heard.text.trim() || normalizeText(heard.text).length < 2) {
+        noMatchStreakRef.current += 1;
+        if (noMatchStreakRef.current >= 2) {
+          const retryMessage = isPreAuthRoute
+            ? isRegisterRoute
+              ? "ยังฟังไม่ชัด ลองพูดช้าๆ ว่า สมัครสมาชิก หรือ เข้าสู่ระบบ"
+              : "ยังฟังไม่ชัด ลองพูดช้าๆ ว่า เข้าสู่ระบบ หรือ สมัครสมาชิก"
+            : "ยังฟังไม่ชัด ลองพูดสั้นๆ เช่น สแกนยา นัดหมอ หรือ แชทหมอ";
+          setVoiceStatusText(retryMessage);
+          speakFeedback(retryMessage, true);
+          noMatchStreakRef.current = 0;
+        }
         continue;
       }
 
+      noMatchStreakRef.current = 0;
       await handleHeardSpeech(heard.text);
     }
-  }, [handleHeardSpeech, isPreAuthRoute, speakFeedback]);
+  }, [handleHeardSpeech, isPreAuthRoute, isRegisterRoute, speakFeedback]);
 
   const startVoiceMode = useCallback((options?: StartVoiceModeOptions) => {
     if (options?.forceEnableVoice && !voiceEnabledRef.current) {

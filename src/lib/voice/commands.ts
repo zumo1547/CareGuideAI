@@ -36,6 +36,30 @@ const stripNoise = (value: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const normalizeIntentText = (value: string) => {
+  let text = stripNoise(value);
+
+  const replacements: Array<[RegExp, string]> = [
+    [/\blog\s*in\b/gu, " login "],
+    [/\bsign\s*in\b/gu, " login "],
+    [/\bregister\b/gu, " register "],
+    [/\bsign\s*up\b/gu, " register "],
+    [/\bcreate\s*account\b/gu, " register "],
+    [/ล๊อกอิน|ล็อคอิน|ลอกอิน|ล้อกอิน|ล็อกอืน|ล็อกอินน์/gu, "ล็อกอิน"],
+    [/ไซน์อิน|ซายอิน|ซายนอิน|ไซนอืน|ไซน์ in/gu, "login"],
+    [/ไซน์อัพ|ซายอัพ|ซายนอัพ|สมัครแอคเคาท์/gu, "register"],
+    [/เขาสู่ระบบ|เข้า\s*สู่\s*ระบบ|เข้า\s*ระบบ|เข้าระบบ|เขา\s*ระบบ|เข้าสู่ระบม|เขาสู่ระบม/gu, "เข้าสู่ระบบ"],
+    [/สมัครสมาชิค|สมัครสมาชีก|สมัครสมาขิก|สมัครสมาขี/gu, "สมัครสมาชิก"],
+    [/ลงทะเบีน|ลงทะเบียน|ลงทะเบียน/gu, "ลงทะเบียน"],
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    text = text.replace(pattern, replacement);
+  }
+
+  return stripNoise(text);
+};
+
 export const normalizeSpeechText = stripNoise;
 
 const includesAny = (text: string, keywords: string[]) => keywords.some((keyword) => text.includes(keyword));
@@ -62,8 +86,16 @@ export const isMedicationSnoozeSpeech = (text: string) =>
   ]);
 
 export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
-  const text = stripNoise(rawText);
+  const text = normalizeIntentText(rawText);
   if (!text) return null;
+
+  const looksLikeLoginCommand =
+    includesAny(text, ["เข้าสู่ระบบ", "ล็อกอิน", "login", "sign in"]) ||
+    (includesAny(text, ["เข้า", "เขา"]) && includesAny(text, ["ระบบ", "ระบม"]));
+
+  const looksLikeRegisterCommand =
+    includesAny(text, ["สมัครสมาชิก", "ลงทะเบียน", "register", "sign up", "create account"]) ||
+    (includesAny(text, ["สมัคร", "ลงทะเบียน"]) && includesAny(text, ["สมาชิก", "บัญชี", "account"]));
 
   if (includesAny(text, ["วิธีเข้าสู่ระบบ", "ล็อกอินยังไง", "ต้องกรอกอะไรเข้าสู่ระบบ"])) {
     return {
@@ -101,7 +133,7 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     };
   }
 
-  if (includesAny(text, ["สมัครสมาชิก", "ลงทะเบียน", "สร้างบัญชี"])) {
+  if (looksLikeRegisterCommand || includesAny(text, ["สร้างบัญชี"])) {
     return {
       type: "action",
       actionId: "submit-register",
@@ -111,7 +143,7 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     };
   }
 
-  if (includesAny(text, ["เข้าสู่ระบบ", "ล็อกอิน", "login"])) {
+  if (looksLikeLoginCommand) {
     return {
       type: "action",
       actionId: "submit-login",

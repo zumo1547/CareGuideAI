@@ -6,7 +6,8 @@ interface SpeechRecognitionAlternativeLike {
 }
 
 interface SpeechRecognitionResultLike {
-  0?: SpeechRecognitionAlternativeLike;
+  length?: number;
+  [index: number]: SpeechRecognitionAlternativeLike | number | undefined;
 }
 
 interface SpeechRecognitionEventLike extends Event {
@@ -128,14 +129,35 @@ export const listenForSpeechOnce = async ({
     }
 
     recognition.onresult = (event) => {
-      const result = event.results?.[0]?.[0];
-      if (!result) return;
-      const transcript = (result.transcript ?? "").trim();
+      const resultSet = event.results?.[0];
+      if (!resultSet) return;
+
+      const maxFromBrowser =
+        typeof resultSet.length === "number" ? Number(resultSet.length) : maxAlternatives;
+      const scanCount = Math.max(1, Math.min(maxAlternatives, maxFromBrowser));
+
+      const candidates: Array<{ transcript: string; confidence: number }> = [];
+      for (let index = 0; index < scanCount; index += 1) {
+        const candidate = resultSet[index];
+        if (!candidate || typeof candidate !== "object") continue;
+        const transcript = (candidate.transcript ?? "").trim();
+        if (!transcript) continue;
+        const confidence = Number.isFinite(candidate.confidence) ? Number(candidate.confidence) : 0;
+        candidates.push({ transcript, confidence });
+      }
+
+      if (!candidates.length) return;
+      candidates.sort((a, b) => {
+        if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+        return b.transcript.length - a.transcript.length;
+      });
+
+      const best = candidates[0];
       lastResult = {
-        text: transcript,
-        confidence: Number.isFinite(result.confidence) ? Number(result.confidence) : 0,
+        text: best.transcript,
+        confidence: best.confidence,
         timedOut: false,
-        noMatch: transcript.length === 0,
+        noMatch: best.transcript.length === 0,
       };
       finish(lastResult);
     };
