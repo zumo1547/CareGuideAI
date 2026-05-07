@@ -24,6 +24,8 @@ interface ReminderEventsTableProps {
   patientId?: string;
 }
 
+const COLLAPSED_ROWS = 8;
+
 const formatDateTime = (dateValue: string | null) =>
   formatDateTimeInTimeZone(dateValue, DEFAULT_APP_TIMEZONE);
 
@@ -58,6 +60,10 @@ export const ReminderEventsTable = ({
   const [isRefreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [isExpanded, setExpanded] = useState(false);
+
+  const hasMoreThanCollapsedRows = events.length > COLLAPSED_ROWS;
+  const visibleEvents = isExpanded ? events : events.slice(0, COLLAPSED_ROWS);
 
   const refreshEvents = useCallback(
     async (silent = false) => {
@@ -181,14 +187,14 @@ export const ReminderEventsTable = ({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {events.length === 0 ? (
+          {visibleEvents.length === 0 ? (
             <TableRow>
               <TableCell colSpan={4} className="text-center text-muted-foreground">
                 No reminder events
               </TableCell>
             </TableRow>
           ) : (
-            events.map((event) => {
+            visibleEvents.map((event) => {
               const displayStatus = getDisplayStatus(event);
 
               return (
@@ -234,6 +240,22 @@ export const ReminderEventsTable = ({
           )}
         </TableBody>
       </Table>
+
+      {hasMoreThanCollapsedRows ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-cyan-200/70 bg-cyan-50/40 px-3 py-2">
+          <p className="text-xs text-cyan-900/90">
+            แสดง {visibleEvents.length} จากทั้งหมด {events.length} รายการ
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {isExpanded ? "ย่อรายการ" : "ดูรายการเต็ม"}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 };
