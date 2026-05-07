@@ -167,6 +167,8 @@ export const AccessibilityAssistant = () => {
   const isPatientRoute = pathname?.startsWith("/app/patient") ?? false;
   const isLoginRoute = pathname === "/login";
   const isRegisterRoute = pathname === "/register";
+  const isAuthRoute = isLoginRoute || isRegisterRoute;
+  const showAssistantUi = pathname?.startsWith("/app") ?? false;
 
   const [prefs, setPrefs] = useState<AccessibilityPrefs>(readInitialPrefs);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -239,6 +241,15 @@ export const AccessibilityAssistant = () => {
   const executeIntent = useCallback(
     (intent: VoiceIntent) => {
       if (intent.type === "navigate") {
+        if (isAuthRoute) {
+          const message = isLoginRoute
+            ? "หน้านี้ใช้คำสั่ง เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก"
+            : "หน้านี้ใช้คำสั่ง สมัครสมาชิก วิธีสมัครสมาชิก หรือ เข้าสู่ระบบ";
+          setVoiceStatusText(message);
+          speakFeedback(message, true);
+          return;
+        }
+
         const sectionId = sectionIdByIntent[intent.sectionId];
         const ok = moveToSection(sectionId);
         if (ok) {
@@ -301,7 +312,7 @@ export const AccessibilityAssistant = () => {
         speakFeedback(`ยังไม่พบปุ่มสำหรับ ${intent.label} กรุณาเลื่อนไปส่วนที่เกี่ยวข้องก่อน`);
       }
     },
-    [clickBySelector, isLoginRoute, isRegisterRoute, moveToSection, speakFeedback],
+    [clickBySelector, isAuthRoute, isLoginRoute, isRegisterRoute, moveToSection, speakFeedback],
   );
 
   const buildConfirmationPrompt = useCallback((intent: VoiceIntent) => {
@@ -360,8 +371,13 @@ export const AccessibilityAssistant = () => {
 
       const intent = parseVoiceIntent(normalized);
       if (!intent) {
-        setVoiceStatusText("ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา นัดหมอ หรือ แชทหมอ");
-        speakFeedback("ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา นัดหมอ หรือ แชทหมอ");
+        const message = isLoginRoute
+          ? "ยังไม่เข้าใจคำสั่ง ลองพูดว่า เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก"
+          : isRegisterRoute
+            ? "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สมัครสมาชิก วิธีสมัครสมาชิก หรือ เข้าสู่ระบบ"
+            : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา นัดหมอ หรือ แชทหมอ";
+        setVoiceStatusText(message);
+        speakFeedback(message);
         return;
       }
 
@@ -375,7 +391,14 @@ export const AccessibilityAssistant = () => {
 
       executeIntent(intent);
     },
-    [buildConfirmationPrompt, executeIntent, pendingConfirmation, speakFeedback],
+    [
+      buildConfirmationPrompt,
+      executeIntent,
+      isLoginRoute,
+      isRegisterRoute,
+      pendingConfirmation,
+      speakFeedback,
+    ],
   );
 
   const runVoiceLoop = useCallback(async () => {
@@ -421,15 +444,17 @@ export const AccessibilityAssistant = () => {
     warmupSpeechSynthesis();
     shouldRunVoiceLoopRef.current = true;
     setVoiceModeEnabled(true);
-    setVoiceStatusText("เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา นัดหมอ แชทหมอ");
-    speakFeedback(
-      "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา นัดหมอ แชทหมอ",
-      true,
-    );
+    const startMessage = isLoginRoute
+      ? "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น เข้าสู่ระบบ หรือ วิธีเข้าสู่ระบบ"
+      : isRegisterRoute
+        ? "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สมัครสมาชิก หรือ วิธีสมัครสมาชิก"
+        : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา นัดหมอ แชทหมอ";
+    setVoiceStatusText(startMessage);
+    speakFeedback(startMessage, true);
     window.setTimeout(() => {
       void runVoiceLoop();
     }, 0);
-  }, [runVoiceLoop, speakFeedback]);
+  }, [isLoginRoute, isRegisterRoute, runVoiceLoop, speakFeedback]);
 
   const stopVoiceMode = useCallback(() => {
     shouldRunVoiceLoopRef.current = false;
@@ -555,6 +580,10 @@ export const AccessibilityAssistant = () => {
   );
 
   const shouldHighlightLauncher = isPatientRoute && !voiceModeEnabled;
+
+  if (!showAssistantUi) {
+    return null;
+  }
 
   return (
     <div className="pointer-events-none fixed right-3 bottom-3 z-[70] md:right-5 md:bottom-5">
