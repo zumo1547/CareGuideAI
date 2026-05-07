@@ -32,7 +32,14 @@ export const VoiceModeStartButton = ({
       onClick={() => {
         if (typeof window !== "undefined") {
           window.localStorage.setItem(VOICE_AUTOSTART_KEY, String(Date.now()));
-          window.dispatchEvent(new Event(VOICE_START_EVENT));
+          window.dispatchEvent(
+            new CustomEvent(VOICE_START_EVENT, {
+              detail: {
+                forceEnableVoice: true,
+                source: "voice-start-button",
+              },
+            }),
+          );
         }
         if (href) {
           router.push(href);

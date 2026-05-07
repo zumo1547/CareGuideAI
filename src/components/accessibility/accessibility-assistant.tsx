@@ -44,6 +44,15 @@ interface PendingConfirmation {
   prompt: string;
 }
 
+interface VoiceStartEventDetail {
+  forceEnableVoice?: boolean;
+  source?: string;
+}
+
+interface StartVoiceModeOptions {
+  forceEnableVoice?: boolean;
+}
+
 const STORAGE_KEY = "careguide-a11y-prefs-v2";
 const VOICE_AUTOSTART_KEY = "careguide-voice-autostart-v1";
 const VOICE_START_EVENT = "careguide:voice-mode-start";
@@ -183,6 +192,7 @@ export const AccessibilityAssistant = () => {
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
 
   const shouldRunVoiceLoopRef = useRef(false);
+  const voiceEnabledRef = useRef(prefs.voiceEnabled);
   const recognitionAbortRef = useRef<AbortController | null>(null);
   const lastSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
   const lastErrorSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
@@ -456,7 +466,7 @@ export const AccessibilityAssistant = () => {
   );
 
   const runVoiceLoop = useCallback(async () => {
-    if (!shouldRunVoiceLoopRef.current || !prefs.voiceEnabled) {
+    if (!shouldRunVoiceLoopRef.current || !voiceEnabledRef.current) {
       setVoiceListening(false);
       return;
     }
@@ -473,7 +483,7 @@ export const AccessibilityAssistant = () => {
       const abortController = new AbortController();
       recognitionAbortRef.current = abortController;
       const heard = await listenForSpeechOnce({
-        timeoutMs: 8000,
+        timeoutMs: isPreAuthRoute ? 12_000 : 8_000,
         signal: abortController.signal,
       });
       recognitionAbortRef.current = null;
@@ -483,18 +493,26 @@ export const AccessibilityAssistant = () => {
         break;
       }
 
-      if (!heard.text.trim()) {
+      if (!heard.text.trim() || normalizeText(heard.text).length < 2) {
         continue;
       }
 
       await handleHeardSpeech(heard.text);
     }
-  }, [handleHeardSpeech, prefs.voiceEnabled, speakFeedback]);
+  }, [handleHeardSpeech, isPreAuthRoute, speakFeedback]);
 
-  const startVoiceMode = useCallback(() => {
+  const startVoiceMode = useCallback((options?: StartVoiceModeOptions) => {
+    if (options?.forceEnableVoice && !voiceEnabledRef.current) {
+      voiceEnabledRef.current = true;
+      setPrefs((previous) => ({ ...previous, voiceEnabled: true }));
+    }
+
     if (shouldRunVoiceLoopRef.current) {
+      setVoiceStatusText("โหมดเสียงกำลังทำงานอยู่");
+      speakFeedback("โหมดเสียงกำลังทำงานอยู่", true);
       return;
     }
+
     warmupSpeechSynthesis();
     shouldRunVoiceLoopRef.current = true;
     setVoiceModeEnabled(true);
@@ -528,6 +546,10 @@ export const AccessibilityAssistant = () => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
   }, [prefs]);
+
+  useEffect(() => {
+    voiceEnabledRef.current = prefs.voiceEnabled;
+  }, [prefs.voiceEnabled]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -593,8 +615,12 @@ export const AccessibilityAssistant = () => {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const handleStartEvent = () => {
-      startVoiceMode();
+    const handleStartEvent = (event: Event) => {
+      const detail =
+        event instanceof CustomEvent
+          ? (event.detail as VoiceStartEventDetail | undefined)
+          : undefined;
+      startVoiceMode({ forceEnableVoice: detail?.forceEnableVoice });
     };
 
     window.addEventListener(VOICE_START_EVENT, handleStartEvent);
@@ -613,7 +639,7 @@ export const AccessibilityAssistant = () => {
     let autoStartTimer: number | null = null;
     if (shouldAutoStart) {
       autoStartTimer = window.setTimeout(() => {
-        startVoiceMode();
+        startVoiceMode({ forceEnableVoice: true });
       }, 0);
     }
 
