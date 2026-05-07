@@ -83,6 +83,7 @@ export default async function Home() {
                 href={primaryHref}
                 className="inline-flex items-center gap-2 rounded-full bg-cyan-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-800"
                 aria-label={primaryLabel}
+                data-voice-action={!isAuthenticated ? "go-register-page" : undefined}
               >
                 {primaryLabel}
                 <ArrowRight className="h-4 w-4" />
@@ -91,6 +92,7 @@ export default async function Home() {
                 href={secondaryHref}
                 className="inline-flex items-center gap-2 rounded-full border border-cyan-700 px-5 py-2.5 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-50"
                 aria-label={secondaryLabel}
+                data-voice-action={!isAuthenticated ? "go-login-page" : undefined}
               >
                 {secondaryLabel}
               </Link>

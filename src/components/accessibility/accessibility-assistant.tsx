@@ -164,11 +164,13 @@ const getErrorAlertText = (element: HTMLElement) => {
 export const AccessibilityAssistant = () => {
   const router = useRouter();
   const pathname = usePathname();
+  const isHomeRoute = pathname === "/";
   const isPatientRoute = pathname?.startsWith("/app/patient") ?? false;
   const isLoginRoute = pathname === "/login";
   const isRegisterRoute = pathname === "/register";
   const isAuthRoute = isLoginRoute || isRegisterRoute;
-  const showAssistantUi = pathname?.startsWith("/app") ?? false;
+  const isPreAuthRoute = isHomeRoute || isAuthRoute;
+  const showAssistantUi = isPreAuthRoute || (pathname?.startsWith("/app") ?? false);
 
   const [prefs, setPrefs] = useState<AccessibilityPrefs>(readInitialPrefs);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -241,10 +243,10 @@ export const AccessibilityAssistant = () => {
   const executeIntent = useCallback(
     (intent: VoiceIntent) => {
       if (intent.type === "navigate") {
-        if (isAuthRoute) {
-          const message = isLoginRoute
-            ? "หน้านี้ใช้คำสั่ง เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก"
-            : "หน้านี้ใช้คำสั่ง สมัครสมาชิก วิธีสมัครสมาชิก หรือ เข้าสู่ระบบ";
+        if (isPreAuthRoute) {
+          const message = isRegisterRoute
+            ? "หน้านี้ใช้คำสั่ง สมัครสมาชิก วิธีสมัครสมาชิก หรือ เข้าสู่ระบบ"
+            : "หน้านี้ใช้คำสั่ง เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก";
           setVoiceStatusText(message);
           speakFeedback(message, true);
           return;
@@ -260,6 +262,25 @@ export const AccessibilityAssistant = () => {
           speakFeedback(`กำลังเปิดหน้าเพื่อ ${intent.label}`);
         }
         return;
+      }
+
+      if (isPreAuthRoute) {
+        const unsupportedInPreAuth = new Set([
+          "start-med-camera-scan",
+          "confirm-med-plan",
+          "send-chat-message",
+          "send-support-request",
+          "send-appointment-request",
+          "accept-appointment",
+          "decline-appointment",
+          "reschedule-appointment",
+        ]);
+        if (unsupportedInPreAuth.has(intent.actionId)) {
+          const message = "ก่อนเข้าสู่ระบบ ใช้ได้เฉพาะคำสั่ง เข้าสู่ระบบ หรือ สมัครสมาชิก";
+          setVoiceStatusText(message);
+          speakFeedback(message, true);
+          return;
+        }
       }
 
       if (intent.actionId === "describe-login-fields") {
@@ -302,6 +323,30 @@ export const AccessibilityAssistant = () => {
         return;
       }
 
+      if (intent.actionId === "submit-login" && isHomeRoute) {
+        const moved = clickBySelector("[data-voice-action='go-login-page']");
+        if (moved) {
+          setVoiceStatusText("กำลังพาไปหน้าเข้าสู่ระบบ");
+          speakFeedback("กำลังพาไปหน้าเข้าสู่ระบบ");
+        } else {
+          setVoiceStatusText("ยังไม่พบปุ่มไปหน้าเข้าสู่ระบบ");
+          speakFeedback("ยังไม่พบปุ่มไปหน้าเข้าสู่ระบบ");
+        }
+        return;
+      }
+
+      if (intent.actionId === "submit-register" && isHomeRoute) {
+        const moved = clickBySelector("[data-voice-action='go-register-page']");
+        if (moved) {
+          setVoiceStatusText("กำลังพาไปหน้าสมัครสมาชิก");
+          speakFeedback("กำลังพาไปหน้าสมัครสมาชิก");
+        } else {
+          setVoiceStatusText("ยังไม่พบปุ่มไปหน้าสมัครสมาชิก");
+          speakFeedback("ยังไม่พบปุ่มไปหน้าสมัครสมาชิก");
+        }
+        return;
+      }
+
       const selector = actionSelectorByIntent[intent.actionId];
       const ok = clickBySelector(selector);
       if (ok) {
@@ -312,7 +357,15 @@ export const AccessibilityAssistant = () => {
         speakFeedback(`ยังไม่พบปุ่มสำหรับ ${intent.label} กรุณาเลื่อนไปส่วนที่เกี่ยวข้องก่อน`);
       }
     },
-    [clickBySelector, isAuthRoute, isLoginRoute, isRegisterRoute, moveToSection, speakFeedback],
+    [
+      clickBySelector,
+      isHomeRoute,
+      isPreAuthRoute,
+      isLoginRoute,
+      isRegisterRoute,
+      moveToSection,
+      speakFeedback,
+    ],
   );
 
   const buildConfirmationPrompt = useCallback((intent: VoiceIntent) => {
@@ -371,11 +424,11 @@ export const AccessibilityAssistant = () => {
 
       const intent = parseVoiceIntent(normalized);
       if (!intent) {
-        const message = isLoginRoute
-          ? "ยังไม่เข้าใจคำสั่ง ลองพูดว่า เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก"
-          : isRegisterRoute
+        const message = isPreAuthRoute
+          ? isRegisterRoute
             ? "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สมัครสมาชิก วิธีสมัครสมาชิก หรือ เข้าสู่ระบบ"
-            : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา นัดหมอ หรือ แชทหมอ";
+            : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก"
+          : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา นัดหมอ หรือ แชทหมอ";
         setVoiceStatusText(message);
         speakFeedback(message);
         return;
@@ -394,7 +447,7 @@ export const AccessibilityAssistant = () => {
     [
       buildConfirmationPrompt,
       executeIntent,
-      isLoginRoute,
+      isPreAuthRoute,
       isRegisterRoute,
       pendingConfirmation,
       speakFeedback,
@@ -444,17 +497,17 @@ export const AccessibilityAssistant = () => {
     warmupSpeechSynthesis();
     shouldRunVoiceLoopRef.current = true;
     setVoiceModeEnabled(true);
-    const startMessage = isLoginRoute
-      ? "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น เข้าสู่ระบบ หรือ วิธีเข้าสู่ระบบ"
-      : isRegisterRoute
+    const startMessage = isPreAuthRoute
+      ? isRegisterRoute
         ? "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สมัครสมาชิก หรือ วิธีสมัครสมาชิก"
-        : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา นัดหมอ แชทหมอ";
+        : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น เข้าสู่ระบบ หรือ วิธีเข้าสู่ระบบ"
+      : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา นัดหมอ แชทหมอ";
     setVoiceStatusText(startMessage);
     speakFeedback(startMessage, true);
     window.setTimeout(() => {
       void runVoiceLoop();
     }, 0);
-  }, [isLoginRoute, isRegisterRoute, runVoiceLoop, speakFeedback]);
+  }, [isPreAuthRoute, isRegisterRoute, runVoiceLoop, speakFeedback]);
 
   const stopVoiceMode = useCallback(() => {
     shouldRunVoiceLoopRef.current = false;
