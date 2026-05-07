@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { LoginForm } from "@/components/auth/login-form";
@@ -9,8 +9,7 @@ interface LoginPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-const toSingle = (value: string | string[] | undefined) =>
-  Array.isArray(value) ? value[0] : value;
+const toSingle = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   if (await hasAuthenticatedUser()) {
@@ -32,12 +31,16 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               เพื่อเริ่มดูแลแผนยา
             </h1>
             <p className="text-slate-600">
-              ระบบรองรับผู้พิการ คุณหมอ และแอดมิน พร้อมหน้าบ้าน-หลังบ้านแบบ role-based
+              รองรับผู้พิการ คุณหมอ และแอดมิน พร้อมระบบสแกนยา นัดหมาย และติดตามการรักษาในที่เดียว
             </p>
             <p className="text-sm text-muted-foreground">
-              ยังไม่มีบัญชี? <Link href="/register">สมัครสมาชิก</Link>
+              ยังไม่มีบัญชี?{" "}
+              <Link href="/register" data-voice-action="go-register-page">
+                สมัครสมาชิก
+              </Link>
             </p>
           </section>
+
           <section className="reveal-up reveal-delay-1">
             <LoginForm nextPath={nextPath} />
           </section>

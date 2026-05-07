@@ -49,6 +49,7 @@ interface ListenOptions {
   timeoutMs?: number;
   interimResults?: boolean;
   maxAlternatives?: number;
+  signal?: AbortSignal;
 }
 
 export const getSpeechRecognitionConstructor = (): BrowserSpeechRecognitionConstructor | null => {
@@ -63,6 +64,7 @@ export const listenForSpeechOnce = async ({
   timeoutMs = 7000,
   interimResults = false,
   maxAlternatives = 1,
+  signal,
 }: ListenOptions = {}): Promise<SpeechListenResult> => {
   const Recognition = getSpeechRecognitionConstructor();
   if (!Recognition) {
@@ -73,6 +75,7 @@ export const listenForSpeechOnce = async ({
     const recognition = new Recognition();
     let done = false;
     let timeoutId: number | null = null;
+    let abortCleanup: (() => void) | null = null;
     let lastResult: SpeechListenResult = {
       text: "",
       confidence: 0,
@@ -85,6 +88,10 @@ export const listenForSpeechOnce = async ({
       done = true;
       if (timeoutId !== null) {
         window.clearTimeout(timeoutId);
+      }
+      if (abortCleanup) {
+        abortCleanup();
+        abortCleanup = null;
       }
       try {
         recognition.onresult = null;
@@ -102,6 +109,23 @@ export const listenForSpeechOnce = async ({
     recognition.interimResults = interimResults;
     recognition.maxAlternatives = maxAlternatives;
     recognition.continuous = false;
+
+    if (signal) {
+      const onAbort = () => {
+        finish({
+          text: "",
+          confidence: 0,
+          timedOut: false,
+          noMatch: true,
+        });
+      };
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+      abortCleanup = () => signal.removeEventListener("abort", onAbort);
+    }
 
     recognition.onresult = (event) => {
       const result = event.results?.[0]?.[0];

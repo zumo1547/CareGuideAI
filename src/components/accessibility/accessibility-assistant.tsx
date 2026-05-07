@@ -3,16 +3,18 @@
 import {
   Accessibility,
   Contrast,
+  Hand,
   Mic,
   MicOff,
   Type,
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   isAffirmativeSpeech,
   isNegativeSpeech,
@@ -45,6 +47,7 @@ interface PendingConfirmation {
 const STORAGE_KEY = "careguide-a11y-prefs-v2";
 const VOICE_AUTOSTART_KEY = "careguide-voice-autostart-v1";
 const VOICE_START_EVENT = "careguide:voice-mode-start";
+const VOICE_AUTOSTART_MAX_AGE_MS = 20_000;
 
 const DEFAULT_PREFS: AccessibilityPrefs = {
   voiceEnabled: true,
@@ -122,6 +125,12 @@ const actionSelectorByIntent: Record<Extract<VoiceIntent, { type: "action" }>["a
   "accept-appointment": "[data-voice-action='appointment-accept']",
   "decline-appointment": "[data-voice-action='appointment-decline']",
   "reschedule-appointment": "[data-voice-action='appointment-reschedule']",
+  "submit-login": "[data-voice-action='submit-login']",
+  "go-register": "[data-voice-action='go-register-page']",
+  "submit-register": "[data-voice-action='submit-register']",
+  "go-login": "[data-voice-action='go-login-page']",
+  "describe-login-fields": "",
+  "describe-register-fields": "",
 };
 
 const fieldSelectorByIntent: Partial<
@@ -133,6 +142,8 @@ const fieldSelectorByIntent: Partial<
   "accept-appointment": "[data-voice-field='appointment-response-note']",
   "decline-appointment": "[data-voice-field='appointment-response-note']",
   "reschedule-appointment": "[data-voice-field='appointment-response-note']",
+  "submit-login": "[data-voice-field='login-email']",
+  "submit-register": "[data-voice-field='register-fullname']",
 };
 
 const getErrorAlertText = (element: HTMLElement) => {
@@ -152,6 +163,10 @@ const getErrorAlertText = (element: HTMLElement) => {
 
 export const AccessibilityAssistant = () => {
   const router = useRouter();
+  const pathname = usePathname();
+  const isPatientRoute = pathname?.startsWith("/app/patient") ?? false;
+  const isLoginRoute = pathname === "/login";
+  const isRegisterRoute = pathname === "/register";
 
   const [prefs, setPrefs] = useState<AccessibilityPrefs>(readInitialPrefs);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -163,6 +178,7 @@ export const AccessibilityAssistant = () => {
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
 
   const shouldRunVoiceLoopRef = useRef(false);
+  const recognitionAbortRef = useRef<AbortController | null>(null);
   const lastSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
   const lastErrorSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
 
@@ -235,6 +251,46 @@ export const AccessibilityAssistant = () => {
         return;
       }
 
+      if (intent.actionId === "describe-login-fields") {
+        const guide =
+          "การเข้าสู่ระบบ ให้กรอก 1 อีเมล 2 รหัสผ่าน แล้วพูดว่า เข้าสู่ระบบ หรือกดปุ่มเข้าสู่ระบบ";
+        setVoiceStatusText(guide);
+        speakFeedback(guide, true);
+        return;
+      }
+
+      if (intent.actionId === "describe-register-fields") {
+        const guide =
+          "การสมัครสมาชิก ให้กรอก 1 ชื่อ นามสกุล 2 อีเมล 3 เบอร์โทรศัพท์ 4 รหัสผ่าน 5 ประเภทผู้ใช้งาน แล้วพูดว่า สมัครสมาชิก";
+        setVoiceStatusText(guide);
+        speakFeedback(guide, true);
+        return;
+      }
+
+      if (intent.actionId === "submit-register" && isLoginRoute) {
+        const moved = clickBySelector("[data-voice-action='go-register-page']");
+        if (moved) {
+          setVoiceStatusText("กำลังพาไปหน้าสมัครสมาชิก");
+          speakFeedback("กำลังพาไปหน้าสมัครสมาชิก");
+        } else {
+          setVoiceStatusText("ยังไม่พบหน้าสมัครสมาชิก");
+          speakFeedback("ยังไม่พบหน้าสมัครสมาชิก");
+        }
+        return;
+      }
+
+      if (intent.actionId === "submit-login" && isRegisterRoute) {
+        const moved = clickBySelector("[data-voice-action='go-login-page']");
+        if (moved) {
+          setVoiceStatusText("กำลังพาไปหน้าเข้าสู่ระบบ");
+          speakFeedback("กำลังพาไปหน้าเข้าสู่ระบบ");
+        } else {
+          setVoiceStatusText("ยังไม่พบหน้าเข้าสู่ระบบ");
+          speakFeedback("ยังไม่พบหน้าเข้าสู่ระบบ");
+        }
+        return;
+      }
+
       const selector = actionSelectorByIntent[intent.actionId];
       const ok = clickBySelector(selector);
       if (ok) {
@@ -245,7 +301,7 @@ export const AccessibilityAssistant = () => {
         speakFeedback(`ยังไม่พบปุ่มสำหรับ ${intent.label} กรุณาเลื่อนไปส่วนที่เกี่ยวข้องก่อน`);
       }
     },
-    [clickBySelector, moveToSection, speakFeedback],
+    [clickBySelector, isLoginRoute, isRegisterRoute, moveToSection, speakFeedback],
   );
 
   const buildConfirmationPrompt = useCallback((intent: VoiceIntent) => {
@@ -337,7 +393,13 @@ export const AccessibilityAssistant = () => {
 
     while (shouldRunVoiceLoopRef.current) {
       setVoiceListening(true);
-      const heard = await listenForSpeechOnce({ timeoutMs: 8000 });
+      const abortController = new AbortController();
+      recognitionAbortRef.current = abortController;
+      const heard = await listenForSpeechOnce({
+        timeoutMs: 8000,
+        signal: abortController.signal,
+      });
+      recognitionAbortRef.current = null;
       setVoiceListening(false);
 
       if (!shouldRunVoiceLoopRef.current) {
@@ -371,10 +433,15 @@ export const AccessibilityAssistant = () => {
 
   const stopVoiceMode = useCallback(() => {
     shouldRunVoiceLoopRef.current = false;
+    recognitionAbortRef.current?.abort();
+    recognitionAbortRef.current = null;
     setVoiceModeEnabled(false);
     setVoiceListening(false);
     setPendingConfirmation(null);
     stopThaiSpeech();
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(VOICE_AUTOSTART_KEY);
+    }
     setVoiceStatusText("ปิดโหมดใช้งานด้วยเสียงแล้ว");
   }, []);
 
@@ -453,10 +520,19 @@ export const AccessibilityAssistant = () => {
 
     window.addEventListener(VOICE_START_EVENT, handleStartEvent);
 
-    const shouldAutoStart = window.localStorage.getItem(VOICE_AUTOSTART_KEY) === "1";
+    const autoStartRaw = window.localStorage.getItem(VOICE_AUTOSTART_KEY);
+    let shouldAutoStart = false;
+    if (autoStartRaw) {
+      const parsedTimestamp = Number(autoStartRaw);
+      shouldAutoStart =
+        Number.isFinite(parsedTimestamp) &&
+        Date.now() - parsedTimestamp >= 0 &&
+        Date.now() - parsedTimestamp <= VOICE_AUTOSTART_MAX_AGE_MS;
+      window.localStorage.removeItem(VOICE_AUTOSTART_KEY);
+    }
+
     let autoStartTimer: number | null = null;
     if (shouldAutoStart) {
-      window.localStorage.removeItem(VOICE_AUTOSTART_KEY);
       autoStartTimer = window.setTimeout(() => {
         startVoiceMode();
       }, 0);
@@ -477,6 +553,8 @@ export const AccessibilityAssistant = () => {
         : "เปิดเสียงช่วยอ่านปุ่ม",
     [prefs.voiceEnabled],
   );
+
+  const shouldHighlightLauncher = isPatientRoute && !voiceModeEnabled;
 
   return (
     <div className="pointer-events-none fixed right-3 bottom-3 z-[70] md:right-5 md:bottom-5">
@@ -591,11 +669,31 @@ export const AccessibilityAssistant = () => {
           </section>
         ) : null}
 
+        {!panelOpen && shouldHighlightLauncher ? (
+          <div
+            id="voice-launcher-hint"
+            className="max-w-[17rem] rounded-2xl border border-cyan-300/80 bg-cyan-50 px-3 py-2 text-xs leading-relaxed text-cyan-900 shadow-lg soft-pulse"
+            role="note"
+            aria-live="polite"
+          >
+            <p className="font-semibold">เริ่มพูดได้จากปุ่มนี้</p>
+            <p className="mt-1 flex items-start gap-1.5">
+              <Hand className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              แตะปุ่มวงกลมมุมขวาล่าง แล้วเลือก
+              <span className="font-semibold">“เริ่มโหมดใช้งานด้วยเสียง”</span>
+            </p>
+          </div>
+        ) : null}
+
         <Button
           type="button"
           size="icon-lg"
-          className="rounded-full shadow-lg"
+          className={cn(
+            "rounded-full shadow-lg",
+            shouldHighlightLauncher && "soft-pulse ring-4 ring-cyan-200",
+          )}
           aria-label="เปิดผู้ช่วยการเข้าถึง"
+          aria-describedby={shouldHighlightLauncher ? "voice-launcher-hint" : undefined}
           onClick={() => setPanelOpen((previous) => !previous)}
         >
           <Accessibility className="h-5 w-5" />

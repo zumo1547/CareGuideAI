@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { RegisterForm } from "@/components/auth/register-form";
@@ -9,8 +9,7 @@ interface RegisterPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-const toSingle = (value: string | string[] | undefined) =>
-  Array.isArray(value) ? value[0] : value;
+const toSingle = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
 
 export default async function RegisterPage({ searchParams }: RegisterPageProps) {
   if (await hasAuthenticatedUser()) {
@@ -29,15 +28,19 @@ export default async function RegisterPage({ searchParams }: RegisterPageProps) 
             <h1 className="text-4xl font-bold leading-tight text-slate-900">
               สมัครใช้งาน
               <br />
-              เพื่อจัดการยาอย่างมั่นใจ
+              เพื่อดูแลสุขภาพอย่างมั่นใจ
             </h1>
             <p className="text-slate-600">
-              ผู้พิการสมัครได้ทันที ส่วนบัญชีหมอใช้ระบบเชิญจากแอดมิน
+              ผู้พิการและผู้ดูแลสมัครได้ทันที ส่วนบัญชีคุณหมอสมัครได้ผ่านระบบเชิญจากแอดมิน
             </p>
             <p className="text-sm text-muted-foreground">
-              มีบัญชีแล้ว? <Link href="/login">เข้าสู่ระบบ</Link>
+              มีบัญชีแล้ว?{" "}
+              <Link href="/login" data-voice-action="go-login-page">
+                เข้าสู่ระบบ
+              </Link>
             </p>
           </section>
+
           <section className="reveal-up reveal-delay-1">
             <RegisterForm inviteTokenFromUrl={inviteToken} />
           </section>

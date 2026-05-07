@@ -17,7 +17,13 @@ export type VoiceIntent =
         | "send-appointment-request"
         | "accept-appointment"
         | "decline-appointment"
-        | "reschedule-appointment";
+        | "reschedule-appointment"
+        | "submit-login"
+        | "go-register"
+        | "submit-register"
+        | "go-login"
+        | "describe-login-fields"
+        | "describe-register-fields";
       label: string;
       requiresConfirmation: boolean;
       repeatText?: string;
@@ -58,6 +64,62 @@ export const isMedicationSnoozeSpeech = (text: string) =>
 export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
   const text = stripNoise(rawText);
   if (!text) return null;
+
+  if (includesAny(text, ["วิธีเข้าสู่ระบบ", "ล็อกอินยังไง", "ต้องกรอกอะไรเข้าสู่ระบบ"])) {
+    return {
+      type: "action",
+      actionId: "describe-login-fields",
+      label: "ฟังวิธีกรอกข้อมูลเข้าสู่ระบบ",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (includesAny(text, ["วิธีสมัครสมาชิก", "สมัครยังไง", "ต้องกรอกอะไรบ้าง", "กรอกอะไรบ้าง"])) {
+    return {
+      type: "action",
+      actionId: "describe-register-fields",
+      label: "ฟังวิธีกรอกข้อมูลสมัครสมาชิก",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (includesAny(text, ["ไปหน้าสมัครสมาชิก", "เปิดหน้าสมัครสมาชิก", "ไปหน้าสมัคร"])) {
+    return {
+      type: "action",
+      actionId: "go-register",
+      label: "ไปหน้าสมัครสมาชิก",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (includesAny(text, ["ไปหน้าเข้าสู่ระบบ", "เปิดหน้าเข้าสู่ระบบ", "ไปหน้า login"])) {
+    return {
+      type: "action",
+      actionId: "go-login",
+      label: "ไปหน้าเข้าสู่ระบบ",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (includesAny(text, ["สมัครสมาชิก", "ลงทะเบียน", "สร้างบัญชี"])) {
+    return {
+      type: "action",
+      actionId: "submit-register",
+      label: "กดปุ่มสมัครสมาชิก",
+      requiresConfirmation: true,
+      repeatText: "ต้องการสมัครสมาชิกใช่ไหม",
+    };
+  }
+
+  if (includesAny(text, ["เข้าสู่ระบบ", "ล็อกอิน", "login"])) {
+    return {
+      type: "action",
+      actionId: "submit-login",
+      label: "กดปุ่มเข้าสู่ระบบ",
+      requiresConfirmation: true,
+      repeatText: "ต้องการเข้าสู่ระบบใช่ไหม",
+    };
+  }
 
   if (
     includesAny(text, ["ส่งข้อความหาหมอ", "ส่งข้อความถึงหมอ", "ส่งแชทหาหมอ", "ส่งข้อความ"]) &&
