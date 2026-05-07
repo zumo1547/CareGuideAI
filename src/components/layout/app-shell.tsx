@@ -32,7 +32,7 @@ interface AppShellProps {
 
 export const AppShell = ({ role, fullName, children }: AppShellProps) => (
   <div className="min-h-screen bg-[radial-gradient(circle_at_top,#ecfeff_0%,#f0fdfa_35%,#f8fafc_65%,#ffffff_100%)]">
-    <header className="border-b bg-background/80 backdrop-blur">
+    <header className="border-b bg-background/80 backdrop-blur" role="banner">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
         <div className="space-y-2">
           <BrandLogo href="/app" imageClassName="h-11" />
@@ -44,12 +44,16 @@ export const AppShell = ({ role, fullName, children }: AppShellProps) => (
         </div>
       </div>
       <Separator />
-      <nav className="mx-auto flex w-full max-w-7xl flex-wrap gap-2 px-4 py-3 md:px-6">
+      <nav
+        className="mx-auto flex w-full max-w-7xl flex-wrap gap-2 px-4 py-3 md:px-6"
+        aria-label="เมนูหลักของระบบ"
+      >
         {navByRole[role].map((item) => (
           <Link
             key={item.href}
             href={item.href}
             className="rounded-full border px-4 py-1.5 text-sm transition-colors hover:bg-accent"
+            aria-label={item.label}
           >
             {item.label}
           </Link>
@@ -72,7 +76,11 @@ export const AppShell = ({ role, fullName, children }: AppShellProps) => (
         ) : null}
       </nav>
     </header>
-    <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6">
+    <main
+      id="main-content"
+      className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6"
+      aria-label="เนื้อหาหลัก"
+    >
       {children}
     </main>
   </div>

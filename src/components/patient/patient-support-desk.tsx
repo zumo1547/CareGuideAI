@@ -3,6 +3,7 @@
 import { Loader2, MessageCircleHeart, RefreshCcw, Send, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { SpeechToTextButton } from "@/components/accessibility/speech-to-text-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { DEFAULT_APP_TIMEZONE, formatDateTimeInTimeZone } from "@/lib/time";
+import { speakThai } from "@/lib/voice/speak";
 import type {
   SupportCaseMessage,
   SupportCaseStatus,
@@ -95,6 +97,7 @@ export const PatientSupportDesk = ({
   const [success, setSuccess] = useState<string | null>(null);
   const [schemaReloadSql, setSchemaReloadSql] = useState<string | null>(null);
   const [schemaDebugMessage, setSchemaDebugMessage] = useState<string | null>(null);
+  const lastSpokenDoctorMessageAtRef = useRef<string>("");
 
   const selectedCase = useMemo(
     () => cases.find((item) => item.id === selectedCaseId) ?? null,
@@ -107,6 +110,14 @@ export const PatientSupportDesk = ({
     }
     return doctorOptions[0].id;
   }, [doctorOptions, selectedDoctorId]);
+
+  const appendRequestMessage = useCallback((text: string) => {
+    setRequestMessage((previous) => `${previous} ${text}`.trim());
+  }, []);
+
+  const appendChatMessage = useCallback((text: string) => {
+    setChatInput((previous) => `${previous} ${text}`.trim());
+  }, []);
 
   const handleSchemaCacheError = useCallback((payload: SupportApiErrorPayload | null) => {
     if (payload?.code === "SUPPORT_SCHEMA_CACHE_NOT_READY") {
@@ -324,6 +335,28 @@ export const PatientSupportDesk = ({
     };
   }, [refreshMessages, selectedCaseId]);
 
+  useEffect(() => {
+    if (!selectedCase || messages.length === 0) return;
+
+    const latestDoctorMessage = [...messages]
+      .reverse()
+      .find((message) => message.senderId !== actorId);
+
+    if (!latestDoctorMessage) return;
+
+    const marker = `${latestDoctorMessage.id}:${latestDoctorMessage.createdAt}`;
+    if (!lastSpokenDoctorMessageAtRef.current) {
+      lastSpokenDoctorMessageAtRef.current = marker;
+      return;
+    }
+    if (lastSpokenDoctorMessageAtRef.current === marker) return;
+
+    lastSpokenDoctorMessageAtRef.current = marker;
+    speakThai(
+      `คุณหมอส่งข้อความใหม่ ${latestDoctorMessage.message} หากต้องการตอบ สามารถพูดแล้วกดปุ่มส่งได้`,
+    );
+  }, [actorId, messages, selectedCase]);
+
   return (
     <Card>
       <CardHeader>
@@ -401,12 +434,21 @@ export const PatientSupportDesk = ({
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="request-message">ข้อความร้องขอ</Label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <SpeechToTextButton
+                      onTranscript={appendRequestMessage}
+                      label="พูดคำร้องหาแพทย์"
+                      ariaLabel="กดเพื่อพูดข้อความร้องขอความช่วยเหลือถึงแพทย์"
+                    />
+                  </div>
                   <Textarea
                     id="request-message"
                     rows={3}
                     value={requestMessage}
                     onChange={(event) => setRequestMessage(event.target.value)}
                     placeholder="เช่น เวียนหัวหลังทานยา อยากปรึกษาคุณหมอ"
+                    aria-label="ข้อความร้องขอถึงคุณหมอ"
+                    data-voice-field="support-request-message"
                   />
                 </div>
                 <div className="flex items-end">
@@ -415,6 +457,8 @@ export const PatientSupportDesk = ({
                     onClick={() => void createCase()}
                     disabled={isCreatingCase || requestMessage.trim().length < 3}
                     className="w-full md:w-auto"
+                    aria-label="ส่งคำร้องขอความช่วยเหลือถึงคุณหมอ"
+                    data-voice-action="send-support-request"
                   >
                     {isCreatingCase ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     ส่งคำร้อง
@@ -513,17 +557,30 @@ export const PatientSupportDesk = ({
               )}
             </div>
 
+            <div className="space-y-2">
+              <SpeechToTextButton
+                onTranscript={appendChatMessage}
+                label="พูดข้อความแชท"
+                ariaLabel="กดเพื่อพูดข้อความตอบคุณหมอ"
+                disabled={selectedCase.status !== "active" || isSendingMessage}
+              />
+            </div>
+
             <div className="flex flex-col gap-2 md:flex-row">
               <Input
                 value={chatInput}
                 onChange={(event) => setChatInput(event.target.value)}
                 placeholder={selectedCase.status === "active" ? "พิมพ์ข้อความถึงคุณหมอ" : "รอคุณหมอตอบรับเคสก่อน"}
                 disabled={selectedCase.status !== "active" || isSendingMessage}
+                aria-label="ข้อความแชทถึงคุณหมอ"
+                data-voice-field="chat-message"
               />
               <Button
                 type="button"
                 onClick={() => void sendMessage()}
                 disabled={selectedCase.status !== "active" || !chatInput.trim() || isSendingMessage}
+                aria-label="ส่งข้อความถึงคุณหมอ"
+                data-voice-action="send-chat-message"
               >
                 {isSendingMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 ส่ง

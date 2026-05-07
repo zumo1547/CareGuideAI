@@ -1,10 +1,30 @@
-"use client";
+﻿"use client";
 
-import { Accessibility, Contrast, Type, Volume2, VolumeX } from "lucide-react";
+import {
+  Accessibility,
+  Contrast,
+  Mic,
+  MicOff,
+  Type,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { speakThai, warmupSpeechSynthesis } from "@/lib/voice/speak";
+import {
+  isAffirmativeSpeech,
+  isNegativeSpeech,
+  isRepeatSpeech,
+  parseVoiceIntent,
+  type VoiceIntent,
+} from "@/lib/voice/commands";
+import {
+  isSpeechRecognitionSupported,
+  listenForSpeechOnce,
+} from "@/lib/voice/recognition";
+import { speakThai, stopThaiSpeech, warmupSpeechSynthesis } from "@/lib/voice/speak";
 
 interface AccessibilityPrefs {
   voiceEnabled: boolean;
@@ -17,7 +37,14 @@ type StoredAccessibilityPrefs = Partial<AccessibilityPrefs> & {
   announceInteractions?: boolean;
 };
 
-const STORAGE_KEY = "careguide-a11y-prefs-v1";
+interface PendingConfirmation {
+  intent: VoiceIntent;
+  prompt: string;
+}
+
+const STORAGE_KEY = "careguide-a11y-prefs-v2";
+const VOICE_AUTOSTART_KEY = "careguide-voice-autostart-v1";
+const VOICE_START_EVENT = "careguide:voice-mode-start";
 
 const DEFAULT_PREFS: AccessibilityPrefs = {
   voiceEnabled: true,
@@ -76,14 +103,68 @@ const getElementLabel = (element: HTMLElement) => {
     if (text) return text;
   }
 
-  return "คำสั่ง";
+  return "ปุ่มคำสั่ง";
+};
+
+const sectionIdByIntent: Record<Extract<VoiceIntent, { type: "navigate" }>["sectionId"], string> = {
+  medicine: "voice-section-medicine",
+  "blood-pressure": "voice-section-blood-pressure",
+  appointment: "voice-section-appointment",
+  chat: "voice-section-chat",
+};
+
+const actionSelectorByIntent: Record<Extract<VoiceIntent, { type: "action" }>["actionId"], string> = {
+  "start-med-camera-scan": "[data-voice-action='start-med-camera-scan']",
+  "confirm-med-plan": "[data-voice-action='confirm-med-plan']",
+  "send-chat-message": "[data-voice-action='send-chat-message']",
+  "send-support-request": "[data-voice-action='send-support-request']",
+  "send-appointment-request": "[data-voice-action='send-appointment-request']",
+  "accept-appointment": "[data-voice-action='appointment-accept']",
+  "decline-appointment": "[data-voice-action='appointment-decline']",
+  "reschedule-appointment": "[data-voice-action='appointment-reschedule']",
+};
+
+const fieldSelectorByIntent: Partial<
+  Record<Extract<VoiceIntent, { type: "action" }>["actionId"], string>
+> = {
+  "send-chat-message": "[data-voice-field='chat-message']",
+  "send-support-request": "[data-voice-field='support-request-message']",
+  "send-appointment-request": "[data-voice-field='appointment-request-note']",
+  "accept-appointment": "[data-voice-field='appointment-response-note']",
+  "decline-appointment": "[data-voice-field='appointment-response-note']",
+  "reschedule-appointment": "[data-voice-field='appointment-response-note']",
+};
+
+const getErrorAlertText = (element: HTMLElement) => {
+  const text = normalizeText(element.innerText || element.textContent || "");
+  if (!text) return "";
+  const lowered = text.toLowerCase();
+  if (
+    lowered.includes("error") ||
+    lowered.includes("failed") ||
+    text.includes("ข้อผิดพลาด") ||
+    text.includes("ไม่สำเร็จ")
+  ) {
+    return text;
+  }
+  return "";
 };
 
 export const AccessibilityAssistant = () => {
+  const router = useRouter();
+
   const [prefs, setPrefs] = useState<AccessibilityPrefs>(readInitialPrefs);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [voiceModeEnabled, setVoiceModeEnabled] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceStatusText, setVoiceStatusText] = useState(
+    "โหมดเสียงยังไม่เริ่ม กดปุ่มเริ่มใช้งานด้วยเสียง",
+  );
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
 
+  const shouldRunVoiceLoopRef = useRef(false);
   const lastSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
+  const lastErrorSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
 
   const speakFeedback = useCallback(
     (text: string, force = false) => {
@@ -92,7 +173,7 @@ export const AccessibilityAssistant = () => {
       if (!force && !prefs.voiceEnabled) return;
 
       const now = Date.now();
-      if (lastSpokenRef.current.text === normalized && now - lastSpokenRef.current.at < 900) {
+      if (lastSpokenRef.current.text === normalized && now - lastSpokenRef.current.at < 1100) {
         return;
       }
 
@@ -101,6 +182,201 @@ export const AccessibilityAssistant = () => {
     },
     [prefs.voiceEnabled],
   );
+
+  const clickBySelector = useCallback((selector: string) => {
+    const target = document.querySelector<HTMLElement>(selector);
+    if (!target) return false;
+
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (
+      target instanceof HTMLButtonElement ||
+      target instanceof HTMLAnchorElement ||
+      target.getAttribute("role") === "button"
+    ) {
+      target.click();
+      return true;
+    }
+
+    target.focus({ preventScroll: true });
+    return true;
+  }, []);
+
+  const moveToSection = useCallback(
+    (sectionId: string) => {
+      const section = document.getElementById(sectionId);
+      if (!section) {
+        const hashUrl = `/app/patient#${sectionId}`;
+        router.push(hashUrl);
+        return false;
+      }
+
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+      const focusTarget = section.querySelector<HTMLElement>(
+        "button, input, textarea, select, a[href], h1, h2, h3",
+      );
+      focusTarget?.focus({ preventScroll: true });
+      return true;
+    },
+    [router],
+  );
+
+  const executeIntent = useCallback(
+    (intent: VoiceIntent) => {
+      if (intent.type === "navigate") {
+        const sectionId = sectionIdByIntent[intent.sectionId];
+        const ok = moveToSection(sectionId);
+        if (ok) {
+          setVoiceStatusText(`กำลังไปที่ ${intent.label}`);
+          speakFeedback(`กำลังไปที่ ${intent.label}`);
+        } else {
+          setVoiceStatusText(`กำลังเปิดหน้าเพื่อ ${intent.label}`);
+          speakFeedback(`กำลังเปิดหน้าเพื่อ ${intent.label}`);
+        }
+        return;
+      }
+
+      const selector = actionSelectorByIntent[intent.actionId];
+      const ok = clickBySelector(selector);
+      if (ok) {
+        setVoiceStatusText(`ดำเนินการแล้ว: ${intent.label}`);
+        speakFeedback(`ดำเนินการแล้ว: ${intent.label}`);
+      } else {
+        setVoiceStatusText(`ยังไม่พบปุ่มสำหรับ ${intent.label}`);
+        speakFeedback(`ยังไม่พบปุ่มสำหรับ ${intent.label} กรุณาเลื่อนไปส่วนที่เกี่ยวข้องก่อน`);
+      }
+    },
+    [clickBySelector, moveToSection, speakFeedback],
+  );
+
+  const buildConfirmationPrompt = useCallback((intent: VoiceIntent) => {
+    if (intent.type !== "action") return `ต้องการ${intent.label}ใช่ไหม`;
+
+    const fieldSelector = fieldSelectorByIntent[intent.actionId];
+    if (fieldSelector) {
+      const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(fieldSelector);
+      const value = normalizeText(field?.value ?? "");
+      if (value) {
+        return `ต้องการ${intent.label}ใช่ไหม ข้อความคือ ${value}`;
+      }
+      return `ต้องการ${intent.label}ใช่ไหม`;
+    }
+
+    return `ต้องการ${intent.label}ใช่ไหม`;
+  }, []);
+
+  const handleHeardSpeech = useCallback(
+    async (heardText: string) => {
+      const normalized = normalizeText(heardText);
+      if (!normalized) {
+        setVoiceStatusText("ไม่ได้ยินคำสั่ง ลองพูดใหม่");
+        return;
+      }
+
+      setVoiceStatusText(`ได้ยิน: ${normalized}`);
+
+      if (pendingConfirmation) {
+        if (isAffirmativeSpeech(normalized)) {
+          const confirmedIntent = pendingConfirmation.intent;
+          setPendingConfirmation(null);
+          setVoiceStatusText("ยืนยันคำสั่งแล้ว กำลังดำเนินการ");
+          speakFeedback("ยืนยันแล้ว กำลังดำเนินการ");
+          executeIntent(confirmedIntent);
+          return;
+        }
+
+        if (isNegativeSpeech(normalized)) {
+          setPendingConfirmation(null);
+          setVoiceStatusText("ยกเลิกคำสั่งแล้ว");
+          speakFeedback("ยกเลิกคำสั่งแล้ว");
+          return;
+        }
+
+        if (isRepeatSpeech(normalized)) {
+          setVoiceStatusText("กำลังทวนคำสั่ง");
+          speakFeedback(pendingConfirmation.prompt, true);
+          return;
+        }
+
+        setVoiceStatusText("กรุณาตอบ ใช่ ไม่ หรือ ทบทวน");
+        speakFeedback("กรุณาตอบ ใช่ ไม่ หรือ ทบทวน");
+        return;
+      }
+
+      const intent = parseVoiceIntent(normalized);
+      if (!intent) {
+        setVoiceStatusText("ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา นัดหมอ หรือ แชทหมอ");
+        speakFeedback("ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา นัดหมอ หรือ แชทหมอ");
+        return;
+      }
+
+      if (intent.requiresConfirmation) {
+        const prompt = buildConfirmationPrompt(intent);
+        setPendingConfirmation({ intent, prompt });
+        setVoiceStatusText(prompt);
+        speakFeedback(`${prompt} ตอบว่า ใช่ ไม่ หรือ ทบทวน`, true);
+        return;
+      }
+
+      executeIntent(intent);
+    },
+    [buildConfirmationPrompt, executeIntent, pendingConfirmation, speakFeedback],
+  );
+
+  const runVoiceLoop = useCallback(async () => {
+    if (!shouldRunVoiceLoopRef.current || !prefs.voiceEnabled) {
+      setVoiceListening(false);
+      return;
+    }
+
+    if (!isSpeechRecognitionSupported()) {
+      setVoiceListening(false);
+      setVoiceStatusText("อุปกรณ์นี้ยังไม่รองรับการสั่งงานด้วยเสียง");
+      speakFeedback("อุปกรณ์นี้ยังไม่รองรับการสั่งงานด้วยเสียง", true);
+      return;
+    }
+
+    while (shouldRunVoiceLoopRef.current) {
+      setVoiceListening(true);
+      const heard = await listenForSpeechOnce({ timeoutMs: 8000 });
+      setVoiceListening(false);
+
+      if (!shouldRunVoiceLoopRef.current) {
+        break;
+      }
+
+      if (!heard.text.trim()) {
+        continue;
+      }
+
+      await handleHeardSpeech(heard.text);
+    }
+  }, [handleHeardSpeech, prefs.voiceEnabled, speakFeedback]);
+
+  const startVoiceMode = useCallback(() => {
+    if (shouldRunVoiceLoopRef.current) {
+      return;
+    }
+    warmupSpeechSynthesis();
+    shouldRunVoiceLoopRef.current = true;
+    setVoiceModeEnabled(true);
+    setVoiceStatusText("เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา นัดหมอ แชทหมอ");
+    speakFeedback(
+      "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา นัดหมอ แชทหมอ",
+      true,
+    );
+    window.setTimeout(() => {
+      void runVoiceLoop();
+    }, 0);
+  }, [runVoiceLoop, speakFeedback]);
+
+  const stopVoiceMode = useCallback(() => {
+    shouldRunVoiceLoopRef.current = false;
+    setVoiceModeEnabled(false);
+    setVoiceListening(false);
+    setPendingConfirmation(null);
+    stopThaiSpeech();
+    setVoiceStatusText("ปิดโหมดใช้งานด้วยเสียงแล้ว");
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -134,8 +410,71 @@ export const AccessibilityAssistant = () => {
     return () => document.removeEventListener("click", onClick, true);
   }, [prefs.announceButtonPress, prefs.voiceEnabled, speakFeedback]);
 
+  useEffect(() => {
+    if (!prefs.voiceEnabled) return;
+
+    const seen = new WeakSet<HTMLElement>();
+    const observer = new MutationObserver(() => {
+      const alerts = Array.from(document.querySelectorAll<HTMLElement>("[role='alert']"));
+      for (const alert of alerts) {
+        if (seen.has(alert)) continue;
+        const errorText = getErrorAlertText(alert);
+        if (!errorText) continue;
+
+        const now = Date.now();
+        if (
+          errorText === lastErrorSpokenRef.current.text &&
+          now - lastErrorSpokenRef.current.at < 1200
+        ) {
+          continue;
+        }
+
+        seen.add(alert);
+        lastErrorSpokenRef.current = { text: errorText, at: now };
+        speakFeedback(`แจ้งเตือนข้อผิดพลาด ${errorText}`);
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+
+    return () => observer.disconnect();
+  }, [prefs.voiceEnabled, speakFeedback]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleStartEvent = () => {
+      startVoiceMode();
+    };
+
+    window.addEventListener(VOICE_START_EVENT, handleStartEvent);
+
+    const shouldAutoStart = window.localStorage.getItem(VOICE_AUTOSTART_KEY) === "1";
+    let autoStartTimer: number | null = null;
+    if (shouldAutoStart) {
+      window.localStorage.removeItem(VOICE_AUTOSTART_KEY);
+      autoStartTimer = window.setTimeout(() => {
+        startVoiceMode();
+      }, 0);
+    }
+
+    return () => {
+      if (autoStartTimer !== null) {
+        window.clearTimeout(autoStartTimer);
+      }
+      window.removeEventListener(VOICE_START_EVENT, handleStartEvent);
+    };
+  }, [startVoiceMode]);
+
   const voiceLabel = useMemo(
-    () => (prefs.voiceEnabled ? "เปิดเสียงช่วยการกดปุ่ม" : "ปิดเสียงช่วยการกดปุ่ม"),
+    () =>
+      prefs.voiceEnabled
+        ? "ปิดเสียงช่วยอ่านปุ่ม"
+        : "เปิดเสียงช่วยอ่านปุ่ม",
     [prefs.voiceEnabled],
   );
 
@@ -143,12 +482,42 @@ export const AccessibilityAssistant = () => {
     <div className="pointer-events-none fixed right-3 bottom-3 z-[70] md:right-5 md:bottom-5">
       <div className="pointer-events-auto flex flex-col items-end gap-2">
         {panelOpen ? (
-          <div className="w-[19rem] rounded-2xl border bg-background/95 p-3 shadow-xl backdrop-blur">
+          <section
+            className="w-[22rem] rounded-2xl border bg-background/95 p-3 shadow-xl backdrop-blur"
+            aria-label="ผู้ช่วยการเข้าถึงและคำสั่งเสียง"
+          >
             <p className="text-sm font-semibold">ผู้ช่วยการเข้าถึง</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              โหมดนี้จะอ่านเสียงเฉพาะตอนกดปุ่มหรือกดลิงก์ เพื่อให้ใช้งานง่ายขึ้นสำหรับผู้พิการทางสายตา
+              รองรับการอ่านปุ่ม คำสั่งเสียง และโหมดตัวอักษรใหญ่สำหรับผู้พิการทางสายตา
             </p>
+
             <div className="mt-3 flex flex-col gap-2">
+              <Button
+                type="button"
+                variant={voiceModeEnabled ? "default" : "secondary"}
+                className="justify-start"
+                onClick={() => {
+                  if (voiceModeEnabled) {
+                    stopVoiceMode();
+                  } else {
+                    startVoiceMode();
+                  }
+                }}
+                aria-label={voiceModeEnabled ? "ปิดโหมดใช้งานด้วยเสียง" : "เริ่มโหมดใช้งานด้วยเสียง"}
+              >
+                {voiceModeEnabled ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                <span>{voiceModeEnabled ? "ปิดโหมดใช้งานด้วยเสียง" : "เริ่มโหมดใช้งานด้วยเสียง"}</span>
+              </Button>
+
+              <div
+                className="rounded-lg border bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground"
+                aria-live="polite"
+              >
+                <p className="font-medium text-foreground">สถานะคำสั่งเสียง</p>
+                <p>{voiceListening ? "กำลังฟังคำสั่ง..." : "ยังไม่ได้ฟัง"}</p>
+                <p>{voiceStatusText}</p>
+              </div>
+
               <Button
                 type="button"
                 variant={prefs.voiceEnabled ? "default" : "outline"}
@@ -158,9 +527,10 @@ export const AccessibilityAssistant = () => {
                   setPrefs((previous) => ({ ...previous, voiceEnabled: next }));
                   if (next) {
                     warmupSpeechSynthesis();
-                    speakFeedback("เปิดเสียงช่วยการกดปุ่มแล้ว", true);
+                    speakFeedback("เปิดเสียงช่วยอ่านปุ่มแล้ว", true);
                   } else {
-                    speakFeedback("ปิดเสียงช่วยการกดปุ่มแล้ว", true);
+                    stopVoiceMode();
+                    speakFeedback("ปิดเสียงช่วยอ่านปุ่มแล้ว", true);
                   }
                 }}
               >
@@ -181,7 +551,11 @@ export const AccessibilityAssistant = () => {
                 disabled={!prefs.voiceEnabled}
               >
                 <Accessibility className="h-4 w-4" />
-                <span>{prefs.announceButtonPress ? "อ่านชื่อปุ่มที่กด: เปิด" : "อ่านชื่อปุ่มที่กด: ปิด"}</span>
+                <span>
+                  {prefs.announceButtonPress
+                    ? "อ่านชื่อปุ่มที่กด: เปิด"
+                    : "อ่านชื่อปุ่มที่กด: ปิด"}
+                </span>
               </Button>
 
               <Button
@@ -214,7 +588,7 @@ export const AccessibilityAssistant = () => {
                 <span>{prefs.highContrast ? "คอนทราสต์สูง: เปิด" : "คอนทราสต์สูง: ปิด"}</span>
               </Button>
             </div>
-          </div>
+          </section>
         ) : null}
 
         <Button
@@ -230,4 +604,3 @@ export const AccessibilityAssistant = () => {
     </div>
   );
 };
-

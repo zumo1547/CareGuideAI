@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Loader2, RefreshCcw, XCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -27,13 +27,13 @@ interface ReminderEventsTableProps {
 const COLLAPSED_ROWS = 8;
 
 const formatDateTime = (dateValue: string | null) =>
-  formatDateTimeInTimeZone(dateValue, DEFAULT_APP_TIMEZONE);
+  formatDateTimeInTimeZone(dateValue, DEFAULT_APP_TIMEZONE, "dd/MM/yy HH:mm");
 
 const statusLabelMap: Record<string, string> = {
-  pending: "pending",
-  sent: "sent",
-  failed: "failed",
-  cancelled: "cancelled",
+  pending: "รอดำเนินการ",
+  sent: "ส่งแล้ว",
+  failed: "ส่งไม่สำเร็จ",
+  cancelled: "ยกเลิกแล้ว",
 };
 
 const statusVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
@@ -124,7 +124,7 @@ export const ReminderEventsTable = ({
       };
 
       if (!response.ok) {
-        setError(payload.error ?? "Cancel reminder failed");
+        setError(payload.error ?? "ยกเลิกการแจ้งเตือนไม่สำเร็จ");
         return;
       }
 
@@ -136,11 +136,11 @@ export const ReminderEventsTable = ({
             : event,
         ),
       );
-      setSuccess("Cancel reminder success");
+      setSuccess("ยกเลิกรายการแจ้งเตือนแล้ว");
       await refreshEvents(true);
       router.refresh();
     } catch {
-      setError("Cancel reminder failed");
+      setError("ยกเลิกการแจ้งเตือนไม่สำเร็จ");
     } finally {
       setCancellingId(null);
     }
@@ -150,14 +150,14 @@ export const ReminderEventsTable = ({
     <div className="space-y-4">
       {error ? (
         <Alert variant="destructive">
-          <AlertTitle>Cancel failed</AlertTitle>
+          <AlertTitle>เกิดข้อผิดพลาด</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
 
       {success ? (
         <Alert>
-          <AlertTitle>Done</AlertTitle>
+          <AlertTitle>สำเร็จ</AlertTitle>
           <AlertDescription>{success}</AlertDescription>
         </Alert>
       ) : null}
@@ -170,9 +170,10 @@ export const ReminderEventsTable = ({
             size="sm"
             onClick={() => void refreshEvents()}
             disabled={isRefreshing}
+            aria-label="รีเฟรชรายการแจ้งเตือน"
           >
             {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-            Refresh
+            รีเฟรช
           </Button>
         </div>
       ) : null}
@@ -180,17 +181,17 @@ export const ReminderEventsTable = ({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Due Time</TableHead>
-            <TableHead>Channel</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Action</TableHead>
+            <TableHead>เวลาแจ้งเตือน</TableHead>
+            <TableHead>ช่องทาง</TableHead>
+            <TableHead>สถานะ</TableHead>
+            <TableHead>การจัดการ</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {visibleEvents.length === 0 ? (
             <TableRow>
               <TableCell colSpan={4} className="text-center text-muted-foreground">
-                No reminder events
+                ไม่มีรายการแจ้งเตือน
               </TableCell>
             </TableRow>
           ) : (
@@ -213,23 +214,24 @@ export const ReminderEventsTable = ({
                         size="sm"
                         disabled={isCancellingId === event.id}
                         onClick={() => cancelReminder(event.id)}
+                        aria-label="ยกเลิกรายการแจ้งเตือน"
                       >
                         {isCancellingId === event.id ? (
                           <>
                             <Loader2 className="h-4 w-4 animate-spin" />
-                            Cancelling...
+                            กำลังยกเลิก...
                           </>
                         ) : (
                           <>
                             <XCircle className="h-4 w-4" />
-                            Cancel
+                            ยกเลิก
                           </>
                         )}
                       </Button>
                     ) : (
                       <span className="text-sm text-muted-foreground">
                         {displayStatus === "cancelled"
-                          ? `Cancelled ${formatDateTime(event.cancelledAt)}`
+                          ? `ยกเลิกเมื่อ ${formatDateTime(event.cancelledAt)}`
                           : "-"}
                       </span>
                     )}
@@ -251,6 +253,7 @@ export const ReminderEventsTable = ({
             variant="outline"
             size="sm"
             onClick={() => setExpanded((current) => !current)}
+            aria-label={isExpanded ? "ย่อรายการแจ้งเตือน" : "ดูรายการแจ้งเตือนทั้งหมด"}
           >
             {isExpanded ? "ย่อรายการ" : "ดูรายการเต็ม"}
           </Button>

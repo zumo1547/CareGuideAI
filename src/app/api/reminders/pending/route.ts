@@ -1,4 +1,4 @@
-import { addMinutes, subHours } from "date-fns";
+﻿import { addMinutes, subHours } from "date-fns";
 import { NextResponse } from "next/server";
 
 import { getApiAuthContext } from "@/lib/api/auth-helpers";
@@ -50,13 +50,18 @@ export async function GET() {
       const medicineName = plan?.medicine_id
         ? medicineMap.get(plan.medicine_id) ?? "ยา"
         : "ยา";
+
       return {
         id: event.id,
         dueAt: event.due_at,
-        message: `ถึงเวลาทานยา ${medicineName} กรุณาทานยาตามแผน`,
+        planId: event.plan_id ?? null,
+        message: `ถึงเวลากินยา ${medicineName} แล้ว`,
       };
     })
-    .filter((item): item is { id: string; dueAt: string; message: string } => Boolean(item));
+    .filter(
+      (item): item is { id: string; dueAt: string; planId: string | null; message: string } =>
+        Boolean(item),
+    );
 
   return NextResponse.json({ events: mapped });
 }

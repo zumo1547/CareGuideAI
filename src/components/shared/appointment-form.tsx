@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   CalendarClock,
@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { SpeechToTextButton } from "@/components/accessibility/speech-to-text-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -118,6 +119,23 @@ export const AppointmentForm = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lastAlarmMessage, setLastAlarmMessage] = useState<string | null>(null);
+
+  const appendAppointmentRequestNote = useCallback((text: string) => {
+    setRequestNote((previous) => `${previous} ${text}`.trim());
+  }, []);
+
+  const appendAppointmentReplyNote = useCallback((appointmentId: string, text: string) => {
+    setDraftByAppointmentId((current) => {
+      const currentDraft = current[appointmentId] ?? DEFAULT_DRAFT;
+      return {
+        ...current,
+        [appointmentId]: {
+          ...currentDraft,
+          note: `${currentDraft.note} ${text}`.trim(),
+        },
+      };
+    });
+  }, []);
 
   const selectedDoctorId = useMemo(() => {
     if (doctorId && sortedDoctorOptions.some((doctor) => doctor.id === doctorId)) {
@@ -377,6 +395,14 @@ export const AppointmentForm = ({
           </div>
           <div className="space-y-2">
             <Label htmlFor="appointment-note">อาการหรือเหตุผลที่ต้องการปรึกษา</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <SpeechToTextButton
+                onTranscript={appendAppointmentRequestNote}
+                label="พูดข้อความนัดหมาย"
+                ariaLabel="กดเพื่อพูดข้อความคำขอนัดหมายถึงคุณหมอ"
+                disabled={!canRequestAppointment || submitting}
+              />
+            </div>
             <Textarea
               id="appointment-note"
               rows={3}
@@ -384,12 +410,16 @@ export const AppointmentForm = ({
               onChange={(event) => setRequestNote(event.target.value)}
               placeholder="เช่น เวียนหัวหลังทานยา ต้องการปรึกษาแพทย์ด่วน"
               disabled={!canRequestAppointment || submitting}
+              aria-label="ข้อความคำขอนัดหมายถึงคุณหมอ"
+              data-voice-field="appointment-request-note"
             />
           </div>
           <Button
             type="button"
             onClick={() => void submitRequest()}
             disabled={!canRequestAppointment || submitting || requestNote.trim().length < 3}
+            aria-label="ส่งคำขอนัดหมายถึงคุณหมอ"
+            data-voice-action="send-appointment-request"
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {submitting ? "กำลังส่ง..." : "ส่งคำขอนัดหมาย"}
@@ -491,8 +521,18 @@ export const AppointmentForm = ({
                           <Label htmlFor={`appointment-response-note-${appointment.id}`}>
                             ข้อความถึงคุณหมอ
                           </Label>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <SpeechToTextButton
+                              onTranscript={(text) => appendAppointmentReplyNote(appointment.id, text)}
+                              label="พูดข้อความถึงหมอ"
+                              ariaLabel="กดเพื่อพูดข้อความตอบกลับถึงคุณหมอ"
+                              disabled={actionLoadingId === appointment.id}
+                            />
+                          </div>
                           <Textarea
                             id={`appointment-response-note-${appointment.id}`}
+                            aria-label="ข้อความตอบกลับถึงคุณหมอ"
+                            data-voice-field="appointment-response-note"
                             rows={2}
                             value={draft.note}
                             onChange={(event) =>
@@ -518,6 +558,8 @@ export const AppointmentForm = ({
                           <Button
                             type="button"
                             onClick={() => void respondToDoctor(appointment, "patient_accept")}
+                            data-voice-action="appointment-accept"
+                            aria-label="ยืนยันรับนัดหมาย"
                             disabled={actionLoadingId === appointment.id}
                           >
                             {actionLoadingId === appointment.id ? (
@@ -531,6 +573,8 @@ export const AppointmentForm = ({
                             type="button"
                             variant="outline"
                             onClick={() => void respondToDoctor(appointment, "patient_decline")}
+                            data-voice-action="appointment-decline"
+                            aria-label="ปฏิเสธนัดหมาย"
                             disabled={
                               actionLoadingId === appointment.id ||
                               draft.note.trim().length < 3
@@ -543,6 +587,8 @@ export const AppointmentForm = ({
                             type="button"
                             variant="secondary"
                             onClick={() => void respondToDoctor(appointment, "patient_reschedule")}
+                            data-voice-action="appointment-reschedule"
+                            aria-label="ขอเลื่อนนัดหมาย"
                             disabled={actionLoadingId === appointment.id}
                           >
                             ขอเลื่อนนัด

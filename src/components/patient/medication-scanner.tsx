@@ -1174,6 +1174,31 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       return;
     }
 
+    const summaryText = [
+      `ชื่อยา ${parsedDetails.medicineNameEn || parsedDetails.medicineNameTh || medicineQuery}`,
+      `ขนาดยา ${dosage}`,
+      parsedTotalPills ? `จำนวนยาในซอง ${parsedTotalPills} เม็ด` : null,
+      medicationType === "otc" ? `เตือนถึงวันที่ ${otcReminderUntilDate}` : "โหมดเตือนจนยาหมด",
+      `ความมั่นใจ OCR ${Math.round(parsedDetails.confidence * 100)} เปอร์เซ็นต์`,
+    ]
+      .filter(Boolean)
+      .join(" , ");
+
+    if (voiceEnabled) {
+      speakThai(`กรุณาทวนข้อมูลก่อนบันทึก ${summaryText} หากถูกต้องให้ยืนยัน`);
+    }
+
+    const accepted = typeof window === "undefined"
+      ? true
+      : window.confirm(
+          `กรุณาทวนข้อมูลก่อนบันทึก\\n\\n${summaryText}\\n\\nกด \"ตกลง\" เพื่อยืนยันบันทึก หรือกด \"ยกเลิก\" เพื่อกลับไปแก้ไข`,
+        );
+
+    if (!accepted) {
+      setPlanError("ยกเลิกการบันทึกชั่วคราว กรุณาตรวจสอบข้อมูลและยืนยันอีกครั้ง");
+      return;
+    }
+
     setIsCreatingPlan(true);
     setPlanError(null);
     setPlanSuccess(null);
@@ -1703,6 +1728,8 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                   setIsScanning(true);
                 }}
                 disabled={isScanning || isStartingCamera}
+                aria-label="เริ่มสแกนยาด้วยกล้อง"
+                data-voice-action="start-med-camera-scan"
               >
                 {isStartingCamera ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -2058,6 +2085,8 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                   <Button
                     onClick={() => void confirmAndCreateMedicationPlan()}
                     disabled={isCreatingPlan || !ocrValidation?.canConfirm || !canSubmitByMedicationType}
+                    aria-label="ยืนยันผลยาและบันทึกแผนยา"
+                    data-voice-action="confirm-med-plan"
                   >
                     {isCreatingPlan ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

@@ -1,4 +1,4 @@
-import { MedicationScanner } from "@/components/patient/medication-scanner";
+﻿import { MedicationScanner } from "@/components/patient/medication-scanner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getPatientScanContext } from "@/lib/patient/scan-context";
 
@@ -6,12 +6,12 @@ export default async function MedicationScanPage() {
   const { session } = await getPatientScanContext();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" id="voice-section-medicine">
       <Card>
         <CardHeader>
           <CardTitle>สแกนยา</CardTitle>
           <CardDescription>
-            สแกนฉลากยาแบบใช้งานจริง พร้อมเสียงแนะนำทิศทางและวิเคราะห์ OCR อัตโนมัติ
+            สแกนฉลากยาแบบใช้งานจริง พร้อมเสียงนำทางและวิเคราะห์ OCR อัตโนมัติ
           </CardDescription>
         </CardHeader>
         <CardContent>

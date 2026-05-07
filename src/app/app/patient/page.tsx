@@ -1,4 +1,4 @@
-import { Activity, BellRing, Pill, UserRoundCheck } from "lucide-react";
+﻿import { Activity, BellRing, Pill, UserRoundCheck } from "lucide-react";
 
 import { MedicationPlanForm } from "@/components/patient/medication-plan-form";
 import { MedicationScanner } from "@/components/patient/medication-scanner";
@@ -35,42 +35,38 @@ export default async function PatientDashboardPage() {
     { data: links },
     { data: doctorProfiles },
     { data: onboardingProfile },
-  ] =
-    await Promise.all([
-      medicineIds.length
-        ? supabase
-            .from("medicines")
-            .select("id, name, strength")
-            .in("id", medicineIds)
-        : Promise.resolve({ data: [] as { id: string; name: string; strength: string | null }[] }),
-      plans?.length
-        ? supabase
-            .from("medication_schedule_times")
-            .select("plan_id, label, time_of_day")
-            .in("plan_id", plans.map((plan) => plan.id))
-        : Promise.resolve({ data: [] as { plan_id: string; label: string; time_of_day: string }[] }),
-      supabase
-        .from("reminder_events")
-        .select("id, due_at, channel, status, provider")
-        .eq("patient_id", session.userId)
-        .order("due_at", { ascending: false })
-        .limit(20),
-      supabase
-        .from("patient_doctor_links")
-        .select("doctor_id")
-        .eq("patient_id", session.userId)
-        .limit(200),
-      adminSupabase
-        .from("profiles")
-        .select("id, full_name, phone")
-        .eq("role", "doctor")
-        .order("full_name", { ascending: true }),
-      supabase
-        .from("user_onboarding_profiles")
-        .select("biological_sex, bmi")
-        .eq("user_id", session.userId)
-        .maybeSingle(),
-    ]);
+  ] = await Promise.all([
+    medicineIds.length
+      ? supabase.from("medicines").select("id, name, strength").in("id", medicineIds)
+      : Promise.resolve({ data: [] as { id: string; name: string; strength: string | null }[] }),
+    plans?.length
+      ? supabase
+          .from("medication_schedule_times")
+          .select("plan_id, label, time_of_day")
+          .in("plan_id", plans.map((plan) => plan.id))
+      : Promise.resolve({ data: [] as { plan_id: string; label: string; time_of_day: string }[] }),
+    supabase
+      .from("reminder_events")
+      .select("id, due_at, channel, status, provider")
+      .eq("patient_id", session.userId)
+      .order("due_at", { ascending: false })
+      .limit(20),
+    supabase
+      .from("patient_doctor_links")
+      .select("doctor_id")
+      .eq("patient_id", session.userId)
+      .limit(200),
+    adminSupabase
+      .from("profiles")
+      .select("id, full_name, phone")
+      .eq("role", "doctor")
+      .order("full_name", { ascending: true }),
+    supabase
+      .from("user_onboarding_profiles")
+      .select("biological_sex, bmi")
+      .eq("user_id", session.userId)
+      .maybeSingle(),
+  ]);
 
   const medicineMap = new Map((medicines ?? []).map((item) => [item.id, item]));
   const linkedDoctorIds = new Set((links ?? []).map((link) => link.doctor_id).filter(Boolean));
@@ -91,11 +87,19 @@ export default async function PatientDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <VoiceReminderListener />
+      <VoiceReminderListener patientId={session.userId} />
+
+      <section className="rounded-2xl border bg-cyan-50/40 p-4" aria-label="คำสั่งเสียงที่รองรับ">
+        <p className="text-sm font-semibold">โหมดใช้งานด้วยเสียง</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          พูดสั่งได้ เช่น “สแกนยา”, “นัดหมอ”, “แชทหมอ”, “ส่งข้อความหาหมอ” และระบบจะทวนยืนยันก่อนทำรายการสำคัญทุกครั้ง
+        </p>
+      </section>
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>แผนยา Active</CardDescription>
+            <CardDescription>แผนยาที่ใช้งานอยู่</CardDescription>
             <CardTitle className="flex items-center gap-2 text-2xl">
               <Pill className="h-5 w-5 text-cyan-700" />
               {plans?.filter((plan) => plan.is_active).length ?? 0}
@@ -104,7 +108,7 @@ export default async function PatientDashboardPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>แจ้งเตือนที่กำลังรอ</CardDescription>
+            <CardDescription>รายการแจ้งเตือนที่รอส่ง</CardDescription>
             <CardTitle className="flex items-center gap-2 text-2xl">
               <BellRing className="h-5 w-5 text-amber-600" />
               {reminderEvents?.filter((item) => item.status === "pending").length ?? 0}
@@ -113,7 +117,7 @@ export default async function PatientDashboardPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>หมอดูแล</CardDescription>
+            <CardDescription>คุณหมอที่ดูแล</CardDescription>
             <CardTitle className="flex items-center gap-2 text-2xl">
               <UserRoundCheck className="h-5 w-5 text-emerald-700" />
               {links?.length ?? 0}
@@ -137,7 +141,7 @@ export default async function PatientDashboardPage() {
             <CardHeader>
               <CardTitle>แนวโน้ม BMI และผลต่อความดันในอนาคต</CardTitle>
               <CardDescription>
-                วิเคราะห์จาก BMI ล่าสุดและเพศ ({bmiTrend.sexLabel}) เพื่อใช้เป็นฐานกับระบบความดันอัตโนมัติในอนาคต
+                วิเคราะห์จากค่า BMI ล่าสุดและเพศ ({bmiTrend.sexLabel}) เพื่อใช้เป็นฐานข้อมูลสำหรับฟีเจอร์ดูแลความดัน
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-2 text-sm md:grid-cols-2">
@@ -164,22 +168,26 @@ export default async function PatientDashboardPage() {
         </section>
       ) : null}
 
-      <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+      <section id="voice-section-medicine" className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <MedicationScanner patientId={session.userId} />
         <MedicationPlanForm patientId={session.userId} />
       </section>
 
       <section className="grid gap-6 lg:grid-cols-2">
-        <PatientSupportDesk
-          patientId={session.userId}
-          doctorOptions={doctorOptions}
-          hasLinkedDoctor={linkedDoctorIds.size > 0}
-        />
-        <AppointmentForm
-          patientId={session.userId}
-          doctorOptions={doctorOptions}
-          hasLinkedDoctor={linkedDoctorIds.size > 0}
-        />
+        <div id="voice-section-chat">
+          <PatientSupportDesk
+            patientId={session.userId}
+            doctorOptions={doctorOptions}
+            hasLinkedDoctor={linkedDoctorIds.size > 0}
+          />
+        </div>
+        <div id="voice-section-appointment">
+          <AppointmentForm
+            patientId={session.userId}
+            doctorOptions={doctorOptions}
+            hasLinkedDoctor={linkedDoctorIds.size > 0}
+          />
+        </div>
       </section>
 
       <section>
@@ -239,7 +247,7 @@ export default async function PatientDashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>Reminder Events</CardTitle>
-            <CardDescription>ข้อมูลจากระบบแจ้งเตือน (SMS/Voice)</CardDescription>
+            <CardDescription>ข้อมูลการแจ้งเตือนยา (SMS/Voice)</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="mb-4 rounded-xl border border-cyan-200/70 bg-gradient-to-br from-cyan-50 to-sky-50 p-4">
@@ -247,7 +255,7 @@ export default async function PatientDashboardPage() {
               <div className="mt-2 space-y-2 text-sm leading-6 text-cyan-900/90">
                 <p className="flex items-start gap-2">
                   <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-600" />
-                  <span>รายการที่กดยกเลิก (cancelled) จะถูกลบอัตโนมัติภายใน 30 นาที</span>
+                  <span>รายการที่ยกเลิก (cancelled) จะถูกลบอัตโนมัติภายใน 30 นาที</span>
                 </p>
                 <p className="flex items-start gap-2">
                   <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-600" />

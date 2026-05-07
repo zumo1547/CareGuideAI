@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { IBM_Plex_Mono, Sarabun } from "next/font/google";
 
 import { AccessibilityAssistant } from "@/components/accessibility/accessibility-assistant";
@@ -20,7 +20,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "CareGuideAI",
   description:
-    "CareGuideAI - ระบบช่วยผู้พิการสแกนยา ติดตามเวลาใช้ยา และประสานงานคุณหมอแบบครบวงจร",
+    "CareGuideAI - ผู้ช่วยผู้พิการทางสายตาในการสแกนยา เตือนกินยา ติดตามสุขภาพ และติดต่อคุณหมอแบบเรียลไทม์",
 };
 
 export default function RootLayout({
