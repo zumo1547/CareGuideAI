@@ -230,37 +230,28 @@ export default async function AdminDashboardPage() {
     .slice(0, 15);
   const expiringInvites = invites.filter((invite) => invite.status === "pending").slice(0, 10);
 
-  const warnings: string[] = [];
-  if (onboardingTableCountResult.error) {
-    if (isSchemaCacheMissingError(onboardingTableCountResult.error)) {
-      warnings.push(
-        "Onboarding table schema cache is not ready. Showing fallback count from user metadata.",
-      );
-    } else {
-      warnings.push(`Failed to load onboarding table count: ${onboardingTableCountResult.error.message}`);
-    }
-  }
-
   const onboardingTableCount = onboardingTableCountResult.error
     ? null
     : num(onboardingTableCountResult.count);
   const onboardingFallbackCount =
     typeof onboardingMetadataCount === "number" ? onboardingMetadataCount : null;
-
-  if (
-    onboardingTableCount !== null &&
-    onboardingFallbackCount !== null &&
-    onboardingFallbackCount > onboardingTableCount
-  ) {
-    warnings.push(
-      "Some onboarding records exist only in fallback metadata and are not fully synced to the main table yet.",
-    );
-  }
-
   const onboardingCount =
     onboardingFallbackCount === null
       ? onboardingTableCount
       : Math.max(onboardingTableCount ?? 0, onboardingFallbackCount);
+  const warnings: string[] = [];
+
+  // If we can count from auth metadata, suppress onboarding schema-cache warnings
+  // to avoid false alarms in admin UI.
+  if (onboardingCount === null && onboardingTableCountResult.error) {
+    if (isSchemaCacheMissingError(onboardingTableCountResult.error)) {
+      warnings.push(
+        "Onboarding count is temporarily unavailable because schema cache is not ready. Please try again in a few seconds.",
+      );
+    } else {
+      warnings.push(`Failed to load onboarding table count: ${onboardingTableCountResult.error.message}`);
+    }
+  }
   const totalUsers = num(totalUsersResult.count);
   const patientCount = num(patientCountResult.count);
   const doctorCount = num(doctorCountResult.count);
