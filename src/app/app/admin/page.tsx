@@ -178,9 +178,9 @@ export default async function AdminDashboardPage() {
   const warnings: string[] = [];
   if (onboardingCountResult.error) {
     if (isSchemaCacheMissingError(onboardingCountResult.error)) {
-      warnings.push("เธ•เธฒเธฃเธฒเธ onboarding เธขเธฑเธเนเธกเนเธเธฃเนเธญเธกเนเธ API schema cache เธเธ“เธฐเธเธตเนเธฃเธฐเธเธ fallback เธขเธฑเธเนเธเนเธเธฒเธเนเธ”เน เนเธ•เนเธเธงเธฃเน€เธเนเธ migration เนเธ Supabase");
+      warnings.push("ตาราง onboarding ยังไม่พร้อมใน API schema cache ขณะนี้ระบบ fallback ยังใช้งานได้ แต่ควรเช็ก migration ใน Supabase");
     } else {
-      warnings.push(`เธ”เธถเธเธเนเธญเธกเธนเธฅ onboarding เนเธกเนเธชเธณเน€เธฃเนเธ: ${onboardingCountResult.error.message}`);
+      warnings.push(`ดึงข้อมูล onboarding ไม่สำเร็จ: ${onboardingCountResult.error.message}`);
     }
   }
 
@@ -215,16 +215,16 @@ export default async function AdminDashboardPage() {
   return (
     <div className="space-y-6">
       <section className="space-y-3">
-        <h2 className="text-2xl font-semibold">เธจเธนเธเธขเนเธ”เธนเนเธฅเธฃเธฐเธเธเนเธญเธ”เธกเธดเธ</h2>
+        <h2 className="text-2xl font-semibold">ศูนย์ดูแลระบบแอดมิน</h2>
         <p className="text-muted-foreground">
-          เธซเธเนเธฒเธเธตเนเธชเธฃเธธเธเธ เธฒเธเธฃเธงเธกเธเธนเนเนเธเน เธฃเธฐเธเธเธขเธฒ เธเธฒเธฃเนเธเนเธเน€เธ•เธทเธญเธ เนเธฅเธฐเธฃเธฒเธขเธเธฒเธฃเธ—เธตเนเธ•เนเธญเธเธเธฑเธ”เธเธฒเธฃ เน€เธเธทเนเธญเนเธซเนเธ”เธนเนเธฅเน€เธงเนเธเนเธ”เนเน€เธฃเนเธงเนเธฅเธฐเธ—เธฑเนเธงเธ–เธถเธ
+          หน้านี้สรุปภาพรวมผู้ใช้ ระบบยา การแจ้งเตือน และรายการที่ต้องจัดการ เพื่อให้ดูแลเว็บได้เร็วและทั่วถึง
         </p>
       </section>
 
       {warnings.length ? (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>เธกเธตเธเธฒเธเธญเธขเนเธฒเธเธ•เนเธญเธเธ•เธฃเธงเธเธชเธญเธ</AlertTitle>
+          <AlertTitle>มีบางอย่างต้องตรวจสอบ</AlertTitle>
           <AlertDescription>
             {warnings.map((message) => (
               <p key={message}>{message}</p>
@@ -236,7 +236,7 @@ export default async function AdminDashboardPage() {
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>เธเธนเนเนเธเนเธ—เธฑเนเธเธซเธกเธ”</CardDescription>
+            <CardDescription>ผู้ใช้ทั้งหมด</CardDescription>
             <CardTitle className="text-3xl">{totalUsers}</CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
@@ -245,40 +245,40 @@ export default async function AdminDashboardPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Onboarding เน€เธชเธฃเนเธเนเธฅเนเธง</CardDescription>
+            <CardDescription>Onboarding เสร็จแล้ว</CardDescription>
             <CardTitle className="text-3xl">{onboardingCount ?? "-"}</CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
             {onboardingCount === null
-              ? "เธฃเธญ schema cache เธเธฃเนเธญเธก"
-              : `${Math.round((onboardingCount / Math.max(totalUsers, 1)) * 100)}% เธเธญเธเธเธนเนเนเธเนเธ—เธฑเนเธเธซเธกเธ”`}
+              ? "รอ schema cache พร้อม"
+              : `${Math.round((onboardingCount / Math.max(totalUsers, 1)) * 100)}% ของผู้ใช้ทั้งหมด`}
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>เนเธเธเธขเธฒเธ—เธตเน active</CardDescription>
+            <CardDescription>แผนยาที่ active</CardDescription>
             <CardTitle className="text-3xl">{num(activePlanCountResult.count)}</CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
-            เธขเธฒเธ—เธตเนเธเธณเธฅเธฑเธเธ•เธดเธ”เธ•เธฒเธกเนเธเธฃเธฐเธเธ
+            ยาที่กำลังติดตามในระบบ
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>เธเธฒเธฃเนเธเนเธเน€เธ•เธทเธญเธเธฃเธญเธชเนเธ</CardDescription>
+            <CardDescription>การแจ้งเตือนรอส่ง</CardDescription>
             <CardTitle className="text-3xl">{num(pendingReminderCountResult.count)}</CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
-            failed {num(failedReminderCountResult.count)} เธฃเธฒเธขเธเธฒเธฃ
+            failed {num(failedReminderCountResult.count)} รายการ
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>เธเธฑเธ”เธซเธกเธฒเธขเธฃเธญเธขเธทเธเธขเธฑเธ</CardDescription>
+            <CardDescription>นัดหมายรอยืนยัน</CardDescription>
             <CardTitle className="text-3xl">{num(pendingAppointmentCountResult.count)}</CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
-            invite pending {num(pendingInviteCountResult.count)} | missed dose เธ—เธฑเนเธเธซเธกเธ” {num(missedDoseCountResult.count)}
+            invite pending {num(pendingInviteCountResult.count)} | missed dose ทั้งหมด {num(missedDoseCountResult.count)}
           </CardContent>
         </Card>
       </section>
@@ -298,25 +298,25 @@ export default async function AdminDashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Users className="h-5 w-5 text-cyan-700" />
-              เธเธนเนเนเธเนเธฅเนเธฒเธชเธธเธ”เนเธฅเธฐเธชเธดเธ—เธเธดเน
+              ผู้ใช้ล่าสุดและสิทธิ์
             </CardTitle>
-            <CardDescription>เธ•เธฃเธงเธเธเธ—เธเธฒเธ—เธเธนเนเนเธเน เธเธฃเนเธญเธกเน€เธงเธฅเธฒเน€เธเนเธฒเธฃเธฐเธเธ</CardDescription>
+            <CardDescription>ตรวจบทบาทผู้ใช้ พร้อมเวลาเข้าระบบ</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>เธเธทเนเธญ</TableHead>
+                  <TableHead>ชื่อ</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead>เธชเธฃเนเธฒเธเน€เธกเธทเนเธญ</TableHead>
                   <TableHead className="text-right">จัดการ</TableHead>
+                  <TableHead>สร้างเมื่อ</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {users.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={4} className="text-center text-muted-foreground">
-                      เธขเธฑเธเนเธกเนเธกเธตเธเนเธญเธกเธนเธฅเธเธนเนเนเธเน
+                      ยังไม่มีข้อมูลผู้ใช้
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -328,7 +328,6 @@ export default async function AdminDashboardPage() {
                           {user.role}
                         </Badge>
                       </TableCell>
-                      <TableCell>{fmt(user.created_at)}</TableCell>
                       <TableCell className="text-right">
                         <DeleteUserButton
                           userId={user.id}
@@ -337,6 +336,7 @@ export default async function AdminDashboardPage() {
                           isCurrentAdmin={user.id === session.userId}
                         />
                       </TableCell>
+                      <TableCell>{fmt(user.created_at)}</TableCell>
                     </TableRow>
                   ))
                 )}
@@ -349,38 +349,38 @@ export default async function AdminDashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Stethoscope className="h-5 w-5 text-cyan-700" />
-              เธชเธ–เธฒเธเธฐเธเธฒเธฃเธเธฑเธเธเธนเนเธเธนเนเธเนเธงเธข-เธซเธกเธญ
+              สถานะการจับคู่ผู้ป่วย-หมอ
             </CardTitle>
-            <CardDescription>เธเนเธงเธขเธ•เธดเธ”เธ•เธฒเธกเธเธงเธฒเธกเธเธฃเธญเธเธเธฅเธธเธกเธเธฒเธฃเธ”เธนเนเธฅเธเธนเนเธเนเธงเธข</CardDescription>
+            <CardDescription>ช่วยติดตามความครอบคลุมการดูแลผู้ป่วย</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">เธเธนเนเธ—เธตเนเธเธฑเธเนเธฅเนเธง</p>
+                <p className="text-xs text-muted-foreground">คู่ที่จับแล้ว</p>
                 <p className="text-2xl font-semibold">{links.length}</p>
               </div>
               <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">เธเธนเนเธเนเธงเธขเธขเธฑเธเนเธกเนเธเธฑเธเธเธนเน</p>
+                <p className="text-xs text-muted-foreground">ผู้ป่วยยังไม่จับคู่</p>
                 <p className="text-2xl font-semibold">{unassignedPatients.length}</p>
               </div>
               <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">เธซเธกเธญเธขเธฑเธเนเธกเนเธกเธตเธเธนเนเธเนเธงเธข</p>
+                <p className="text-xs text-muted-foreground">หมอยังไม่มีผู้ป่วย</p>
                 <p className="text-2xl font-semibold">{doctorsWithoutPatients.length}</p>
               </div>
             </div>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>เธเธนเนเธเนเธงเธขเธขเธฑเธเนเธกเนเธเธฑเธเธเธนเน</TableHead>
-                  <TableHead>เนเธ—เธฃเธจเธฑเธเธ—เน</TableHead>
-                  <TableHead>เธชเธฃเนเธฒเธเน€เธกเธทเนเธญ</TableHead>
+                  <TableHead>ผู้ป่วยยังไม่จับคู่</TableHead>
+                  <TableHead>โทรศัพท์</TableHead>
+                  <TableHead>สร้างเมื่อ</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {unassignedPatients.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
-                      เธเธนเนเธเนเธงเธขเธ–เธนเธเธเธฑเธเธเธนเนเธเธฃเธเนเธฅเนเธง
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                      ผู้ป่วยถูกจับคู่ครบแล้ว
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -403,17 +403,17 @@ export default async function AdminDashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <BellRing className="h-5 w-5 text-cyan-700" />
-              เนเธเนเธเน€เธ•เธทเธญเธเธ—เธตเนเธ•เนเธญเธเน€เธเนเธฒเธฃเธฐเธงเธฑเธ
+              แจ้งเตือนที่ต้องเฝ้าระวัง
             </CardTitle>
-            <CardDescription>เธ•เธฃเธงเธ failed reminder เนเธฅเธฐ missed dose เธฅเนเธฒเธชเธธเธ”</CardDescription>
+            <CardDescription>ตรวจ failed reminder และ missed dose ล่าสุด</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold">Failed Reminder เธฅเนเธฒเธชเธธเธ”</h3>
+              <h3 className="text-sm font-semibold">Failed Reminder ล่าสุด</h3>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>เธเธนเนเนเธเน</TableHead>
+                    <TableHead>ผู้ใช้</TableHead>
                     <TableHead>Due</TableHead>
                     <TableHead>Provider</TableHead>
                   </TableRow>
@@ -421,8 +421,8 @@ export default async function AdminDashboardPage() {
                 <TableBody>
                   {failedReminders.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground">
-                        เนเธกเนเธกเธต failed reminder
+                      <TableCell colSpan={3} className="text-center text-muted-foreground">
+                        ไม่มี failed reminder
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -438,20 +438,20 @@ export default async function AdminDashboardPage() {
               </Table>
             </div>
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold">Missed Dose เธฅเนเธฒเธชเธธเธ”</h3>
+              <h3 className="text-sm font-semibold">Missed Dose ล่าสุด</h3>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>เธเธนเนเนเธเน</TableHead>
-                    <TableHead>เน€เธงเธฅเธฒ</TableHead>
-                    <TableHead>เธชเธ–เธฒเธเธฐ</TableHead>
+                    <TableHead>ผู้ใช้</TableHead>
+                    <TableHead>เวลา</TableHead>
+                    <TableHead>สถานะ</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {missedLogs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground">
-                        เนเธกเนเธกเธต missed dose เธฅเนเธฒเธชเธธเธ”
+                      <TableCell colSpan={3} className="text-center text-muted-foreground">
+                        ไม่มี missed dose ล่าสุด
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -475,9 +475,9 @@ export default async function AdminDashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <CalendarClock className="h-5 w-5 text-cyan-700" />
-              เธเธฑเธ”เธซเธกเธฒเธขเนเธฅเธฐเธเธณเน€เธเธดเธเธซเธกเธญ
+              นัดหมายและคำเชิญหมอ
             </CardTitle>
-            <CardDescription>เธ•เธดเธ”เธ•เธฒเธกเธเธญเธเธงเธ”เธ”เนเธฒเธเธเธฒเธฃเธเธฃเธฐเธชเธฒเธเธเธฒเธ</CardDescription>
+            <CardDescription>ติดตามคอขวดด้านการประสานงาน</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-2">
@@ -485,16 +485,16 @@ export default async function AdminDashboardPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>เธเธนเนเธเนเธงเธข</TableHead>
-                    <TableHead>เธซเธกเธญ</TableHead>
-                    <TableHead>เธเธญเน€เธกเธทเนเธญ</TableHead>
+                    <TableHead>ผู้ป่วย</TableHead>
+                    <TableHead>หมอ</TableHead>
+                    <TableHead>ขอเมื่อ</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pendingAppointments.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground">
-                        เนเธกเนเธกเธตเธเธฑเธ”เธซเธกเธฒเธขเธ—เธตเนเธฃเธญเธขเธทเธเธขเธฑเธ
+                      <TableCell colSpan={3} className="text-center text-muted-foreground">
+                        ไม่มีนัดหมายที่รอยืนยัน
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -510,20 +510,20 @@ export default async function AdminDashboardPage() {
               </Table>
             </div>
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold">Invite เธ—เธตเนเธขเธฑเธ pending</h3>
+              <h3 className="text-sm font-semibold">Invite ที่ยัง pending</h3>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Email</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>เธซเธกเธ”เธญเธฒเธขเธธ</TableHead>
+                    <TableHead>หมดอายุ</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {expiringInvites.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground">
-                        เนเธกเนเธกเธต invite เธ—เธตเนเธเนเธฒเธเธญเธขเธนเน
+                      <TableCell colSpan={3} className="text-center text-muted-foreground">
+                        ไม่มี invite ที่ค้างอยู่
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -549,9 +549,9 @@ export default async function AdminDashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Shield className="h-5 w-5 text-cyan-700" />
-              Doctor Invite เธ—เธฑเนเธเธซเธกเธ”
+              Doctor Invite ทั้งหมด
             </CardTitle>
-            <CardDescription>เธ•เธดเธ”เธ•เธฒเธกเธชเธ–เธฒเธเธฐเธเนเธฒเธ/เธขเธญเธกเธฃเธฑเธ/เธขเธเน€เธฅเธดเธ</CardDescription>
+            <CardDescription>ติดตามสถานะค้าง/ยอมรับ/ยกเลิก</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -565,8 +565,8 @@ export default async function AdminDashboardPage() {
               <TableBody>
                 {invites.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
-                      เธขเธฑเธเนเธกเนเธกเธต invite
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                      ยังไม่มี invite
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -591,7 +591,7 @@ export default async function AdminDashboardPage() {
               <ClipboardList className="h-5 w-5 text-cyan-700" />
               Admin Audit Logs
             </CardTitle>
-            <CardDescription>เน€เธเนเธเธเธฒเธฃเน€เธเธฅเธตเนเธขเธเนเธเธฅเธเธชเธณเธเธฑเธเธเธญเธเธเธนเนเธ”เธนเนเธฅเธฃเธฐเธเธ</CardDescription>
+            <CardDescription>เช็กการเปลี่ยนแปลงสำคัญของผู้ดูแลระบบ</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -605,8 +605,8 @@ export default async function AdminDashboardPage() {
               <TableBody>
                 {logs.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
-                      เนเธกเนเธกเธต audit logs
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                      ไม่มี audit logs
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -632,17 +632,17 @@ export default async function AdminDashboardPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <UserCog className="h-5 w-5 text-cyan-700" />
-                เธซเธกเธญเธ—เธตเนเธขเธฑเธเนเธกเนเธกเธตเธเธนเนเธเนเธงเธขเนเธเธเธงเธฒเธกเธ”เธนเนเธฅ
+                หมอที่ยังไม่มีผู้ป่วยในความดูแล
               </CardTitle>
-              <CardDescription>เนเธเนเธชเธณเธซเธฃเธฑเธเธเธฃเธฐเธเธฒเธขเธ เธฒเธฃเธฐเธเธฒเธเนเธซเนเธชเธกเธ”เธธเธฅ</CardDescription>
+              <CardDescription>ใช้สำหรับกระจายภาระงานให้สมดุล</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>เธเธทเนเธญเธซเธกเธญ</TableHead>
-                    <TableHead>เนเธ—เธฃเธจเธฑเธเธ—เน</TableHead>
-                    <TableHead>เธชเธฃเนเธฒเธเน€เธกเธทเนเธญ</TableHead>
+                    <TableHead>ชื่อหมอ</TableHead>
+                    <TableHead>โทรศัพท์</TableHead>
+                    <TableHead>สร้างเมื่อ</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -662,6 +662,3 @@ export default async function AdminDashboardPage() {
     </div>
   );
 }
-
-
-
