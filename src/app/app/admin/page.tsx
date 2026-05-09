@@ -19,7 +19,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/session";
 import { env } from "@/lib/env";
-import { isSchemaCacheMissingError } from "@/lib/onboarding-storage";
+import {
+  isSchemaCacheMissingError,
+  ONBOARDING_PROFILE_METADATA_KEY,
+} from "@/lib/onboarding-storage";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateTimeInTimeZone } from "@/lib/time";
 import type { Role } from "@/types/domain";
@@ -39,9 +43,58 @@ const inviteBadgeVariant = (status: string) => {
   return "secondary";
 };
 
+const hasOnboardingMetadata = (rawMetadata: unknown) => {
+  if (!rawMetadata || typeof rawMetadata !== "object" || Array.isArray(rawMetadata)) {
+    return false;
+  }
+  const metadata = rawMetadata as Record<string, unknown>;
+  const fallbackProfile = metadata[ONBOARDING_PROFILE_METADATA_KEY];
+  return (
+    metadata.onboarding_completed === true ||
+    (typeof fallbackProfile === "object" && fallbackProfile !== null)
+  );
+};
+
+const countOnboardingFromAuthMetadata = async () => {
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+    return null;
+  }
+
+  const adminSupabase = createSupabaseAdminClient();
+  const perPage = 1000;
+  let page = 1;
+  let total = 0;
+
+  while (true) {
+    const { data, error } = await adminSupabase.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const users = data.users ?? [];
+    total += users.filter((user) => hasOnboardingMetadata(user.user_metadata)).length;
+
+    if (users.length < perPage) {
+      break;
+    }
+
+    page += 1;
+    if (page > 50) {
+      break;
+    }
+  }
+
+  return total;
+};
+
 export default async function AdminDashboardPage() {
   const session = await requireRole(["admin"]);
   const supabase = await createSupabaseServerClient();
+  const onboardingTableCountPromise = supabase
+    .from("user_onboarding_profiles")
+    .select("user_id", { count: "exact" })
+    .limit(1);
+  const onboardingMetadataCountPromise = countOnboardingFromAuthMetadata().catch(() => null);
 
   const [
     totalUsersResult,
@@ -54,7 +107,6 @@ export default async function AdminDashboardPage() {
     failedReminderCountResult,
     pendingAppointmentCountResult,
     missedDoseCountResult,
-    onboardingCountResult,
     usersResult,
     patientsResult,
     doctorsResult,
@@ -64,6 +116,8 @@ export default async function AdminDashboardPage() {
     failedRemindersResult,
     pendingAppointmentsResult,
     missedLogsResult,
+    onboardingTableCountResult,
+    onboardingMetadataCount,
   ] = await Promise.all([
     supabase.from("profiles").select("id", { count: "exact", head: true }),
     supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "patient"),
@@ -93,7 +147,6 @@ export default async function AdminDashboardPage() {
       .from("adherence_logs")
       .select("id", { count: "exact", head: true })
       .eq("status", "missed"),
-    supabase.from("user_onboarding_profiles").select("user_id", { count: "exact", head: true }),
     supabase
       .from("profiles")
       .select("id, full_name, role, created_at")
@@ -144,6 +197,8 @@ export default async function AdminDashboardPage() {
       .eq("status", "missed")
       .order("scheduled_for", { ascending: false })
       .limit(20),
+    onboardingTableCountPromise,
+    onboardingMetadataCountPromise,
   ]);
 
   const users = usersResult.data ?? [];
@@ -176,15 +231,36 @@ export default async function AdminDashboardPage() {
   const expiringInvites = invites.filter((invite) => invite.status === "pending").slice(0, 10);
 
   const warnings: string[] = [];
-  if (onboardingCountResult.error) {
-    if (isSchemaCacheMissingError(onboardingCountResult.error)) {
-      warnings.push("ตาราง onboarding ยังไม่พร้อมใน API schema cache ขณะนี้ระบบ fallback ยังใช้งานได้ แต่ควรเช็ก migration ใน Supabase");
+  if (onboardingTableCountResult.error) {
+    if (isSchemaCacheMissingError(onboardingTableCountResult.error)) {
+      warnings.push(
+        "Onboarding table schema cache is not ready. Showing fallback count from user metadata.",
+      );
     } else {
-      warnings.push(`ดึงข้อมูล onboarding ไม่สำเร็จ: ${onboardingCountResult.error.message}`);
+      warnings.push(`Failed to load onboarding table count: ${onboardingTableCountResult.error.message}`);
     }
   }
 
-  const onboardingCount = onboardingCountResult.error ? null : num(onboardingCountResult.count);
+  const onboardingTableCount = onboardingTableCountResult.error
+    ? null
+    : num(onboardingTableCountResult.count);
+  const onboardingFallbackCount =
+    typeof onboardingMetadataCount === "number" ? onboardingMetadataCount : null;
+
+  if (
+    onboardingTableCount !== null &&
+    onboardingFallbackCount !== null &&
+    onboardingFallbackCount > onboardingTableCount
+  ) {
+    warnings.push(
+      "Some onboarding records exist only in fallback metadata and are not fully synced to the main table yet.",
+    );
+  }
+
+  const onboardingCount =
+    onboardingFallbackCount === null
+      ? onboardingTableCount
+      : Math.max(onboardingTableCount ?? 0, onboardingFallbackCount);
   const totalUsers = num(totalUsersResult.count);
   const patientCount = num(patientCountResult.count);
   const doctorCount = num(doctorCountResult.count);
