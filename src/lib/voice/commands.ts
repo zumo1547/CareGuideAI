@@ -23,7 +23,11 @@ export type VoiceIntent =
         | "submit-register"
         | "go-login"
         | "describe-login-fields"
-        | "describe-register-fields";
+        | "describe-register-fields"
+        | "go-patient-dashboard"
+        | "go-medicine-scan-page"
+        | "go-bp-scan-page"
+        | "go-profile-page";
       label: string;
       requiresConfirmation: boolean;
       repeatText?: string;
@@ -51,6 +55,12 @@ const normalizeIntentText = (value: string) => {
     [/เขาสู่ระบบ|เข้า\s*สู่\s*ระบบ|เข้า\s*ระบบ|เข้าระบบ|เขา\s*ระบบ|เข้าสู่ระบม|เขาสู่ระบม/gu, "เข้าสู่ระบบ"],
     [/สมัครสมาชิค|สมัครสมาชีก|สมัครสมาขิก|สมัครสมาขี/gu, "สมัครสมาชิก"],
     [/ลงทะเบีน|ลงทะเบียน|ลงทะเบียน/gu, "ลงทะเบียน"],
+    [/แสกน|สแกรน|สะแกน|สแกน/gu, "สแกน"],
+    [/แฟ้มข้อมูล|แฟ้ม|โปรไฟล์|โพรไฟล์/gu, "แฟ้มข้อมูล"],
+    [/แดชบอร์ด|หน้าหลัก|หน้าแรก/gu, "แดชบอร์ด"],
+    [/แช็ต|แชท|chat/gu, "แชท"],
+    [/นัดหมาย|นัดหมอ|นัดแพทย์|นัดคุณหมอ/gu, "นัดหมอ"],
+    [/ความดันโลหิต|วัดความดัน|เช็คความดัน|ความดัน/gu, "สแกนความดัน"],
   ];
 
   for (const [pattern, replacement] of replacements) {
@@ -145,6 +155,77 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     };
   }
 
+  if (
+    includesAny(text, [
+      "ไปหน้าแดชบอร์ด",
+      "เข้าแดชบอร์ด",
+      "กลับหน้าแดชบอร์ด",
+      "ไปหน้าหลัก",
+      "กลับหน้าหลัก",
+      "ไปหน้าแรก",
+      "แดชบอร์ดผู้พิการ",
+    ])
+  ) {
+    return {
+      type: "action",
+      actionId: "go-patient-dashboard",
+      label: "ไปหน้าแดชบอร์ดผู้พิการ",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (
+    includesAny(text, [
+      "ไปหน้าแฟ้มข้อมูล",
+      "เปิดแฟ้มข้อมูล",
+      "ไปโปรไฟล์",
+      "ไปหน้าโปรไฟล์",
+      "แฟ้มข้อมูลของฉัน",
+    ])
+  ) {
+    return {
+      type: "action",
+      actionId: "go-profile-page",
+      label: "ไปหน้าแฟ้มข้อมูลของฉัน",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (
+    includesAny(text, [
+      "ไปหน้าสแกนยา",
+      "เปิดหน้าสแกนยา",
+      "ไปสแกนยา",
+      "เปิดสแกนยา",
+      "หน้า สแกนยา",
+    ])
+  ) {
+    return {
+      type: "action",
+      actionId: "go-medicine-scan-page",
+      label: "ไปหน้าสแกนยา",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (
+    includesAny(text, [
+      "ไปหน้าสแกนความดัน",
+      "เปิดหน้าสแกนความดัน",
+      "ไปสแกนความดัน",
+      "เปิดสแกนความดัน",
+      "ไปหน้าวัดความดัน",
+      "เปิดหน้าวัดความดัน",
+    ])
+  ) {
+    return {
+      type: "action",
+      actionId: "go-bp-scan-page",
+      label: "ไปหน้าสแกนความดัน",
+      requiresConfirmation: false,
+    };
+  }
+
   if (looksLikeRegisterCommand || includesAny(text, ["สร้างบัญชี"])) {
     return {
       type: "action",
@@ -205,7 +286,16 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     };
   }
 
-  if (includesAny(text, ["ส่งคำขอนัด", "ส่งนัดหมอ", "นัดหมอ"])) {
+  if (
+    includesAny(text, [
+      "ส่งคำขอนัด",
+      "ส่งนัดหมอ",
+      "ส่งคำนัด",
+      "ขอส่งนัด",
+      "ส่งคำขอนัดหมาย",
+      "ส่งคำขอนัดแพทย์",
+    ])
+  ) {
     return {
       type: "action",
       actionId: "send-appointment-request",
@@ -241,7 +331,17 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     };
   }
 
-  if (includesAny(text, ["แชทหมอ", "คุยหมอ", "หน้าคุยหมอ"])) {
+  if (
+    includesAny(text, [
+      "แชทหมอ",
+      "คุยหมอ",
+      "หน้าคุยหมอ",
+      "คุยกับหมอ",
+      "คุยกับคุณหมอ",
+      "แชทกับหมอ",
+      "แชทคุณหมอ",
+    ])
+  ) {
     return {
       type: "navigate",
       sectionId: "chat",
@@ -250,7 +350,16 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     };
   }
 
-  if (includesAny(text, ["นัดหมอ", "ไปหน้านัดหมอ", "หน้าการนัดหมาย"])) {
+  if (
+    includesAny(text, [
+      "นัดหมอ",
+      "ไปหน้านัดหมอ",
+      "หน้าการนัดหมาย",
+      "เปิดหน้านัดหมอ",
+      "นัดหมายแพทย์",
+      "ไปหน้านัดหมาย",
+    ])
+  ) {
     return {
       type: "navigate",
       sectionId: "appointment",
@@ -259,7 +368,7 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     };
   }
 
-  if (includesAny(text, ["สแกนยา", "ไปหน้าสแกนยา"])) {
+  if (includesAny(text, ["สแกนยา", "ไปหน้าสแกนยา", "เปิดสแกนยา"])) {
     return {
       type: "navigate",
       sectionId: "medicine",
@@ -268,7 +377,16 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     };
   }
 
-  if (includesAny(text, ["สแกนความดัน", "วัดความดัน", "หน้าความดัน"])) {
+  if (
+    includesAny(text, [
+      "สแกนความดัน",
+      "วัดความดัน",
+      "หน้าความดัน",
+      "เช็คความดัน",
+      "วัดค่าความดัน",
+      "สแกนค่าเลือดดัน",
+    ])
+  ) {
     return {
       type: "navigate",
       sectionId: "blood-pressure",

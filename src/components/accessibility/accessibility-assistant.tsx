@@ -141,6 +141,10 @@ const actionSelectorByIntent: Record<Extract<VoiceIntent, { type: "action" }>["a
   "go-login": "[data-voice-action='go-login-page']",
   "describe-login-fields": "",
   "describe-register-fields": "",
+  "go-patient-dashboard": "[data-voice-action='go-patient-dashboard']",
+  "go-medicine-scan-page": "[data-voice-action='go-medicine-scan-page']",
+  "go-bp-scan-page": "[data-voice-action='go-bp-scan-page']",
+  "go-profile-page": "[data-voice-action='go-profile-page']",
 };
 
 const fieldSelectorByIntent: Partial<
@@ -490,7 +494,7 @@ export const AccessibilityAssistant = () => {
           ? currentFlags.isRegisterRoute
             ? "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สมัครสมาชิก วิธีสมัครสมาชิก หรือ เข้าสู่ระบบ"
             : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก"
-          : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา นัดหมอ หรือ แชทหมอ";
+          : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา สแกนความดัน นัดหมอ หรือ แชทหมอ";
 
         if (noIntentStreakRef.current < 2) {
           setVoiceStatusText("กำลังฟังอยู่ ลองพูดช้าๆ อีกครั้ง");
@@ -563,7 +567,7 @@ export const AccessibilityAssistant = () => {
             ? dynamicFlags.isRegisterRoute
               ? "ยังฟังไม่ชัด ลองพูดช้าๆ ว่า สมัครสมาชิก หรือ เข้าสู่ระบบ"
               : "ยังฟังไม่ชัด ลองพูดช้าๆ ว่า เข้าสู่ระบบ หรือ สมัครสมาชิก"
-            : "ยังฟังไม่ชัด ลองพูดสั้นๆ เช่น สแกนยา นัดหมอ หรือ แชทหมอ";
+            : "ยังฟังไม่ชัด ลองพูดสั้นๆ เช่น สแกนยา สแกนความดัน นัดหมอ หรือ แชทหมอ";
           setVoiceStatusText(retryMessage);
           speakGuidanceWithCooldown(retryMessage, 4500);
           noMatchStreakRef.current = 0;
@@ -596,7 +600,7 @@ export const AccessibilityAssistant = () => {
       ? currentFlags.isRegisterRoute
         ? "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สมัครสมาชิก หรือ วิธีสมัครสมาชิก"
         : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น เข้าสู่ระบบ หรือ วิธีเข้าสู่ระบบ"
-      : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา นัดหมอ แชทหมอ";
+      : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา สแกนความดัน นัดหมอ แชทหมอ";
     setVoiceStatusText(startMessage);
     speakFeedback(startMessage, true);
     window.setTimeout(() => {

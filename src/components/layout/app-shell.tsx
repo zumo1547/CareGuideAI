@@ -24,6 +24,15 @@ const navByRole: Record<Role, { href: string; label: string }[]> = {
   admin: [{ href: "/app/admin", label: "หน้าแอดมิน" }],
 };
 
+const voiceActionByRoleAndHref: Partial<Record<Role, Record<string, string>>> = {
+  patient: {
+    "/app/patient": "go-patient-dashboard",
+    "/app/scan/medicine": "go-medicine-scan-page",
+    "/app/scan/blood-pressure": "go-bp-scan-page",
+    "/app/profile": "go-profile-page",
+  },
+};
+
 interface AppShellProps {
   role: Role;
   fullName: string;
@@ -54,6 +63,7 @@ export const AppShell = ({ role, fullName, children }: AppShellProps) => (
             href={item.href}
             className="rounded-full border px-4 py-1.5 text-sm transition-colors hover:bg-accent"
             aria-label={item.label}
+            data-voice-action={voiceActionByRoleAndHref[role]?.[item.href]}
           >
             {item.label}
           </Link>
