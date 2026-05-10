@@ -60,6 +60,8 @@ const normalizeIntentText = (value: string) => {
     [/สมัครสมาชิค|สมัครสมาชีก|สมัครสมาขิก|สมัครสมาขี/gu, "สมัครสมาชิก"],
     [/ลงทะเบีน|ลงทะเบียน|ลงทะเบียน/gu, "ลงทะเบียน"],
     [/แสกน|สแกรน|สะแกน|สแกน/gu, "สแกน"],
+    [/แจ้งเดือน|แจ้งเดอน|แจงเดอน|แจงเดือน|แจ้งเตอืน|แจงเตอน/gu, "แจ้งเตือน"],
+    [/ล้าสุด|ลาสุด|ล่าสุดๆ|ล่ะสุด/gu, "ล่าสุด"],
     [/แฟ้มข้อมูล|แฟ้ม|โปรไฟล์|โพรไฟล์/gu, "แฟ้มข้อมูล"],
     [/แดชบอร์ด|หน้าหลัก|หน้าแรก/gu, "แดชบอร์ด"],
     [/แช็ต|แชท|chat/gu, "แชท"],
@@ -76,7 +78,10 @@ const normalizeIntentText = (value: string) => {
 
 export const normalizeSpeechText = stripNoise;
 
-const includesAny = (text: string, keywords: string[]) => keywords.some((keyword) => text.includes(keyword));
+const includesAny = (text: string, keywords: string[]) => {
+  const normalizedText = stripNoise(text);
+  return keywords.some((keyword) => normalizedText.includes(stripNoise(keyword)));
+};
 
 const normalizeConfirmationSpeech = (value: string) =>
   stripNoise(value)
@@ -326,8 +331,15 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
   if (
     includesAny(text, [
       "ดูการแจ้งเตือนล่าสุด",
+      "ไปดูการแจ้งเตือนล่าสุด",
+      "ดูแจ้งเตือนล่าสุด",
+      "อ่านแจ้งเตือนล่าสุด",
+      "อ่านรายการแจ้งเตือนล่าสุด",
+      "รายการแจ้งเตือนล่าสุด",
+      "ดูเตือนล่าสุด",
       "อ่านการแจ้งเตือนล่าสุด",
       "อ่านตารางยา",
+      "ดูตารางยา",
       "อ่านตารางยาและการแจ้งเตือนล่าสุด",
       "สรุปการแจ้งเตือนล่าสุด",
       "อ่านยาและแจ้งเตือนล่าสุด",
