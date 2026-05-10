@@ -203,10 +203,10 @@ export const AccessibilityAssistant = () => {
   const [voiceStatusText, setVoiceStatusText] = useState(
     "โหมดเสียงยังไม่เริ่ม กดปุ่มเริ่มใช้งานด้วยเสียง",
   );
-  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
 
   const shouldRunVoiceLoopRef = useRef(false);
   const voiceEnabledRef = useRef(prefs.voiceEnabled);
+  const pendingConfirmationRef = useRef<PendingConfirmation | null>(null);
   const noMatchStreakRef = useRef(0);
   const noIntentStreakRef = useRef(0);
   const lastGuidanceSpokenAtRef = useRef(0);
@@ -261,7 +261,7 @@ export const AccessibilityAssistant = () => {
       noIntentStreakRef.current = 0;
       setVoiceModeEnabled(false);
       setVoiceListening(false);
-      setPendingConfirmation(null);
+      pendingConfirmationRef.current = null;
       stopThaiSpeech();
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(VOICE_AUTOSTART_KEY);
@@ -296,8 +296,22 @@ export const AccessibilityAssistant = () => {
     const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
     if (!field) return false;
     field.focus({ preventScroll: true });
-    field.value = value;
-    field.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const isTextArea = field instanceof HTMLTextAreaElement;
+    const descriptor = Object.getOwnPropertyDescriptor(
+      isTextArea ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+      "value",
+    );
+    descriptor?.set?.call(field, value);
+    if (!descriptor?.set) {
+      field.value = value;
+    }
+
+    const inputEvent =
+      typeof InputEvent !== "undefined"
+        ? new InputEvent("input", { bubbles: true, data: value })
+        : new Event("input", { bubbles: true });
+    field.dispatchEvent(inputEvent);
     field.dispatchEvent(new Event("change", { bubbles: true }));
     return true;
   }, []);
@@ -359,7 +373,8 @@ export const AccessibilityAssistant = () => {
 
   const queueConfirmation = useCallback(
     (intent: VoiceIntent, prompt: string) => {
-      setPendingConfirmation({ intent, prompt });
+      const nextConfirmation = { intent, prompt };
+      pendingConfirmationRef.current = nextConfirmation;
       setVoiceStatusText(prompt);
       speakFeedback(`${prompt} ตอบว่า ใช่ ไม่ หรือ ทบทวน`, true);
       pauseListeningUntilRef.current = Date.now() + estimatePromptLeadMs(prompt);
@@ -677,10 +692,19 @@ export const AccessibilityAssistant = () => {
 
       setVoiceStatusText(`ได้ยิน: ${normalized}`);
 
-      if (pendingConfirmation) {
+      const activePendingConfirmation = pendingConfirmationRef.current;
+      if (activePendingConfirmation) {
+        if (isNegativeSpeech(normalized)) {
+          pendingConfirmationRef.current = null;
+          noIntentStreakRef.current = 0;
+          setVoiceStatusText("ยกเลิกคำสั่งแล้ว");
+          speakFeedback("ยกเลิกคำสั่งแล้ว");
+          return;
+        }
+
         if (isAffirmativeSpeech(normalized)) {
-          const confirmedIntent = pendingConfirmation.intent;
-          setPendingConfirmation(null);
+          const confirmedIntent = activePendingConfirmation.intent;
+          pendingConfirmationRef.current = null;
           noIntentStreakRef.current = 0;
           setVoiceStatusText("ยืนยันคำสั่งแล้ว กำลังดำเนินการ");
           speakFeedback("ยืนยันแล้ว กำลังดำเนินการ");
@@ -688,19 +712,12 @@ export const AccessibilityAssistant = () => {
           return;
         }
 
-        if (isNegativeSpeech(normalized)) {
-          setPendingConfirmation(null);
-          noIntentStreakRef.current = 0;
-          setVoiceStatusText("ยกเลิกคำสั่งแล้ว");
-          speakFeedback("ยกเลิกคำสั่งแล้ว");
-          return;
-        }
-
         if (isRepeatSpeech(normalized)) {
           noIntentStreakRef.current = 0;
           setVoiceStatusText("กำลังทวนคำสั่ง");
-          speakFeedback(pendingConfirmation.prompt, true);
-          pauseListeningUntilRef.current = Date.now() + estimatePromptLeadMs(pendingConfirmation.prompt);
+          speakFeedback(activePendingConfirmation.prompt, true);
+          pauseListeningUntilRef.current =
+            Date.now() + estimatePromptLeadMs(activePendingConfirmation.prompt);
           return;
         }
 
@@ -746,7 +763,6 @@ export const AccessibilityAssistant = () => {
       executeIntent,
       queueConfirmation,
       speakGuidanceWithCooldown,
-      pendingConfirmation,
       speakFeedback,
     ],
   );
@@ -777,9 +793,10 @@ export const AccessibilityAssistant = () => {
       const abortController = new AbortController();
       recognitionAbortRef.current = abortController;
       const currentFlags = routeFlagsRef.current;
+      const hasPendingConfirmation = Boolean(pendingConfirmationRef.current);
       const heard = await listenForSpeechOnce({
-        timeoutMs: pendingConfirmation ? 16_000 : currentFlags.isPreAuthRoute ? 14_000 : 12_500,
-        maxAlternatives: pendingConfirmation ? 6 : 4,
+        timeoutMs: hasPendingConfirmation ? 16_000 : currentFlags.isPreAuthRoute ? 14_000 : 12_500,
+        maxAlternatives: hasPendingConfirmation ? 6 : 4,
         signal: abortController.signal,
       });
       recognitionAbortRef.current = null;
@@ -809,7 +826,7 @@ export const AccessibilityAssistant = () => {
       noMatchStreakRef.current = 0;
       await handleHeardSpeech(heard.text);
     }
-  }, [handleHeardSpeech, pendingConfirmation, speakGuidanceWithCooldown, speakFeedback]);
+  }, [handleHeardSpeech, speakGuidanceWithCooldown, speakFeedback]);
 
   const startVoiceMode = useCallback((options?: StartVoiceModeOptions) => {
     if (options?.forceEnableVoice && !voiceEnabledRef.current) {

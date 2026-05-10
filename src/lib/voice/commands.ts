@@ -99,6 +99,10 @@ export const isAffirmativeSpeech = (text: string) =>
     "ส่งเลย",
     "เริ่มเลย",
     "ยอมรับ",
+    "ครับ",
+    "ค่ะ",
+    "จ้า",
+    "ฮะ",
   ]);
 
 export const isNegativeSpeech = (text: string) =>
