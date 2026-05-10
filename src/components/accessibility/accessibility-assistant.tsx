@@ -440,19 +440,9 @@ export const AccessibilityAssistant = () => {
           .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
         if (parsedMedicationRows.length > 0) {
-          const visibleRows = parsedMedicationRows.slice(0, 4);
-          const lines = visibleRows.map((row, index) => {
-            const dosageText = row.dosage || "-";
-            const timeText = row.time || "-";
-            const statusText = row.status || "-";
-            return `รายการที่ ${index + 1} ${row.medicine} ขนาดยา ${dosageText} เวลา ${timeText} สถานะ ${statusText}`;
-          });
-
-          const suffix =
-            parsedMedicationRows.length > visibleRows.length
-              ? ` และมีเพิ่มเติมอีก ${parsedMedicationRows.length - visibleRows.length} รายการ`
-              : "";
-          medicationSummary = `${lines.join(" ")}${suffix}`;
+          const latestMedication = parsedMedicationRows[0];
+          const activeCount = parsedMedicationRows.filter((row) => row.status === "กำลังใช้งาน").length;
+          medicationSummary = `มียาทั้งหมด ${parsedMedicationRows.length} รายการ ใช้งานอยู่ ${activeCount} รายการ รายการล่าสุดคือ ${latestMedication?.medicine ?? "-"} ขนาดยา ${latestMedication?.dosage || "-"} เวลา ${latestMedication?.time || "-"} สถานะ ${latestMedication?.status || "-"}`;
         }
       }
     }
@@ -490,16 +480,13 @@ export const AccessibilityAssistant = () => {
           .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
         if (parsedReminderRows.length > 0) {
-          const visibleRows = parsedReminderRows.slice(0, 3);
-          const lines = visibleRows.map((row, index) => {
-            return `แจ้งเตือนที่ ${index + 1} เวลา ${row.dueTime} ช่องทาง ${row.channel} สถานะ ${row.status}`;
-          });
+          const latestReminder = parsedReminderRows[0];
+          const pendingCount = parsedReminderRows.filter((row) => row.status === "รอดำเนินการ").length;
+          const sentCount = parsedReminderRows.filter((row) => row.status === "ส่งแล้ว").length;
+          const cancelledCount = parsedReminderRows.filter((row) => row.status === "ยกเลิกแล้ว").length;
+          const failedCount = parsedReminderRows.filter((row) => row.status === "ส่งไม่สำเร็จ").length;
 
-          const suffix =
-            parsedReminderRows.length > visibleRows.length
-              ? ` และมีเพิ่มเติมอีก ${parsedReminderRows.length - visibleRows.length} รายการ`
-              : "";
-          reminderSummary = `${lines.join(" ")}${suffix}`;
+          reminderSummary = `มีรายการแจ้งเตือนทั้งหมด ${parsedReminderRows.length} รายการ รอดำเนินการ ${pendingCount} รายการ ส่งแล้ว ${sentCount} รายการ ยกเลิกแล้ว ${cancelledCount} รายการ ส่งไม่สำเร็จ ${failedCount} รายการ และรายการล่าสุดคือ เวลา ${latestReminder?.dueTime || "-"} ช่องทาง ${latestReminder?.channel || "-"} สถานะ ${latestReminder?.status || "-"}`;
         }
       }
     }

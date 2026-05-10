@@ -1,5 +1,8 @@
 ﻿import { Activity, BellRing, Pill, UserRoundCheck } from "lucide-react";
 
+import { addDays } from "date-fns";
+import { formatInTimeZone } from "date-fns-tz";
+
 import { VoiceModeStartButton } from "@/components/accessibility/voice-mode-start-button";
 import { MedicationPlanForm } from "@/components/patient/medication-plan-form";
 import { MedicationScanner } from "@/components/patient/medication-scanner";
@@ -12,8 +15,171 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/session";
 import { getBmiTrend } from "@/lib/onboarding";
+import { hasTwilioConfig } from "@/lib/reminders/twilio-sms-provider";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { combineDateAndTime, DEFAULT_APP_TIMEZONE, todayInTimeZone } from "@/lib/time";
+
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const REMINDER_BACKFILL_DAYS = 7;
+const REMINDER_BACKFILL_MAX_ROWS = 400;
+
+type PlanRow = {
+  id: string;
+  medicine_id: string;
+  dosage: string;
+  notes: string | null;
+  is_active: boolean;
+  start_date: string | null;
+  end_date: string | null;
+};
+
+type ScheduleRow = {
+  plan_id: string;
+  label: string;
+  time_of_day: string;
+};
+
+type ReminderEventRow = {
+  id: string;
+  due_at: string;
+  channel: string;
+  status: string;
+  provider: string | null;
+};
+
+const toDateOnlyOrNull = (value: string | null | undefined) => {
+  if (!value) return null;
+  return DATE_ONLY_REGEX.test(value) ? value : null;
+};
+
+const hasUpcomingPendingReminder = (events: ReminderEventRow[]) => {
+  const threshold = Date.now() - 60_000;
+  return events.some((event) => {
+    if (event.status !== "pending") return false;
+    const dueTime = new Date(event.due_at).getTime();
+    return Number.isFinite(dueTime) && dueTime > threshold;
+  });
+};
+
+const ensurePatientReminderBackfill = async ({
+  supabase,
+  patientId,
+  plans,
+  schedules,
+}: {
+  supabase: ReturnType<typeof createSupabaseAdminClient>;
+  patientId: string;
+  plans: PlanRow[];
+  schedules: ScheduleRow[];
+}) => {
+  const activePlans = plans.filter((plan) => plan.is_active);
+  if (!activePlans.length) return 0;
+
+  const scheduleByPlan = new Map<string, string[]>();
+  for (const item of schedules) {
+    const list = scheduleByPlan.get(item.plan_id) ?? [];
+    const time24 = item.time_of_day.slice(0, 5);
+    if (time24) {
+      list.push(time24);
+      scheduleByPlan.set(item.plan_id, list);
+    }
+  }
+
+  const plansWithSchedule = activePlans.filter((plan) => (scheduleByPlan.get(plan.id) ?? []).length > 0);
+  if (!plansWithSchedule.length) return 0;
+
+  const now = new Date();
+  const todayIso = todayInTimeZone(DEFAULT_APP_TIMEZONE);
+  const todayAnchor = combineDateAndTime(todayIso, "00:00", DEFAULT_APP_TIMEZONE);
+  const horizonIso = formatInTimeZone(
+    addDays(todayAnchor, REMINDER_BACKFILL_DAYS),
+    DEFAULT_APP_TIMEZONE,
+    "yyyy-MM-dd'T'23:59:59XXX",
+  );
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("reminder_events")
+    .select("plan_id, due_at, channel")
+    .eq("patient_id", patientId)
+    .gte("due_at", new Date(now.getTime() - 60_000).toISOString())
+    .lte("due_at", horizonIso)
+    .limit(5000);
+  if (existingError) return 0;
+
+  const existingKeys = new Set(
+    (existingRows ?? []).map((row) => `${row.plan_id}|${row.due_at}|${row.channel}`),
+  );
+
+  const reminderRows: Array<{
+    patient_id: string;
+    plan_id: string;
+    channel: "sms" | "voice";
+    due_at: string;
+    status: "pending";
+    provider: string;
+  }> = [];
+
+  const smsProvider = hasTwilioConfig() ? "twilio" : "mock-sms";
+
+  for (const plan of plansWithSchedule) {
+    const startDateIso = toDateOnlyOrNull(plan.start_date) ?? todayIso;
+    const endDateIso = toDateOnlyOrNull(plan.end_date);
+    const times = scheduleByPlan.get(plan.id) ?? [];
+
+    for (let dayOffset = 0; dayOffset <= REMINDER_BACKFILL_DAYS; dayOffset += 1) {
+      const date = addDays(todayAnchor, dayOffset);
+      const dateIso = formatInTimeZone(date, DEFAULT_APP_TIMEZONE, "yyyy-MM-dd");
+
+      if (dateIso < startDateIso) continue;
+      if (endDateIso && dateIso > endDateIso) continue;
+
+      for (const time24 of times) {
+        const dueAt = combineDateAndTime(dateIso, time24, DEFAULT_APP_TIMEZONE);
+        if (dueAt.getTime() <= now.getTime() - 60_000) continue;
+        const dueIso = dueAt.toISOString();
+
+        const smsKey = `${plan.id}|${dueIso}|sms`;
+        if (!existingKeys.has(smsKey)) {
+          reminderRows.push({
+            patient_id: patientId,
+            plan_id: plan.id,
+            channel: "sms",
+            due_at: dueIso,
+            status: "pending",
+            provider: smsProvider,
+          });
+          existingKeys.add(smsKey);
+        }
+
+        const voiceKey = `${plan.id}|${dueIso}|voice`;
+        if (!existingKeys.has(voiceKey)) {
+          reminderRows.push({
+            patient_id: patientId,
+            plan_id: plan.id,
+            channel: "voice",
+            due_at: dueIso,
+            status: "pending",
+            provider: "web-tts",
+          });
+          existingKeys.add(voiceKey);
+        }
+
+        if (reminderRows.length >= REMINDER_BACKFILL_MAX_ROWS) break;
+      }
+
+      if (reminderRows.length >= REMINDER_BACKFILL_MAX_ROWS) break;
+    }
+
+    if (reminderRows.length >= REMINDER_BACKFILL_MAX_ROWS) break;
+  }
+
+  if (!reminderRows.length) return 0;
+  const { error: insertError } = await supabase.from("reminder_events").insert(reminderRows);
+  if (insertError) return 0;
+
+  return reminderRows.length;
+};
 
 export default async function PatientDashboardPage() {
   const session = await requireRole(["patient", "admin"]);
@@ -69,6 +235,29 @@ export default async function PatientDashboardPage() {
       .maybeSingle(),
   ]);
 
+  let hydratedReminderEvents = (reminderEvents ?? []) as ReminderEventRow[];
+  const activePlans = ((plans ?? []) as PlanRow[]).filter((plan) => plan.is_active);
+  const scheduleRows = (schedules ?? []) as ScheduleRow[];
+
+  if (activePlans.length && scheduleRows.length && !hasUpcomingPendingReminder(hydratedReminderEvents)) {
+    const inserted = await ensurePatientReminderBackfill({
+      supabase: adminSupabase,
+      patientId: session.userId,
+      plans: (plans ?? []) as PlanRow[],
+      schedules: scheduleRows,
+    });
+
+    if (inserted > 0) {
+      const { data: latestReminderEvents } = await supabase
+        .from("reminder_events")
+        .select("id, due_at, channel, status, provider")
+        .eq("patient_id", session.userId)
+        .order("due_at", { ascending: false })
+        .limit(20);
+      hydratedReminderEvents = (latestReminderEvents ?? []) as ReminderEventRow[];
+    }
+  }
+
   const medicineMap = new Map((medicines ?? []).map((item) => [item.id, item]));
   const linkedDoctorIds = new Set((links ?? []).map((link) => link.doctor_id).filter(Boolean));
   const doctorOptions = (doctorProfiles ?? []).map((doctor) => ({
@@ -82,7 +271,7 @@ export default async function PatientDashboardPage() {
     onboardingProfile?.biological_sex && Number.isFinite(bmiValue) && bmiValue > 0
       ? getBmiTrend(bmiValue, onboardingProfile.biological_sex)
       : null;
-  const reminderSyncKey = (reminderEvents ?? [])
+  const reminderSyncKey = (hydratedReminderEvents ?? [])
     .map((event) => `${event.id}:${event.status}:${event.due_at}`)
     .join("|");
 
@@ -132,7 +321,7 @@ export default async function PatientDashboardPage() {
             <CardDescription>รายการแจ้งเตือนที่รอส่ง</CardDescription>
             <CardTitle className="flex items-center gap-2 text-2xl">
               <BellRing className="h-5 w-5 text-amber-600" />
-              {reminderEvents?.filter((item) => item.status === "pending").length ?? 0}
+              {hydratedReminderEvents?.filter((item) => item.status === "pending").length ?? 0}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -287,7 +476,7 @@ export default async function PatientDashboardPage() {
             <ReminderEventsTable
               key={`patient-reminder-${session.userId}-${reminderSyncKey}`}
               patientId={session.userId}
-              initialEvents={(reminderEvents ?? []).map((event) => ({
+              initialEvents={(hydratedReminderEvents ?? []).map((event) => ({
                 id: event.id,
                 dueAt: event.due_at,
                 channel: event.channel,
