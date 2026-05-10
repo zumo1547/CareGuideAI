@@ -178,7 +178,7 @@ export const ReminderEventsTable = ({
         </div>
       ) : null}
 
-      <Table>
+      <Table data-voice-table="patient-reminder-events">
         <TableHeader>
           <TableRow>
             <TableHead>เวลาแจ้งเตือน</TableHead>

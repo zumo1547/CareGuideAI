@@ -211,7 +211,7 @@ export default async function PatientDashboardPage() {
         </div>
       </section>
 
-      <section>
+      <section data-voice-section="latest-medication-reminders">
         <Card>
           <CardHeader>
             <CardTitle>ตารางยาและการแจ้งเตือนล่าสุด</CardTitle>
@@ -220,7 +220,7 @@ export default async function PatientDashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table data-voice-table="latest-medication-plan">
               <TableHeader>
                 <TableRow>
                   <TableHead>ชื่อยา</TableHead>
@@ -264,7 +264,7 @@ export default async function PatientDashboardPage() {
         </Card>
       </section>
 
-      <section>
+      <section data-voice-section="patient-reminder-events">
         <Card>
           <CardHeader>
             <CardTitle>Reminder Events</CardTitle>

@@ -136,6 +136,7 @@ const sectionIdByIntent: Record<Extract<VoiceIntent, { type: "navigate" }>["sect
   "start-med-camera-scan": "[data-voice-action='start-med-camera-scan']",
   "start-bp-camera-scan": "[data-voice-action='start-bp-camera-scan']",
   "confirm-med-plan": "[data-voice-action='confirm-med-plan']",
+  "read-latest-reminders": "",
   "send-chat-message": "[data-voice-action='send-chat-message']",
   "send-support-request": "[data-voice-action='send-support-request']",
   "send-appointment-request": "[data-voice-action='send-appointment-request']",
@@ -182,6 +183,22 @@ const getErrorAlertText = (element: HTMLElement) => {
     return text;
   }
   return "";
+};
+
+const reminderStatusToThai = (statusText: string) => {
+  const normalized = normalizeText(statusText).toLowerCase();
+  if (!normalized) return "-";
+  if (normalized.includes("active")) return "กำลังใช้งาน";
+  if (normalized.includes("inactive")) return "หยุดใช้งาน";
+  if (normalized.includes("pending")) return "รอดำเนินการ";
+  if (normalized.includes("sent")) return "ส่งแล้ว";
+  if (normalized.includes("cancelled")) return "ยกเลิกแล้ว";
+  if (normalized.includes("failed")) return "ส่งไม่สำเร็จ";
+  if (normalized.includes("รอดำเนินการ")) return "รอดำเนินการ";
+  if (normalized.includes("ส่งแล้ว")) return "ส่งแล้ว";
+  if (normalized.includes("ยกเลิกแล้ว")) return "ยกเลิกแล้ว";
+  if (normalized.includes("ส่งไม่สำเร็จ")) return "ส่งไม่สำเร็จ";
+  return statusText;
 };
 
 export const AccessibilityAssistant = () => {
@@ -382,6 +399,114 @@ export const AccessibilityAssistant = () => {
     [speakFeedback],
   );
 
+  const buildLatestMedicationReminderSpeech = useCallback(() => {
+    const section = document.querySelector<HTMLElement>(
+      "[data-voice-section='latest-medication-reminders']",
+    );
+    if (!section) {
+      return "ยังไม่พบส่วนตารางยาและการแจ้งเตือนล่าสุดในหน้านี้";
+    }
+
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    const medicationRows = Array.from(
+      section.querySelectorAll<HTMLTableRowElement>(
+        "[data-voice-table='latest-medication-plan'] tbody tr",
+      ),
+    );
+
+    let medicationSummary = "ตารางยาล่าสุดยังไม่มีข้อมูล";
+    if (medicationRows.length > 0) {
+      const singleCellText = normalizeText(
+        medicationRows[0]?.querySelectorAll("td").length === 1
+          ? medicationRows[0].textContent ?? ""
+          : "",
+      );
+
+      if (singleCellText.includes("ยังไม่มีแผนยา")) {
+        medicationSummary = "ตอนนี้ยังไม่มีแผนยาในระบบ";
+      } else {
+        const parsedMedicationRows = medicationRows
+          .map((row) => {
+            const cells = row.querySelectorAll<HTMLTableCellElement>("td");
+            if (cells.length < 4) return null;
+            const medicine = normalizeText(cells[0]?.textContent ?? "");
+            const dosage = normalizeText(cells[1]?.textContent ?? "");
+            const time = normalizeText(cells[2]?.textContent ?? "");
+            const status = reminderStatusToThai(normalizeText(cells[3]?.textContent ?? ""));
+            if (!medicine && !dosage && !time) return null;
+            return { medicine, dosage, time, status };
+          })
+          .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+        if (parsedMedicationRows.length > 0) {
+          const visibleRows = parsedMedicationRows.slice(0, 4);
+          const lines = visibleRows.map((row, index) => {
+            const dosageText = row.dosage || "-";
+            const timeText = row.time || "-";
+            const statusText = row.status || "-";
+            return `รายการที่ ${index + 1} ${row.medicine} ขนาดยา ${dosageText} เวลา ${timeText} สถานะ ${statusText}`;
+          });
+
+          const suffix =
+            parsedMedicationRows.length > visibleRows.length
+              ? ` และมีเพิ่มเติมอีก ${parsedMedicationRows.length - visibleRows.length} รายการ`
+              : "";
+          medicationSummary = `${lines.join(" ")}${suffix}`;
+        }
+      }
+    }
+
+    const reminderSection = document.querySelector<HTMLElement>(
+      "[data-voice-section='patient-reminder-events']",
+    );
+    const reminderRows = reminderSection
+      ? Array.from(
+          reminderSection.querySelectorAll<HTMLTableRowElement>(
+            "[data-voice-table='patient-reminder-events'] tbody tr",
+          ),
+        )
+      : [];
+
+    let reminderSummary = "ยังไม่มีรายการแจ้งเตือนล่าสุด";
+    if (reminderRows.length > 0) {
+      const singleCellText = normalizeText(
+        reminderRows[0]?.querySelectorAll("td").length === 1 ? reminderRows[0].textContent ?? "" : "",
+      );
+
+      if (singleCellText.includes("ไม่มีรายการแจ้งเตือน")) {
+        reminderSummary = "ตอนนี้ยังไม่มีรายการแจ้งเตือน";
+      } else {
+        const parsedReminderRows = reminderRows
+          .map((row) => {
+            const cells = row.querySelectorAll<HTMLTableCellElement>("td");
+            if (cells.length < 3) return null;
+            const dueTime = normalizeText(cells[0]?.textContent ?? "");
+            const channel = normalizeText(cells[1]?.textContent ?? "");
+            const status = reminderStatusToThai(normalizeText(cells[2]?.textContent ?? ""));
+            if (!dueTime && !channel && !status) return null;
+            return { dueTime, channel, status };
+          })
+          .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+        if (parsedReminderRows.length > 0) {
+          const visibleRows = parsedReminderRows.slice(0, 3);
+          const lines = visibleRows.map((row, index) => {
+            return `แจ้งเตือนที่ ${index + 1} เวลา ${row.dueTime} ช่องทาง ${row.channel} สถานะ ${row.status}`;
+          });
+
+          const suffix =
+            parsedReminderRows.length > visibleRows.length
+              ? ` และมีเพิ่มเติมอีก ${parsedReminderRows.length - visibleRows.length} รายการ`
+              : "";
+          reminderSummary = `${lines.join(" ")}${suffix}`;
+        }
+      }
+    }
+
+    return `สรุปตารางยาและการแจ้งเตือนล่าสุด ${medicationSummary} และข้อมูล Reminder Events ${reminderSummary}`;
+  }, []);
+
   const runSupportRequestVoiceFlow = useCallback(async () => {
     const intro = "ถึงส่วนแชทหมอแล้ว กรุณาพูดข้อความร้องขอความช่วยเหลือ";
     const spokenText = await captureSpeechText(intro, 18_000);
@@ -558,6 +683,20 @@ export const AccessibilityAssistant = () => {
         return;
       }
 
+      if (intent.actionId === "read-latest-reminders") {
+        if (!currentFlags.isPatientRoute) {
+          const message = "คำสั่งนี้ใช้ได้ในหน้าแดชบอร์ดผู้พิการเท่านั้น";
+          setVoiceStatusText(message);
+          speakFeedback(message, true);
+          return;
+        }
+
+        const speech = buildLatestMedicationReminderSpeech();
+        setVoiceStatusText("กำลังอ่านตารางยาและการแจ้งเตือนล่าสุด");
+        speakFeedback(speech, true);
+        return;
+      }
+
       if (intent.actionId === "voice-compose-support-request") {
         await runSupportRequestVoiceFlow();
         return;
@@ -653,6 +792,7 @@ export const AccessibilityAssistant = () => {
     [
       clickBySelector,
       ensureActionFieldHasContent,
+      buildLatestMedicationReminderSpeech,
       moveToSection,
       queueConfirmation,
       runAppointmentRequestVoiceFlow,

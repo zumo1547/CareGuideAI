@@ -13,6 +13,7 @@ export type VoiceIntent =
         | "start-med-camera-scan"
         | "start-bp-camera-scan"
         | "confirm-med-plan"
+        | "read-latest-reminders"
         | "send-chat-message"
         | "send-support-request"
         | "send-appointment-request"
@@ -319,6 +320,24 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
       actionId: "confirm-med-plan",
       label: "ยืนยันผลยาและบันทึกแผนยา",
       requiresConfirmation: true,
+    };
+  }
+
+  if (
+    includesAny(text, [
+      "ดูการแจ้งเตือนล่าสุด",
+      "อ่านการแจ้งเตือนล่าสุด",
+      "อ่านตารางยา",
+      "อ่านตารางยาและการแจ้งเตือนล่าสุด",
+      "สรุปการแจ้งเตือนล่าสุด",
+      "อ่านยาและแจ้งเตือนล่าสุด",
+    ])
+  ) {
+    return {
+      type: "action",
+      actionId: "read-latest-reminders",
+      label: "อ่านตารางยาและการแจ้งเตือนล่าสุด",
+      requiresConfirmation: false,
     };
   }
 
