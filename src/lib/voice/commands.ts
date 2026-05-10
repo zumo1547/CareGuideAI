@@ -11,10 +11,13 @@ export type VoiceIntent =
       type: "action";
       actionId:
         | "start-med-camera-scan"
+        | "start-bp-camera-scan"
         | "confirm-med-plan"
         | "send-chat-message"
         | "send-support-request"
         | "send-appointment-request"
+        | "voice-compose-support-request"
+        | "voice-compose-appointment-request"
         | "accept-appointment"
         | "decline-appointment"
         | "reschedule-appointment"
@@ -286,6 +289,15 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     };
   }
 
+  if (includesAny(text, ["เริ่มสแกนความดันด้วยกล้อง", "เปิดกล้องสแกนความดัน", "สแกนความดันด้วยกล้อง"])) {
+    return {
+      type: "action",
+      actionId: "start-bp-camera-scan",
+      label: "เริ่มสแกนความดันด้วยกล้อง",
+      requiresConfirmation: true,
+    };
+  }
+
   if (
     includesAny(text, [
       "ส่งคำขอนัด",
@@ -328,6 +340,24 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
       actionId: "reschedule-appointment",
       label: "ส่งคำขอเลื่อนนัดหมาย",
       requiresConfirmation: true,
+    };
+  }
+
+  if (includesAny(text, ["ร้องขอหมอด้วยเสียง", "ขอความช่วยเหลือด้วยเสียง", "ส่งคำร้องด้วยเสียง"])) {
+    return {
+      type: "action",
+      actionId: "voice-compose-support-request",
+      label: "เริ่มส่งคำร้องหาแพทย์ด้วยเสียง",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (includesAny(text, ["นัดหมอด้วยเสียง", "ส่งนัดด้วยเสียง", "ส่งคำขอนัดด้วยเสียง"])) {
+    return {
+      type: "action",
+      actionId: "voice-compose-appointment-request",
+      label: "เริ่มส่งคำขอนัดหมายด้วยเสียง",
+      requiresConfirmation: false,
     };
   }
 

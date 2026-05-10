@@ -126,12 +126,15 @@ const sectionIdByIntent: Record<Extract<VoiceIntent, { type: "navigate" }>["sect
   chat: "voice-section-chat",
 };
 
-const actionSelectorByIntent: Record<Extract<VoiceIntent, { type: "action" }>["actionId"], string> = {
+  const actionSelectorByIntent: Record<Extract<VoiceIntent, { type: "action" }>["actionId"], string> = {
   "start-med-camera-scan": "[data-voice-action='start-med-camera-scan']",
+  "start-bp-camera-scan": "[data-voice-action='start-bp-camera-scan']",
   "confirm-med-plan": "[data-voice-action='confirm-med-plan']",
   "send-chat-message": "[data-voice-action='send-chat-message']",
   "send-support-request": "[data-voice-action='send-support-request']",
   "send-appointment-request": "[data-voice-action='send-appointment-request']",
+  "voice-compose-support-request": "",
+  "voice-compose-appointment-request": "",
   "accept-appointment": "[data-voice-action='appointment-accept']",
   "decline-appointment": "[data-voice-action='appointment-decline']",
   "reschedule-appointment": "[data-voice-action='appointment-reschedule']",
@@ -206,6 +209,7 @@ export const AccessibilityAssistant = () => {
     isLoginRoute,
     isRegisterRoute,
     isPreAuthRoute,
+    isPatientRoute,
   });
   const recognitionAbortRef = useRef<AbortController | null>(null);
   const lastSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
@@ -280,6 +284,49 @@ export const AccessibilityAssistant = () => {
     return true;
   }, []);
 
+  const setFieldValueBySelector = useCallback((selector: string, value: string) => {
+    const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
+    if (!field) return false;
+    field.focus({ preventScroll: true });
+    field.value = value;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    field.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }, []);
+
+  const captureSpeechText = useCallback(
+    async (prompt: string, timeoutMs = 14_000) => {
+      if (!shouldRunVoiceLoopRef.current || !voiceEnabledRef.current) {
+        return null;
+      }
+
+      setVoiceStatusText(prompt);
+      speakFeedback(prompt, true);
+      setVoiceListening(true);
+      const heard = await listenForSpeechOnce({
+        timeoutMs,
+        maxAlternatives: 4,
+      });
+      setVoiceListening(false);
+
+      const transcript = normalizeText(heard.text);
+      if (!transcript) {
+        const retryMessage = "ยังไม่ได้ยินข้อความชัดเจน กรุณาลองสั่งใหม่อีกครั้ง";
+        setVoiceStatusText(retryMessage);
+        speakFeedback(retryMessage, true);
+        return null;
+      }
+
+      if (isVoiceModeStopSpeech(transcript)) {
+        deactivateVoiceMode(true);
+        return null;
+      }
+
+      return transcript;
+    },
+    [deactivateVoiceMode, speakFeedback],
+  );
+
   const moveToSection = useCallback(
     (sectionId: string) => {
       const section = document.getElementById(sectionId);
@@ -299,8 +346,96 @@ export const AccessibilityAssistant = () => {
     [router],
   );
 
+  const queueConfirmation = useCallback(
+    (intent: VoiceIntent, prompt: string) => {
+      setPendingConfirmation({ intent, prompt });
+      setVoiceStatusText(prompt);
+      speakFeedback(`${prompt} ตอบว่า ใช่ ไม่ หรือ ทบทวน`, true);
+    },
+    [speakFeedback],
+  );
+
+  const runSupportRequestVoiceFlow = useCallback(async () => {
+    const intro = "ถึงส่วนแชทหมอแล้ว กรุณาพูดข้อความร้องขอความช่วยเหลือ";
+    const spokenText = await captureSpeechText(intro, 18_000);
+    if (!spokenText) {
+      return;
+    }
+
+    const fillOk = setFieldValueBySelector("[data-voice-field='support-request-message']", spokenText);
+    if (!fillOk) {
+      const message = "ยังไม่พบช่องข้อความคำร้องหาแพทย์";
+      setVoiceStatusText(message);
+      speakFeedback(message, true);
+      return;
+    }
+
+    const confirmIntent: VoiceIntent = {
+      type: "action",
+      actionId: "send-support-request",
+      label: "ส่งคำร้องขอความช่วยเหลือถึงคุณหมอ",
+      requiresConfirmation: true,
+    };
+    queueConfirmation(confirmIntent, `ต้องการส่งคำร้องถึงคุณหมอ ข้อความว่า ${spokenText} ใช่ไหม`);
+  }, [captureSpeechText, queueConfirmation, setFieldValueBySelector, speakFeedback]);
+
+  const runAppointmentRequestVoiceFlow = useCallback(async () => {
+    const intro = "ถึงส่วนนัดหมอแล้ว กรุณาพูดอาการหรือเหตุผลที่ต้องการนัดพบแพทย์";
+    const spokenText = await captureSpeechText(intro, 18_000);
+    if (!spokenText) {
+      return;
+    }
+
+    const fillOk = setFieldValueBySelector("[data-voice-field='appointment-request-note']", spokenText);
+    if (!fillOk) {
+      const message = "ยังไม่พบช่องข้อความคำขอนัดหมาย";
+      setVoiceStatusText(message);
+      speakFeedback(message, true);
+      return;
+    }
+
+    const confirmIntent: VoiceIntent = {
+      type: "action",
+      actionId: "send-appointment-request",
+      label: "ส่งคำขอนัดหมายถึงคุณหมอ",
+      requiresConfirmation: true,
+    };
+    queueConfirmation(confirmIntent, `ต้องการส่งคำขอนัดหมาย ข้อความว่า ${spokenText} ใช่ไหม`);
+  }, [captureSpeechText, queueConfirmation, setFieldValueBySelector, speakFeedback]);
+
+  const ensureActionFieldHasContent = useCallback(
+    async (actionId: Extract<VoiceIntent, { type: "action" }>["actionId"]) => {
+      const fieldSelector = fieldSelectorByIntent[actionId];
+      if (!fieldSelector) return true;
+
+      const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(fieldSelector);
+      if (!field) return false;
+
+      const currentValue = normalizeText(field.value ?? "");
+      if (currentValue.length > 0) return true;
+
+      const promptByAction: Partial<Record<typeof actionId, string>> = {
+        "send-chat-message": "กรุณาพูดข้อความที่ต้องการส่งหาคุณหมอ",
+        "send-support-request": "กรุณาพูดข้อความคำร้องขอความช่วยเหลือ",
+        "send-appointment-request": "กรุณาพูดอาการหรือเหตุผลที่ต้องการนัดหมาย",
+        "accept-appointment": "หากต้องการส่งข้อความถึงคุณหมอ กรุณาพูดได้เลย",
+        "decline-appointment": "กรุณาพูดเหตุผลการปฏิเสธนัด",
+        "reschedule-appointment": "กรุณาพูดเหตุผลการขอเลื่อนนัด",
+      };
+
+      const spokenText = await captureSpeechText(
+        promptByAction[actionId] ?? "กรุณาพูดข้อความ",
+        18_000,
+      );
+      if (!spokenText) return false;
+
+      return setFieldValueBySelector(fieldSelector, spokenText);
+    },
+    [captureSpeechText, setFieldValueBySelector],
+  );
+
   const executeIntent = useCallback(
-    (intent: VoiceIntent) => {
+    async (intent: VoiceIntent) => {
       const currentFlags = routeFlagsRef.current;
       if (intent.type === "navigate") {
         if (currentFlags.isPreAuthRoute) {
@@ -321,6 +456,40 @@ export const AccessibilityAssistant = () => {
           setVoiceStatusText(`กำลังเปิดหน้าเพื่อ ${intent.label}`);
           speakFeedback(`กำลังเปิดหน้าเพื่อ ${intent.label}`);
         }
+
+        if (currentFlags.isPatientRoute) {
+          if (intent.sectionId === "medicine") {
+            const followIntent: VoiceIntent = {
+              type: "action",
+              actionId: "start-med-camera-scan",
+              label: "เริ่มสแกนยาด้วยกล้อง",
+              requiresConfirmation: true,
+            };
+            queueConfirmation(followIntent, "ถึงส่วนสแกนยาแล้ว ต้องการเริ่มสแกนด้วยกล้องเลยไหม");
+            return;
+          }
+
+          if (intent.sectionId === "blood-pressure") {
+            const followIntent: VoiceIntent = {
+              type: "action",
+              actionId: "start-bp-camera-scan",
+              label: "เริ่มสแกนความดันด้วยกล้อง",
+              requiresConfirmation: true,
+            };
+            queueConfirmation(followIntent, "ถึงส่วนสแกนความดันแล้ว ต้องการเริ่มสแกนด้วยกล้องเลยไหม");
+            return;
+          }
+
+          if (intent.sectionId === "chat") {
+            await runSupportRequestVoiceFlow();
+            return;
+          }
+
+          if (intent.sectionId === "appointment") {
+            await runAppointmentRequestVoiceFlow();
+            return;
+          }
+        }
         return;
       }
 
@@ -331,6 +500,9 @@ export const AccessibilityAssistant = () => {
           "send-chat-message",
           "send-support-request",
           "send-appointment-request",
+          "start-bp-camera-scan",
+          "voice-compose-support-request",
+          "voice-compose-appointment-request",
           "accept-appointment",
           "decline-appointment",
           "reschedule-appointment",
@@ -356,6 +528,16 @@ export const AccessibilityAssistant = () => {
           "การสมัครสมาชิก ให้กรอก 1 ชื่อ นามสกุล 2 อีเมล 3 เบอร์โทรศัพท์ 4 รหัสผ่าน 5 ประเภทผู้ใช้งาน แล้วพูดว่า สมัครสมาชิก";
         setVoiceStatusText(guide);
         speakFeedback(guide, true);
+        return;
+      }
+
+      if (intent.actionId === "voice-compose-support-request") {
+        await runSupportRequestVoiceFlow();
+        return;
+      }
+
+      if (intent.actionId === "voice-compose-appointment-request") {
+        await runAppointmentRequestVoiceFlow();
         return;
       }
 
@@ -408,6 +590,30 @@ export const AccessibilityAssistant = () => {
       }
 
       const selector = actionSelectorByIntent[intent.actionId];
+      if (!selector) {
+        setVoiceStatusText(`ยังไม่พบคำสั่งที่ทำงานได้สำหรับ ${intent.label}`);
+        speakFeedback(`ยังไม่พบคำสั่งที่ทำงานได้สำหรับ ${intent.label}`);
+        return;
+      }
+
+      const shouldAutoCaptureField = new Set([
+        "send-chat-message",
+        "send-support-request",
+        "send-appointment-request",
+        "accept-appointment",
+        "decline-appointment",
+        "reschedule-appointment",
+      ]);
+      if (shouldAutoCaptureField.has(intent.actionId)) {
+        const isReady = await ensureActionFieldHasContent(intent.actionId);
+        if (!isReady) {
+          const message = "ยังไม่พร้อมส่งคำสั่งนี้ กรุณาลองพูดข้อความอีกครั้ง";
+          setVoiceStatusText(message);
+          speakFeedback(message, true);
+          return;
+        }
+      }
+
       const ok = clickBySelector(selector);
       if (ok) {
         setVoiceStatusText(`ดำเนินการแล้ว: ${intent.label}`);
@@ -419,7 +625,11 @@ export const AccessibilityAssistant = () => {
     },
     [
       clickBySelector,
+      ensureActionFieldHasContent,
       moveToSection,
+      queueConfirmation,
+      runAppointmentRequestVoiceFlow,
+      runSupportRequestVoiceFlow,
       speakFeedback,
     ],
   );
@@ -462,7 +672,7 @@ export const AccessibilityAssistant = () => {
           noIntentStreakRef.current = 0;
           setVoiceStatusText("ยืนยันคำสั่งแล้ว กำลังดำเนินการ");
           speakFeedback("ยืนยันแล้ว กำลังดำเนินการ");
-          executeIntent(confirmedIntent);
+          await executeIntent(confirmedIntent);
           return;
         }
 
@@ -516,7 +726,7 @@ export const AccessibilityAssistant = () => {
         return;
       }
 
-      executeIntent(intent);
+      await executeIntent(intent);
     },
     [
       buildConfirmationPrompt,
@@ -627,8 +837,9 @@ export const AccessibilityAssistant = () => {
       isLoginRoute,
       isRegisterRoute,
       isPreAuthRoute,
+      isPatientRoute,
     };
-  }, [isHomeRoute, isLoginRoute, isRegisterRoute, isPreAuthRoute]);
+  }, [isHomeRoute, isLoginRoute, isRegisterRoute, isPreAuthRoute, isPatientRoute]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;

@@ -1125,6 +1125,8 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
           <Button
             onClick={() => void startCameraScan()}
             disabled={!isCameraSupported || isScanning || cameraState === "requesting"}
+            aria-label="เริ่มสแกนความดันด้วยกล้อง"
+            data-voice-action="start-bp-camera-scan"
           >
             {cameraState === "requesting" ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
