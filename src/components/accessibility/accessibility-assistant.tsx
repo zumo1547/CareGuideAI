@@ -67,6 +67,12 @@ const DEFAULT_PREFS: AccessibilityPrefs = {
 };
 
 const normalizeText = (value: string) => value.replace(/\s+/g, " ").trim();
+const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+const estimatePromptLeadMs = (text: string) => {
+  const base = 800;
+  const byLength = Math.min(2200, Math.max(0, text.length * 22));
+  return base + byLength;
+};
 
 const readInitialPrefs = (): AccessibilityPrefs => {
   if (typeof window === "undefined") return DEFAULT_PREFS;
@@ -204,6 +210,7 @@ export const AccessibilityAssistant = () => {
   const noMatchStreakRef = useRef(0);
   const noIntentStreakRef = useRef(0);
   const lastGuidanceSpokenAtRef = useRef(0);
+  const pauseListeningUntilRef = useRef(0);
   const routeFlagsRef = useRef({
     isHomeRoute,
     isLoginRoute,
@@ -240,6 +247,7 @@ export const AccessibilityAssistant = () => {
       }
       lastGuidanceSpokenAtRef.current = now;
       speakFeedback(text, true);
+      pauseListeningUntilRef.current = Date.now() + estimatePromptLeadMs(text);
     },
     [speakFeedback],
   );
@@ -302,10 +310,13 @@ export const AccessibilityAssistant = () => {
 
       setVoiceStatusText(prompt);
       speakFeedback(prompt, true);
+      const leadMs = estimatePromptLeadMs(prompt);
+      pauseListeningUntilRef.current = Date.now() + leadMs;
+      await sleep(leadMs);
       setVoiceListening(true);
       const heard = await listenForSpeechOnce({
         timeoutMs,
-        maxAlternatives: 4,
+        maxAlternatives: 6,
       });
       setVoiceListening(false);
 
@@ -351,6 +362,7 @@ export const AccessibilityAssistant = () => {
       setPendingConfirmation({ intent, prompt });
       setVoiceStatusText(prompt);
       speakFeedback(`${prompt} ตอบว่า ใช่ ไม่ หรือ ทบทวน`, true);
+      pauseListeningUntilRef.current = Date.now() + estimatePromptLeadMs(prompt);
     },
     [speakFeedback],
   );
@@ -688,11 +700,13 @@ export const AccessibilityAssistant = () => {
           noIntentStreakRef.current = 0;
           setVoiceStatusText("กำลังทวนคำสั่ง");
           speakFeedback(pendingConfirmation.prompt, true);
+          pauseListeningUntilRef.current = Date.now() + estimatePromptLeadMs(pendingConfirmation.prompt);
           return;
         }
 
         setVoiceStatusText("กรุณาตอบ ใช่ ไม่ หรือ ทบทวน");
         speakFeedback("กรุณาตอบ ใช่ ไม่ หรือ ทบทวน");
+        pauseListeningUntilRef.current = Date.now() + estimatePromptLeadMs("กรุณาตอบ ใช่ ไม่ หรือ ทบทวน");
         return;
       }
 
@@ -720,9 +734,7 @@ export const AccessibilityAssistant = () => {
       noIntentStreakRef.current = 0;
       if (intent.requiresConfirmation) {
         const prompt = buildConfirmationPrompt(intent);
-        setPendingConfirmation({ intent, prompt });
-        setVoiceStatusText(prompt);
-        speakFeedback(`${prompt} ตอบว่า ใช่ ไม่ หรือ ทบทวน`, true);
+        queueConfirmation(intent, prompt);
         return;
       }
 
@@ -732,6 +744,7 @@ export const AccessibilityAssistant = () => {
       buildConfirmationPrompt,
       deactivateVoiceMode,
       executeIntent,
+      queueConfirmation,
       speakGuidanceWithCooldown,
       pendingConfirmation,
       speakFeedback,
@@ -752,13 +765,21 @@ export const AccessibilityAssistant = () => {
     }
 
     while (shouldRunVoiceLoopRef.current) {
+      const now = Date.now();
+      if (pauseListeningUntilRef.current > now) {
+        await sleep(pauseListeningUntilRef.current - now);
+        if (!shouldRunVoiceLoopRef.current) {
+          break;
+        }
+      }
+
       setVoiceListening(true);
       const abortController = new AbortController();
       recognitionAbortRef.current = abortController;
       const currentFlags = routeFlagsRef.current;
       const heard = await listenForSpeechOnce({
-        timeoutMs: currentFlags.isPreAuthRoute ? 12_000 : 10_500,
-        maxAlternatives: 3,
+        timeoutMs: pendingConfirmation ? 16_000 : currentFlags.isPreAuthRoute ? 14_000 : 12_500,
+        maxAlternatives: pendingConfirmation ? 6 : 4,
         signal: abortController.signal,
       });
       recognitionAbortRef.current = null;
@@ -788,7 +809,7 @@ export const AccessibilityAssistant = () => {
       noMatchStreakRef.current = 0;
       await handleHeardSpeech(heard.text);
     }
-  }, [handleHeardSpeech, speakGuidanceWithCooldown, speakFeedback]);
+  }, [handleHeardSpeech, pendingConfirmation, speakGuidanceWithCooldown, speakFeedback]);
 
   const startVoiceMode = useCallback((options?: StartVoiceModeOptions) => {
     if (options?.forceEnableVoice && !voiceEnabledRef.current) {

@@ -77,14 +77,52 @@ export const normalizeSpeechText = stripNoise;
 
 const includesAny = (text: string, keywords: string[]) => keywords.some((keyword) => text.includes(keyword));
 
+const normalizeConfirmationSpeech = (value: string) =>
+  stripNoise(value)
+    .replace(/ไช่|ใช่ๆ|ช่าย|ใช่จ้า|ใช่ครับ|ใช่ค่ะ|ใช้|ใช/gu, "ใช่")
+    .replace(/โอเค|โอเคครับ|โอเคค่ะ|โอเคคับ|โอเคคะ/gu, "โอเค")
+    .replace(/ยืนยันเลย|ยืนยันได้เลย|ตกลงครับ|ตกลงค่ะ/gu, "ยืนยัน")
+    .replace(/ไม่ใช่|ไม่โอเค|ไม่เอา|ไม่ครับ|ไม่ค่ะ|โน|no/gu, "ไม่")
+    .replace(/ทบทวนอีกครั้ง|ทวนอีกครั้ง|ทวนอีกที|พูดอีกครั้ง|พูดใหม่|ขออีกที|ขอทวน|ทวน/gu, "ทบทวน")
+    .replace(/\s+/gu, " ")
+    .trim();
+
 export const isAffirmativeSpeech = (text: string) =>
-  includesAny(stripNoise(text), ["ใช่", "ยืนยัน", "ตกลง", "โอเค", "ถูกต้อง", "ได้"]);
+  includesAny(normalizeConfirmationSpeech(text), [
+    "ใช่",
+    "ยืนยัน",
+    "ตกลง",
+    "โอเค",
+    "ถูกต้อง",
+    "ได้",
+    "ไปต่อ",
+    "ส่งเลย",
+    "เริ่มเลย",
+    "ยอมรับ",
+  ]);
 
 export const isNegativeSpeech = (text: string) =>
-  includesAny(stripNoise(text), ["ไม่", "ยกเลิก", "หยุด", "ไม่ใช่", "ไม่เอา"]);
+  includesAny(normalizeConfirmationSpeech(text), [
+    "ไม่",
+    "ยกเลิก",
+    "หยุด",
+    "ไม่เอา",
+    "ไม่ต้อง",
+    "ปฏิเสธ",
+    "ยกเลิกไป",
+  ]);
 
 export const isRepeatSpeech = (text: string) =>
-  includesAny(stripNoise(text), ["ทบทวน", "ทวน", "พูดอีกครั้ง", "อีกครั้ง", "repeat"]);
+  includesAny(normalizeConfirmationSpeech(text), [
+    "ทบทวน",
+    "พูดอีกครั้ง",
+    "อีกครั้ง",
+    "repeat",
+    "ขอใหม่",
+    "อ่านใหม่",
+    "ไม่ทัน",
+    "ทวนคำสั่ง",
+  ]);
 
 export const isVoiceModeStopSpeech = (text: string) =>
   includesAny(stripNoise(text), [
