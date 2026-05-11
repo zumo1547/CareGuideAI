@@ -70,6 +70,8 @@ interface ReminderRow {
   channel: string;
   status: string;
   provider: string | null;
+  cancelled_at: string | null;
+  sent_at: string | null;
 }
 
 interface BloodPressureRow {
@@ -279,18 +281,18 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
           sessionRead: () =>
             supabase
               .from("reminder_events")
-              .select("id, due_at, channel, status, provider")
+              .select("id, due_at, channel, status, provider, cancelled_at, sent_at")
               .eq("patient_id", safeSelectedPatientId)
               .order("due_at", { ascending: false })
-              .limit(20),
+              .limit(50),
           adminRead: adminSupabase
             ? () =>
                 adminSupabase
                   .from("reminder_events")
-                  .select("id, due_at, channel, status, provider")
+                  .select("id, due_at, channel, status, provider, cancelled_at, sent_at")
                   .eq("patient_id", safeSelectedPatientId)
                   .order("due_at", { ascending: false })
-                  .limit(20)
+                  .limit(50)
             : undefined,
         }),
         readWithFallback<AppointmentRow[]>({
@@ -661,7 +663,12 @@ export default async function CaregiverDashboardPage({ searchParams }: Caregiver
                     channel: event.channel,
                     status: event.status,
                     provider: event.provider,
-                    cancelledAt: null,
+                    cancelledAt:
+                      event.cancelled_at ??
+                      ((event.status === "failed" || event.status === "cancelled") &&
+                      event.provider === "user-cancelled"
+                        ? event.sent_at
+                        : null),
                   }))}
                 />
               </CardContent>

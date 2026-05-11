@@ -23,6 +23,7 @@ const mapEvents = (
     status: string;
     provider: string | null;
     cancelled_at?: string | null;
+    sent_at?: string | null;
   }>,
 ) =>
   rows.map((row) => ({
@@ -31,7 +32,11 @@ const mapEvents = (
     channel: row.channel,
     status: row.status,
     provider: row.provider,
-    cancelledAt: row.cancelled_at ?? null,
+    cancelledAt:
+      row.cancelled_at ??
+      ((row.status === "cancelled" || (row.status === "failed" && row.provider === "user-cancelled"))
+        ? row.sent_at ?? null
+        : null),
   }));
 
 export async function GET(request: Request) {
@@ -67,7 +72,7 @@ export async function GET(request: Request) {
 
   const primary = await reader
     .from("reminder_events")
-    .select("id, due_at, channel, status, provider, cancelled_at")
+    .select("id, due_at, channel, status, provider, cancelled_at, sent_at")
     .eq("patient_id", patientId)
     .order("due_at", { ascending: false })
     .limit(limit);
@@ -79,6 +84,7 @@ export async function GET(request: Request) {
         status: string;
         provider: string | null;
         cancelled_at?: string | null;
+        sent_at?: string | null;
       }>
     | null;
   let error = primary.error;
@@ -86,7 +92,7 @@ export async function GET(request: Request) {
   if (isCancelledAtColumnMissing(error?.message)) {
     const fallback = await reader
       .from("reminder_events")
-      .select("id, due_at, channel, status, provider")
+      .select("id, due_at, channel, status, provider, sent_at")
       .eq("patient_id", patientId)
       .order("due_at", { ascending: false })
       .limit(limit);
@@ -98,6 +104,7 @@ export async function GET(request: Request) {
           status: string;
           provider: string | null;
           cancelled_at?: string | null;
+          sent_at?: string | null;
         }>
       | null;
     error = fallback.error;
@@ -117,6 +124,7 @@ export async function GET(request: Request) {
         status: string;
         provider: string | null;
         cancelled_at?: string | null;
+        sent_at?: string | null;
       }>,
     ),
   });
