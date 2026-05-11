@@ -2,7 +2,7 @@
 
 import { Loader2, RefreshCcw, XCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -116,6 +116,52 @@ export const ReminderEventsTable = ({
     },
     [patientId],
   );
+
+  useEffect(() => {
+    if (!patientId) return;
+    const kickoffTimeoutId = window.setTimeout(() => {
+      void refreshEvents(true);
+    }, 120);
+
+    const handleFocus = () => {
+      void refreshEvents(true);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshEvents(true);
+      }
+    };
+
+    const handleReminderRefreshEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ patientId?: string }>).detail;
+      if (!detail?.patientId || detail.patientId === patientId) {
+        void refreshEvents(true);
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void refreshEvents(true);
+    }, 15_000);
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener(
+      "careguide:reminder-events-refresh",
+      handleReminderRefreshEvent as EventListener,
+    );
+
+    return () => {
+      window.clearTimeout(kickoffTimeoutId);
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener(
+        "careguide:reminder-events-refresh",
+        handleReminderRefreshEvent as EventListener,
+      );
+    };
+  }, [patientId, refreshEvents]);
 
   const cancelReminders = async (eventIds: string[], isBulk: boolean) => {
     if (!eventIds.length) return;

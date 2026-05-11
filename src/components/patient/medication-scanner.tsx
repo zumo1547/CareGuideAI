@@ -1232,6 +1232,11 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
 
       setPlanSuccess("ยืนยันผลสแกนแล้ว และสร้างตารางยา/แจ้งเตือน SMS สำเร็จ");
       setStatus("บันทึกแผนยาเรียบร้อยแล้ว");
+      window.dispatchEvent(
+        new CustomEvent("careguide:reminder-events-refresh", {
+          detail: { patientId },
+        }),
+      );
       router.refresh();
       if (voiceEnabled) {
         speakThai("บันทึกแผนยาเรียบร้อยแล้ว ระบบเตือนพร้อมใช้งาน");

@@ -129,6 +129,11 @@ export const MedicationPlanForm = ({ patientId }: MedicationPlanFormProps) => {
       noon: false,
       evening: true,
     });
+    window.dispatchEvent(
+      new CustomEvent("careguide:reminder-events-refresh", {
+        detail: { patientId },
+      }),
+    );
     router.refresh();
   });
 
