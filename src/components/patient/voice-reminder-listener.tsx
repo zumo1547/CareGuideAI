@@ -7,7 +7,7 @@ import {
   isMedicationTakenSpeech,
 } from "@/lib/voice/commands";
 import { listenForSpeechOnce } from "@/lib/voice/recognition";
-import { speakThai } from "@/lib/voice/speak";
+import { speakThaiAndWait } from "@/lib/voice/speak";
 
 interface PendingVoiceEvent {
   id: string;
@@ -20,10 +20,22 @@ interface VoiceReminderListenerProps {
   patientId: string;
 }
 
+const REMINDER_POLL_MS = 30_000;
+const LISTEN_TIMEOUT_MS = 12_000;
+const LISTEN_RETRY_TIMEOUT_MS = 10_000;
+const RETRY_GAP_MS = 1_500;
+const VOICE_REPROMPT_COOLDOWN_MS = 2 * 60 * 1000;
+const VOICE_SNOOZE_COOLDOWN_MS = 5 * 60 * 1000;
+
+type AskResult = "taken" | "snooze" | "unanswered";
+
 export const VoiceReminderListener = ({ patientId }: VoiceReminderListenerProps) => {
   const inflightRef = useRef(false);
+  const nextAllowedAskRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
+    const nextAllowedAskMap = nextAllowedAskRef.current;
+
     const acknowledgeEvents = async (eventIds: string[]) => {
       if (!eventIds.length) return;
       await fetch("/api/reminders/ack", {
@@ -50,35 +62,65 @@ export const VoiceReminderListener = ({ patientId }: VoiceReminderListenerProps)
       return response.ok;
     };
 
-    const askMedicationResponse = async (event: PendingVoiceEvent) => {
-      speakThai(`${event.message} กินแล้วหรือยัง ตอบว่า กินแล้ว หรือ เตือนอีกที`);
-      const heard = await listenForSpeechOnce({ timeoutMs: 7000 });
+    const setNextAskAfter = (eventId: string, cooldownMs: number) => {
+      nextAllowedAskMap.set(eventId, Date.now() + cooldownMs);
+    };
+
+    const askMedicationResponse = async (event: PendingVoiceEvent): Promise<AskResult> => {
+      await speakThaiAndWait(
+        `${event.message} กินแล้วหรือยัง พูดว่า กินแล้ว หรือ เตือนอีกที`,
+        0.88,
+        RETRY_GAP_MS,
+      );
+
+      const heard = await listenForSpeechOnce({ timeoutMs: LISTEN_TIMEOUT_MS });
       const text = heard.text.trim();
 
       if (isMedicationTakenSpeech(text)) {
         const takenLogged = await logTaken(event);
         if (!takenLogged) {
-          speakThai("บันทึกการกินยาไม่สำเร็จ จะเตือนซ้ำให้อีกครั้ง");
-          return false;
+          await speakThaiAndWait("บันทึกการกินยาไม่สำเร็จ จะเตือนใหม่อีกครั้ง", 0.9, 400);
+          return "unanswered";
         }
 
         await acknowledgeEvents([event.id]);
-        speakThai("รับทราบว่ากินยาแล้ว และบันทึกเรียบร้อย");
-        return true;
+        nextAllowedAskMap.delete(event.id);
+        await speakThaiAndWait("รับทราบว่ากินยาแล้ว และบันทึกเรียบร้อย", 0.9, 400);
+        return "taken";
       }
 
       if (isMedicationSnoozeSpeech(text)) {
-        speakThai("รับทราบ เดี๋ยวจะเตือนใหม่ตามรอบที่ตั้งไว้");
-        return false;
+        await speakThaiAndWait("รับทราบ เดี๋ยวจะเตือนใหม่ตามรอบที่ตั้งไว้", 0.9, 400);
+        return "snooze";
       }
 
-      if (!text) {
-        speakThai("ยังไม่ได้ยินคำตอบ จะเตือนให้อีกครั้ง");
-        return false;
+      await speakThaiAndWait(
+        "ยังจับคำตอบไม่ชัดเจน กรุณาตอบว่า กินแล้ว หรือ เตือนอีกที",
+        0.86,
+        RETRY_GAP_MS,
+      );
+      const retryHeard = await listenForSpeechOnce({ timeoutMs: LISTEN_RETRY_TIMEOUT_MS });
+      const retryText = retryHeard.text.trim();
+
+      if (isMedicationTakenSpeech(retryText)) {
+        const takenLogged = await logTaken(event);
+        if (!takenLogged) {
+          await speakThaiAndWait("บันทึกการกินยาไม่สำเร็จ จะเตือนใหม่อีกครั้ง", 0.9, 400);
+          return "unanswered";
+        }
+        await acknowledgeEvents([event.id]);
+        nextAllowedAskMap.delete(event.id);
+        await speakThaiAndWait("รับทราบว่ากินยาแล้ว และบันทึกเรียบร้อย", 0.9, 400);
+        return "taken";
       }
 
-      speakThai("หากกินยาแล้วให้ตอบว่า กินแล้ว หากยังไม่กินให้ตอบว่า เตือนอีกที");
-      return false;
+      if (isMedicationSnoozeSpeech(retryText)) {
+        await speakThaiAndWait("รับทราบ เดี๋ยวจะเตือนใหม่ตามรอบที่ตั้งไว้", 0.9, 400);
+        return "snooze";
+      }
+
+      await speakThaiAndWait("ยังไม่ได้ยินคำตอบที่ชัดเจน จะเตือนใหม่อีกครั้งในอีกสักครู่", 0.86, 200);
+      return "unanswered";
     };
 
     const checkPendingVoiceReminders = async () => {
@@ -92,8 +134,15 @@ export const VoiceReminderListener = ({ patientId }: VoiceReminderListenerProps)
         const events = payload.events ?? [];
         if (!events.length) return;
 
-        for (const event of events) {
-          await askMedicationResponse(event);
+        const now = Date.now();
+        const nextEvent = events.find((event) => (nextAllowedAskMap.get(event.id) ?? 0) <= now);
+        if (!nextEvent) return;
+
+        const result = await askMedicationResponse(nextEvent);
+        if (result === "snooze") {
+          setNextAskAfter(nextEvent.id, VOICE_SNOOZE_COOLDOWN_MS);
+        } else if (result === "unanswered") {
+          setNextAskAfter(nextEvent.id, VOICE_REPROMPT_COOLDOWN_MS);
         }
       } finally {
         inflightRef.current = false;
@@ -103,9 +152,12 @@ export const VoiceReminderListener = ({ patientId }: VoiceReminderListenerProps)
     void checkPendingVoiceReminders();
     const interval = window.setInterval(() => {
       void checkPendingVoiceReminders();
-    }, 30_000);
+    }, REMINDER_POLL_MS);
 
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearInterval(interval);
+      nextAllowedAskMap.clear();
+    };
   }, [patientId]);
 
   return null;

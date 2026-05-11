@@ -147,14 +147,31 @@ export const isVoiceModeStopSpeech = (text: string) =>
   ]);
 
 export const isMedicationTakenSpeech = (text: string) =>
-  includesAny(stripNoise(text), ["กินแล้ว", "ทานแล้ว", "รับประทานแล้ว", "เรียบร้อย", "กินยาแล้ว"]);
+  includesAny(stripNoise(text), [
+    "กินแล้ว",
+    "กินยาแล้ว",
+    "ทานแล้ว",
+    "ทานยาแล้ว",
+    "รับประทานแล้ว",
+    "รับประทานยาแล้ว",
+    "เรียบร้อย",
+    "เรียบร้อยแล้ว",
+    "กินเสร็จแล้ว",
+    "ทานเสร็จแล้ว",
+  ]);
 
 export const isMedicationSnoozeSpeech = (text: string) =>
   includesAny(stripNoise(text), [
     "ยังไม่ได้กิน",
     "ยังไม่กิน",
+    "ยังไม่ได้ทาน",
+    "ยังไม่ทาน",
+    "ยังไม่กินยา",
+    "ยังไม่ทานยา",
     "ขอเตือนอีกที",
     "เตือนอีกครั้ง",
+    "เตือนใหม่",
+    "ไว้ก่อน",
     "เดี๋ยวก่อน",
   ]);
 
