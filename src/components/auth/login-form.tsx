@@ -148,7 +148,7 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
         <div className="rounded-xl border border-cyan-200/80 bg-cyan-50/60 p-3">
           <p className="text-sm font-semibold">เริ่มโหมดเสียงสำหรับหน้าเข้าสู่ระบบ</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            กดปุ่มด้านล่างก่อน แล้วพูดว่า “เข้าสู่ระบบ” ระบบจะถามยืนยันก่อนกดปุ่มให้
+            กดปุ่มด้านล่างก่อน แล้วพูดว่า &quot;เข้าสู่ระบบ&quot; ระบบจะถามยืนยันก่อนกดปุ่มให้
           </p>
           <VoiceModeStartButton
             label="เริ่มต้นโหมดใช้งานด้วยเสียง"
@@ -243,7 +243,11 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
               disabled={Boolean(oauthPending)}
               aria-label="เข้าสู่ระบบด้วย Google"
             >
-              {oauthPending === "google" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+              {oauthPending === "google" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Mail className="h-4 w-4" />
+              )}
               <span>เข้าสู่ระบบด้วย Google</span>
             </Button>
 
