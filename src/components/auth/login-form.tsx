@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AlertCircle, Loader2, Mail, MessageCircle, UserRound } from "lucide-react";
+import { AlertCircle, Loader2, Mail, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -35,7 +35,7 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
   const [resetEmailInput, setResetEmailInput] = useState("");
   const [loginEmailInput, setLoginEmailInput] = useState("");
   const [resetInfo, setResetInfo] = useState<string | null>(null);
-  const [oauthPending, setOauthPending] = useState<"google" | "facebook" | "line" | null>(null);
+  const [oauthPending, setOauthPending] = useState<"google" | "facebook" | null>(null);
   const router = useRouter();
 
   const {
@@ -104,11 +104,10 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     );
   };
 
-  const signInWithProvider = async (provider: "google" | "facebook" | "custom:line") => {
+  const signInWithProvider = async (provider: "google" | "facebook") => {
     setError(null);
     setResetInfo(null);
-    const pendingKey = provider === "custom:line" ? "line" : provider;
-    setOauthPending(pendingKey);
+    setOauthPending(provider);
 
     const supabase = createSupabaseBrowserClient();
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
@@ -120,13 +119,13 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
 
     setOauthPending(null);
     if (oauthError) {
-      if (provider === "custom:line") {
-        setError(
-          `LINE Login ยังไม่พร้อมใช้งาน: ${oauthError.message} (ต้องตั้งค่า Supabase Custom OAuth Provider ชื่อ line ก่อน)`,
-        );
-      } else {
-        setError(oauthError.message);
-      }
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+      const callbackHint = supabaseUrl
+        ? `${supabaseUrl.replace(/\/+$/u, "")}/auth/v1/callback`
+        : "https://<project-ref>.supabase.co/auth/v1/callback";
+      setError(
+        `${oauthError.message} (ตรวจ Provider ใน Supabase และตั้ง Authorized redirect URI ให้มี ${callbackHint})`,
+      );
     }
   };
 
@@ -267,21 +266,6 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
               <span>เข้าสู่ระบบด้วย Facebook</span>
             </Button>
 
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={() => void signInWithProvider("custom:line")}
-              disabled={Boolean(oauthPending)}
-              aria-label="เข้าสู่ระบบด้วย LINE"
-            >
-              {oauthPending === "line" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <MessageCircle className="h-4 w-4" />
-              )}
-              <span>เข้าสู่ระบบด้วย LINE</span>
-            </Button>
           </div>
         </div>
 
