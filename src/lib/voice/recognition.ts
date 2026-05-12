@@ -50,6 +50,7 @@ interface ListenOptions {
   timeoutMs?: number;
   interimResults?: boolean;
   maxAlternatives?: number;
+  waitForTimeoutOnNoMatch?: boolean;
   signal?: AbortSignal;
 }
 
@@ -65,6 +66,7 @@ export const listenForSpeechOnce = async ({
   timeoutMs = 7000,
   interimResults = false,
   maxAlternatives = 1,
+  waitForTimeoutOnNoMatch = false,
   signal,
 }: ListenOptions = {}): Promise<SpeechListenResult> => {
   const Recognition = getSpeechRecognitionConstructor();
@@ -181,6 +183,9 @@ export const listenForSpeechOnce = async ({
     };
 
     recognition.onend = () => {
+      if (waitForTimeoutOnNoMatch && !lastResult.text.trim() && timeoutId !== null) {
+        return;
+      }
       finish(lastResult);
     };
 

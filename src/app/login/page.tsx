@@ -18,6 +18,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   const resolvedSearchParams = await searchParams;
   const nextPath = toSingle(resolvedSearchParams.next) ?? "/app";
+  const initialError = toSingle(resolvedSearchParams.error) ?? null;
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#ecfeff_0%,#f8fafc_45%,#ffffff_100%)]">
@@ -42,7 +43,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </section>
 
           <section className="reveal-up reveal-delay-1">
-            <LoginForm nextPath={nextPath} />
+            <LoginForm nextPath={nextPath} initialError={initialError} />
           </section>
         </div>
       </main>

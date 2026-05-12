@@ -21,8 +21,8 @@ interface VoiceReminderListenerProps {
 }
 
 const REMINDER_POLL_MS = 30_000;
-const LISTEN_TIMEOUT_MS = 12_000;
-const LISTEN_RETRY_TIMEOUT_MS = 10_000;
+const LISTEN_TIMEOUT_MS = 16_000;
+const LISTEN_RETRY_TIMEOUT_MS = 14_000;
 const RETRY_GAP_MS = 1_500;
 const VOICE_REPROMPT_COOLDOWN_MS = 2 * 60 * 1000;
 const VOICE_SNOOZE_COOLDOWN_MS = 5 * 60 * 1000;
@@ -73,7 +73,12 @@ export const VoiceReminderListener = ({ patientId }: VoiceReminderListenerProps)
         RETRY_GAP_MS,
       );
 
-      const heard = await listenForSpeechOnce({ timeoutMs: LISTEN_TIMEOUT_MS });
+      const heard = await listenForSpeechOnce({
+        timeoutMs: LISTEN_TIMEOUT_MS,
+        maxAlternatives: 3,
+        interimResults: true,
+        waitForTimeoutOnNoMatch: true,
+      });
       const text = heard.text.trim();
 
       if (isMedicationTakenSpeech(text)) {
@@ -99,7 +104,12 @@ export const VoiceReminderListener = ({ patientId }: VoiceReminderListenerProps)
         0.86,
         RETRY_GAP_MS,
       );
-      const retryHeard = await listenForSpeechOnce({ timeoutMs: LISTEN_RETRY_TIMEOUT_MS });
+      const retryHeard = await listenForSpeechOnce({
+        timeoutMs: LISTEN_RETRY_TIMEOUT_MS,
+        maxAlternatives: 3,
+        interimResults: true,
+        waitForTimeoutOnNoMatch: true,
+      });
       const retryText = retryHeard.text.trim();
 
       if (isMedicationTakenSpeech(retryText)) {

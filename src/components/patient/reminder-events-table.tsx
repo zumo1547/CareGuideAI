@@ -43,24 +43,21 @@ const statusVariant = (status: string): "default" | "secondary" | "destructive" 
   return "outline";
 };
 
-const getDisplayStatus = (event: ReminderEventRow) => {
+const toDisplayStatus = (event: ReminderEventRow) => {
   if (event.status === "failed" && event.provider === "user-cancelled") {
     return "cancelled";
   }
   return event.status;
 };
 
-const withCancelledStatus = (event: ReminderEventRow, cancelledAt: string) => ({
+const asCancelledEvent = (event: ReminderEventRow, cancelledAt: string): ReminderEventRow => ({
   ...event,
   status: "cancelled",
   provider: "user-cancelled",
   cancelledAt,
 });
 
-export const ReminderEventsTable = ({
-  initialEvents,
-  patientId,
-}: ReminderEventsTableProps) => {
+export const ReminderEventsTable = ({ initialEvents, patientId }: ReminderEventsTableProps) => {
   const router = useRouter();
   const [events, setEvents] = useState(initialEvents);
   const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set());
@@ -72,15 +69,15 @@ export const ReminderEventsTable = ({
 
   const hasMoreThanCollapsedRows = events.length > COLLAPSED_ROWS;
   const visibleEvents = isExpanded ? events : events.slice(0, COLLAPSED_ROWS);
-
-  const pendingEventIds = useMemo(
-    () => events.filter((event) => getDisplayStatus(event) === "pending").map((event) => event.id),
+  const pendingCount = useMemo(
+    () => events.filter((event) => toDisplayStatus(event) === "pending").length,
     [events],
   );
 
   const refreshEvents = useCallback(
     async (silent = false) => {
       if (!patientId) return;
+
       if (!silent) {
         setRefreshing(true);
         setError(null);
@@ -119,6 +116,7 @@ export const ReminderEventsTable = ({
 
   useEffect(() => {
     if (!patientId) return;
+
     const kickoffTimeoutId = window.setTimeout(() => {
       void refreshEvents(true);
     }, 120);
@@ -165,6 +163,7 @@ export const ReminderEventsTable = ({
 
   const cancelReminders = async (eventIds: string[], isBulk: boolean) => {
     if (!eventIds.length) return;
+
     setError(null);
     setSuccess(null);
     setCancellingIds((current) => {
@@ -172,9 +171,7 @@ export const ReminderEventsTable = ({
       eventIds.forEach((id) => next.add(id));
       return next;
     });
-    if (isBulk) {
-      setCancellingAllPending(true);
-    }
+    if (isBulk) setCancellingAllPending(true);
 
     try {
       const response = await fetch("/api/reminders/cancel-many", {
@@ -199,11 +196,11 @@ export const ReminderEventsTable = ({
 
       const cancelledAt = payload.cancelledAt ?? new Date().toISOString();
       const cancelledIds = payload.cancelledIds ?? eventIds;
-      const cancelledSet = new Set(cancelledIds);
+      const cancelledIdSet = new Set(cancelledIds);
 
       setEvents((current) =>
         current.map((event) =>
-          cancelledSet.has(event.id) ? withCancelledStatus(event, cancelledAt) : event,
+          cancelledIdSet.has(event.id) ? asCancelledEvent(event, cancelledAt) : event,
         ),
       );
 
@@ -224,9 +221,7 @@ export const ReminderEventsTable = ({
         eventIds.forEach((id) => next.delete(id));
         return next;
       });
-      if (isBulk) {
-        setCancellingAllPending(false);
-      }
+      if (isBulk) setCancellingAllPending(false);
     }
   };
 
@@ -235,12 +230,46 @@ export const ReminderEventsTable = ({
   };
 
   const cancelAllPendingReminders = async () => {
-    if (!pendingEventIds.length) return;
-    const confirmed = window.confirm(
-      `ต้องการยกเลิกรายการแจ้งเตือนที่รอดำเนินการทั้งหมด ${pendingEventIds.length} รายการ ใช่หรือไม่`,
-    );
+    const confirmed = window.confirm("ต้องการยกเลิกรายการแจ้งเตือนที่รอดำเนินการทั้งหมดใช่หรือไม่");
     if (!confirmed) return;
-    await cancelReminders(pendingEventIds, true);
+
+    setError(null);
+    setSuccess(null);
+    setCancellingAllPending(true);
+
+    try {
+      const response = await fetch("/api/reminders/cancel-many", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cancelAllPending: true,
+          patientId: patientId ?? undefined,
+        }),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        cancelledCount?: number;
+      };
+
+      if (!response.ok) {
+        setError(payload.error ?? "ยกเลิกรายการแจ้งเตือนทั้งหมดไม่สำเร็จ");
+        return;
+      }
+
+      const cancelledCount = payload.cancelledCount ?? 0;
+      setSuccess(
+        cancelledCount > 0
+          ? `ยกเลิกรายการแจ้งเตือนที่รอดำเนินการทั้งหมดแล้ว ${cancelledCount} รายการ`
+          : "ไม่พบรายการที่รอดำเนินการให้ยกเลิก",
+      );
+
+      await refreshEvents(true);
+      router.refresh();
+    } catch {
+      setError("ยกเลิกรายการแจ้งเตือนทั้งหมดไม่สำเร็จ");
+    } finally {
+      setCancellingAllPending(false);
+    }
   };
 
   return (
@@ -272,18 +301,19 @@ export const ReminderEventsTable = ({
             {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
             รีเฟรช
           </Button>
+
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={() => void cancelAllPendingReminders()}
-            disabled={!pendingEventIds.length || isCancellingAllPending}
+            disabled={isCancellingAllPending || pendingCount === 0}
             aria-label="ยกเลิกรายการแจ้งเตือนที่รอดำเนินการทั้งหมด"
           >
             {isCancellingAllPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
             {isCancellingAllPending
               ? "กำลังยกเลิกทั้งหมด..."
-              : `ยกเลิกที่รอดำเนินการทั้งหมด (${pendingEventIds.length})`}
+              : `ยกเลิกที่รอดำเนินการทั้งหมด (${pendingCount})`}
           </Button>
         </div>
       ) : null}
@@ -306,7 +336,7 @@ export const ReminderEventsTable = ({
             </TableRow>
           ) : (
             visibleEvents.map((event) => {
-              const displayStatus = getDisplayStatus(event);
+              const displayStatus = toDisplayStatus(event);
               const isCancellingThisRow = cancellingIds.has(event.id);
 
               return (
@@ -342,9 +372,7 @@ export const ReminderEventsTable = ({
                     ) : (
                       <span className="text-sm text-muted-foreground">
                         {displayStatus === "cancelled"
-                          ? `ยกเลิกเมื่อ ${
-                              event.cancelledAt ? formatDateTime(event.cancelledAt) : "ไม่พบเวลา"
-                            }`
+                          ? `ยกเลิกเมื่อ ${event.cancelledAt ? formatDateTime(event.cancelledAt) : "ไม่พบเวลา"}`
                           : "-"}
                       </span>
                     )}
