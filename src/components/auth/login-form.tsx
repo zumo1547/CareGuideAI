@@ -1,10 +1,10 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AlertCircle, Loader2, Mail, UserRound } from "lucide-react";
+import { AlertCircle, Loader2, Mail, RefreshCw, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -22,11 +22,55 @@ const schema = z.object({
 });
 
 type FormValues = z.infer<typeof schema>;
+type OAuthProvider = "google" | "facebook";
+type ProviderAvailability = Record<OAuthProvider, boolean | null>;
+
+const DEFAULT_PROVIDER_AVAILABILITY: ProviderAvailability = {
+  google: null,
+  facebook: null,
+};
 
 interface LoginFormProps {
   nextPath?: string;
   initialError?: string | null;
 }
+
+const getSupabaseBaseUrl = () =>
+  (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/u, "");
+
+const getSupabaseProjectRef = () => {
+  const supabaseUrl = getSupabaseBaseUrl();
+  const match = supabaseUrl.match(/^https:\/\/([^.]+)\.supabase\.co$/u);
+  return match?.[1] ?? null;
+};
+
+const buildProviderDisabledError = (provider: OAuthProvider) => {
+  const providerName = provider === "google" ? "Google" : "Facebook";
+  const projectRef = getSupabaseProjectRef();
+  const callback = getSupabaseBaseUrl()
+    ? `${getSupabaseBaseUrl()}/auth/v1/callback`
+    : "https://<project-ref>.supabase.co/auth/v1/callback";
+
+  return `ยังไม่ได้เปิด ${providerName} ใน Supabase โปรเจกต์ที่เว็บเชื่อมต่ออยู่${
+    projectRef ? ` (${projectRef})` : ""
+  } กรุณาไปที่ Supabase > Authentication > Providers แล้วเปิด ${providerName} พร้อมใส่ Client ID/Secret และตั้ง Redirect URI เป็น ${callback}`;
+};
+
+const parseProviderAvailability = (payload: unknown): ProviderAvailability => {
+  if (!payload || typeof payload !== "object") {
+    return DEFAULT_PROVIDER_AVAILABILITY;
+  }
+
+  const external = (payload as { external?: Record<string, unknown> }).external;
+  if (!external || typeof external !== "object") {
+    return DEFAULT_PROVIDER_AVAILABILITY;
+  }
+
+  return {
+    google: typeof external.google === "boolean" ? external.google : null,
+    facebook: typeof external.facebook === "boolean" ? external.facebook : null,
+  };
+};
 
 export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormProps) => {
   const [error, setError] = useState<string | null>(initialError);
@@ -35,7 +79,11 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
   const [resetEmailInput, setResetEmailInput] = useState("");
   const [loginEmailInput, setLoginEmailInput] = useState("");
   const [resetInfo, setResetInfo] = useState<string | null>(null);
-  const [oauthPending, setOauthPending] = useState<"google" | "facebook" | null>(null);
+  const [oauthPending, setOauthPending] = useState<OAuthProvider | null>(null);
+  const [providerAvailability, setProviderAvailability] = useState<ProviderAvailability>(
+    DEFAULT_PROVIDER_AVAILABILITY,
+  );
+  const [isCheckingProviders, setCheckingProviders] = useState(false);
   const router = useRouter();
 
   const {
@@ -47,6 +95,21 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
   });
   const emailField = register("email");
 
+  const googleDisabled = Boolean(oauthPending) || providerAvailability.google === false;
+  const facebookDisabled = Boolean(oauthPending) || providerAvailability.facebook === false;
+
+  const providerStatusText = useMemo(() => {
+    const toText = (value: boolean | null) => {
+      if (value === true) return "พร้อมใช้งาน";
+      if (value === false) return "ยังไม่เปิดใน Supabase";
+      return "กำลังตรวจสอบ";
+    };
+    return {
+      google: toText(providerAvailability.google),
+      facebook: toText(providerAvailability.facebook),
+    };
+  }, [providerAvailability.facebook, providerAvailability.google]);
+
   const getSafeNextPath = () => {
     if (!nextPath.startsWith("/") || nextPath.startsWith("//")) return "/app";
     return nextPath;
@@ -55,6 +118,61 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
   const buildCallbackUrl = (targetPath: string) => {
     const params = new URLSearchParams({ next: targetPath });
     return `${window.location.origin}/auth/callback?${params.toString()}`;
+  };
+
+  const refreshProviderStatus = async () => {
+    const supabaseUrl = getSupabaseBaseUrl();
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+    if (!supabaseUrl || !anonKey) return null;
+
+    setCheckingProviders(true);
+    try {
+      const response = await fetch(`${supabaseUrl}/auth/v1/settings`, {
+        method: "GET",
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+        },
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const payload = (await response.json()) as unknown;
+      const availability = parseProviderAvailability(payload);
+      setProviderAvailability(availability);
+      return availability;
+    } catch {
+      return null;
+    } finally {
+      setCheckingProviders(false);
+    }
+  };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refreshProviderStatus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const ensureProviderEnabled = async (provider: OAuthProvider) => {
+    let availability = providerAvailability;
+
+    if (availability[provider] === null) {
+      const latest = await refreshProviderStatus();
+      if (latest) {
+        availability = latest;
+      }
+    }
+
+    if (availability[provider] === false) {
+      setError(buildProviderDisabledError(provider));
+      return false;
+    }
+
+    return true;
   };
 
   const onSubmit = handleSubmit(async (values) => {
@@ -104,11 +222,16 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     );
   };
 
-  const signInWithProvider = async (provider: "google" | "facebook") => {
+  const signInWithProvider = async (provider: OAuthProvider) => {
     setError(null);
     setResetInfo(null);
-    setOauthPending(provider);
 
+    const isEnabled = await ensureProviderEnabled(provider);
+    if (!isEnabled) {
+      return;
+    }
+
+    setOauthPending(provider);
     const supabase = createSupabaseBrowserClient();
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider,
@@ -116,16 +239,19 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
         redirectTo: buildCallbackUrl(getSafeNextPath()),
       },
     });
-
     setOauthPending(null);
+
     if (oauthError) {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-      const callbackHint = supabaseUrl
-        ? `${supabaseUrl.replace(/\/+$/u, "")}/auth/v1/callback`
+      if (oauthError.message.toLowerCase().includes("provider is not enabled")) {
+        setError(buildProviderDisabledError(provider));
+        void refreshProviderStatus();
+        return;
+      }
+
+      const callbackHint = getSupabaseBaseUrl()
+        ? `${getSupabaseBaseUrl()}/auth/v1/callback`
         : "https://<project-ref>.supabase.co/auth/v1/callback";
-      setError(
-        `${oauthError.message} (ตรวจ Provider ใน Supabase และตั้ง Authorized redirect URI ให้มี ${callbackHint})`,
-      );
+      setError(`${oauthError.message} (ตรวจ redirect URI ให้มี ${callbackHint})`);
     }
   };
 
@@ -232,6 +358,25 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
         ) : null}
 
         <div className="space-y-2">
+          <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-semibold text-foreground">สถานะ Social Login ของโปรเจกต์นี้</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => void refreshProviderStatus()}
+                disabled={isCheckingProviders}
+              >
+                {isCheckingProviders ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                <span>{isCheckingProviders ? "ตรวจสอบ..." : "เช็คใหม่"}</span>
+              </Button>
+            </div>
+            <p className="mt-1">Google: {providerStatusText.google}</p>
+            <p>Facebook: {providerStatusText.facebook}</p>
+          </div>
+
           <p className="text-center text-xs text-muted-foreground">หรือเข้าสู่ระบบด้วยบัญชีอื่น</p>
           <div className="grid gap-2">
             <Button
@@ -239,7 +384,7 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
               variant="outline"
               className="w-full"
               onClick={() => void signInWithProvider("google")}
-              disabled={Boolean(oauthPending)}
+              disabled={googleDisabled}
               aria-label="เข้าสู่ระบบด้วย Google"
             >
               {oauthPending === "google" ? (
@@ -255,7 +400,7 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
               variant="outline"
               className="w-full"
               onClick={() => void signInWithProvider("facebook")}
-              disabled={Boolean(oauthPending)}
+              disabled={facebookDisabled}
               aria-label="เข้าสู่ระบบด้วย Facebook"
             >
               {oauthPending === "facebook" ? (
@@ -265,7 +410,6 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
               )}
               <span>เข้าสู่ระบบด้วย Facebook</span>
             </Button>
-
           </div>
         </div>
 
