@@ -77,14 +77,14 @@ export default async function Home() {
               ))}
             </div>
 
-            <div className="grid w-full gap-3 pt-1 sm:grid-cols-3">
+            <div className="grid w-full max-w-3xl grid-cols-1 gap-3 pt-1 md:grid-cols-3">
               <VoiceModeStartButton
                 href={primaryHref}
-                className="h-12 w-full justify-center rounded-full bg-cyan-700 text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-cyan-800 hover:shadow-cyan-200 active:translate-y-0"
+                className="hero-action-btn hero-action-btn-primary"
               />
               <Link
                 href={primaryHref}
-                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-cyan-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-cyan-800 hover:shadow-cyan-200 active:translate-y-0"
+                className="hero-action-btn hero-action-btn-primary"
                 aria-label={primaryLabel}
                 data-voice-action={!isAuthenticated ? "go-register-page" : undefined}
               >
@@ -93,7 +93,7 @@ export default async function Home() {
               </Link>
               <Link
                 href={secondaryHref}
-                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border border-cyan-700 px-5 py-2.5 text-sm font-semibold text-cyan-800 transition-all duration-300 hover:-translate-y-0.5 hover:bg-cyan-50 hover:shadow-sm active:translate-y-0"
+                className="hero-action-btn hero-action-btn-outline"
                 aria-label={secondaryLabel}
                 data-voice-action={!isAuthenticated ? "go-login-page" : undefined}
               >
