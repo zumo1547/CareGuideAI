@@ -159,25 +159,28 @@ export const AppShell = ({ role, fullName, children }: AppShellProps) => {
               >
                 {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
               </button>
-              <BrandLogo href="/app" imageClassName="h-10" />
-              <div className="hidden min-w-0 md:block">
-                <p className="text-xs text-slate-500">ผู้ใช้งานปัจจุบัน</p>
-                <p className="truncate text-sm font-semibold text-slate-900">{fullName}</p>
-              </div>
+              <BrandLogo
+                href="/app"
+                imageClassName="h-10"
+                className="[&_span]:hidden sm:[&_span]:inline-flex"
+              />
             </div>
 
-            <div className="flex items-center gap-2">
-              <Badge className="bg-cyan-700 text-white hover:bg-cyan-700">{roleLabel[role]}</Badge>
-              <div className="hidden sm:block">
-                <LogoutButton />
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-2 rounded-xl border border-cyan-100 bg-cyan-50/70 p-3 md:hidden">
-            <p className="truncate text-sm font-semibold text-slate-900">{fullName}</p>
-            <div className="mt-2 sm:hidden">
-              <LogoutButton />
+            <div className="flex min-w-0 items-center justify-end gap-2">
+              <p className="hidden max-w-[18rem] truncate text-sm text-slate-700 md:block">
+                ผู้ใช้งานปัจจุบัน: <span className="font-semibold text-slate-900">{fullName}</span>
+              </p>
+              <p className="max-w-[34vw] truncate text-sm font-semibold text-slate-900 md:hidden">
+                {fullName}
+              </p>
+              <Badge className="h-7 rounded-full bg-cyan-700 px-2 text-[11px] text-white hover:bg-cyan-700">
+                {roleLabel[role]}
+              </Badge>
+              <LogoutButton
+                size="sm"
+                showIcon
+                className="h-8 rounded-full border-cyan-200 bg-cyan-50 px-3 text-[0.78rem] font-semibold text-cyan-900 hover:bg-cyan-100"
+              />
             </div>
           </div>
 
