@@ -62,6 +62,7 @@ const VOICE_START_EVENT = "careguide:voice-mode-start";
 const VOICE_AUTOSTART_MAX_AGE_MS = 20_000;
 const VOICE_MEDICINE_SCAN_FLOW_KEY = "careguide-voice-medicine-scan-flow-v1";
 const VOICE_MEDICINE_SCAN_FLOW_MAX_AGE_MS = 90_000;
+const VOICE_MED_CONFIRM_SKIP_DIALOG_KEY = "careguide:voice-confirm-med-plan-skip-dialog";
 
 const DEFAULT_PREFS: AccessibilityPrefs = {
   voiceEnabled: true,
@@ -73,8 +74,8 @@ const DEFAULT_PREFS: AccessibilityPrefs = {
 const normalizeText = (value: string) => value.replace(/\s+/g, " ").trim();
 const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 const estimatePromptLeadMs = (text: string) => {
-  const base = 800;
-  const byLength = Math.min(2200, Math.max(0, text.length * 22));
+  const base = 1600;
+  const byLength = Math.min(5200, Math.max(700, text.length * 42));
   return base + byLength;
 };
 
@@ -361,6 +362,7 @@ export const AccessibilityAssistant = () => {
       const heard = await listenForSpeechOnce({
         timeoutMs,
         maxAlternatives: 6,
+        waitForTimeoutOnNoMatch: true,
       });
       setVoiceListening(false);
 
@@ -417,9 +419,10 @@ export const AccessibilityAssistant = () => {
         onNegative: options?.onNegative,
       };
       pendingConfirmationRef.current = nextConfirmation;
+      const confirmationPrompt = `${prompt} ตอบว่า ใช่ ไม่ หรือ ทบทวน`;
       setVoiceStatusText(prompt);
-      speakFeedback(`${prompt} ตอบว่า ใช่ ไม่ หรือ ทบทวน`, true);
-      pauseListeningUntilRef.current = Date.now() + estimatePromptLeadMs(prompt);
+      speakFeedback(confirmationPrompt, true);
+      pauseListeningUntilRef.current = Date.now() + estimatePromptLeadMs(confirmationPrompt);
     },
     [speakFeedback],
   );
@@ -956,8 +959,9 @@ export const AccessibilityAssistant = () => {
       const currentFlags = routeFlagsRef.current;
       const hasPendingConfirmation = Boolean(pendingConfirmationRef.current);
       const heard = await listenForSpeechOnce({
-        timeoutMs: hasPendingConfirmation ? 16_000 : currentFlags.isPreAuthRoute ? 14_000 : 12_500,
-        maxAlternatives: hasPendingConfirmation ? 6 : 4,
+        timeoutMs: hasPendingConfirmation ? 24_000 : currentFlags.isPreAuthRoute ? 14_000 : 12_500,
+        maxAlternatives: hasPendingConfirmation ? 8 : 4,
+        waitForTimeoutOnNoMatch: hasPendingConfirmation,
         signal: abortController.signal,
       });
       recognitionAbortRef.current = null;
@@ -1183,6 +1187,11 @@ export const AccessibilityAssistant = () => {
 
         queueConfirmation(confirmIntent, `${summaryText} ต้องการยืนยันผลหรือไม่`, {
           onAffirmative: async () => {
+            try {
+              window.localStorage.setItem(VOICE_MED_CONFIRM_SKIP_DIALOG_KEY, String(Date.now()));
+            } catch {
+              // Ignore localStorage errors and continue with fallback behavior.
+            }
             const clicked = clickBySelector("[data-voice-action='confirm-med-plan']");
             if (!clicked) {
               const message = "ยังไม่พบปุ่มยืนยันผลยา";

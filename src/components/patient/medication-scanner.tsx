@@ -139,6 +139,8 @@ const QUALITY_HARD_MIN_CONTRAST = 0.045;
 const QUALITY_HARD_MIN_SHARPNESS = 0.028;
 const NAME_CLARITY_MIN_SCORE = 0.54;
 const AUTO_FINALIZE_MIN_SAFETY_SCORE = 0.42;
+const VOICE_MED_CONFIRM_SKIP_DIALOG_KEY = "careguide:voice-confirm-med-plan-skip-dialog";
+const VOICE_MED_CONFIRM_SKIP_DIALOG_MAX_AGE_MS = 30_000;
 
 interface ScanCandidate {
   text: string;
@@ -1188,11 +1190,26 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
       speakThai(`กรุณาทวนข้อมูลก่อนบันทึก ${summaryText} หากถูกต้องให้ยืนยัน`);
     }
 
-    const accepted = typeof window === "undefined"
-      ? true
-      : window.confirm(
-          `กรุณาทวนข้อมูลก่อนบันทึก\\n\\n${summaryText}\\n\\nกด \"ตกลง\" เพื่อยืนยันบันทึก หรือกด \"ยกเลิก\" เพื่อกลับไปแก้ไข`,
-        );
+    let shouldSkipConfirmDialog = false;
+    if (typeof window !== "undefined") {
+      try {
+        const rawSkipFlag = window.localStorage.getItem(VOICE_MED_CONFIRM_SKIP_DIALOG_KEY);
+        if (rawSkipFlag) {
+          window.localStorage.removeItem(VOICE_MED_CONFIRM_SKIP_DIALOG_KEY);
+          const skipTs = Number(rawSkipFlag);
+          shouldSkipConfirmDialog = !Number.isFinite(skipTs)
+            || Date.now() - skipTs <= VOICE_MED_CONFIRM_SKIP_DIALOG_MAX_AGE_MS;
+        }
+      } catch {
+        // Ignore localStorage failures and keep normal manual confirm flow.
+      }
+    }
+
+    const accepted = shouldSkipConfirmDialog
+      || typeof window === "undefined"
+      || window.confirm(
+        `กรุณาทวนข้อมูลก่อนบันทึก\\n\\n${summaryText}\\n\\nกด \"ตกลง\" เพื่อยืนยันบันทึก หรือกด \"ยกเลิก\" เพื่อกลับไปแก้ไข`,
+      );
 
     if (!accepted) {
       setPlanError("ยกเลิกการบันทึกชั่วคราว กรุณาตรวจสอบข้อมูลและยืนยันอีกครั้ง");

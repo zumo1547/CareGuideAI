@@ -93,8 +93,13 @@ const normalizeConfirmationSpeech = (value: string) =>
     .replace(/\s+/gu, " ")
     .trim();
 
-export const isAffirmativeSpeech = (text: string) =>
-  includesAny(normalizeConfirmationSpeech(text), [
+export const isAffirmativeSpeech = (text: string) => {
+  const normalized = normalizeConfirmationSpeech(text);
+  if (/^ใช่?\b/gu.test(normalized)) return true;
+  if (/^ได้\b/gu.test(normalized)) return true;
+  if (/^โอเค\b/gu.test(normalized)) return true;
+
+  return includesAny(normalized, [
     "ใช่",
     "ยืนยัน",
     "ตกลง",
@@ -109,10 +114,17 @@ export const isAffirmativeSpeech = (text: string) =>
     "ค่ะ",
     "จ้า",
     "ฮะ",
+    "อืม",
+    "อือ",
+    "yes",
   ]);
+};
 
-export const isNegativeSpeech = (text: string) =>
-  includesAny(normalizeConfirmationSpeech(text), [
+export const isNegativeSpeech = (text: string) => {
+  const normalized = normalizeConfirmationSpeech(text);
+  if (/^ไม่\b/gu.test(normalized)) return true;
+
+  return includesAny(normalized, [
     "ไม่",
     "ยกเลิก",
     "หยุด",
@@ -120,7 +132,9 @@ export const isNegativeSpeech = (text: string) =>
     "ไม่ต้อง",
     "ปฏิเสธ",
     "ยกเลิกไป",
+    "no",
   ]);
+};
 
 export const isRepeatSpeech = (text: string) =>
   includesAny(normalizeConfirmationSpeech(text), [
