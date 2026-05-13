@@ -1,10 +1,10 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AlertCircle, Loader2, Mail, RefreshCw, UserRound } from "lucide-react";
+import { AlertCircle, Loader2, Mail, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -23,37 +23,15 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 type OAuthProvider = "google" | "facebook";
-type ProviderAvailability = Record<OAuthProvider, boolean | null>;
-
-const DEFAULT_PROVIDER_AVAILABILITY: ProviderAvailability = {
-  google: null,
-  facebook: null,
-};
 
 interface LoginFormProps {
   nextPath?: string;
   initialError?: string | null;
 }
 
-const getSupabaseBaseUrl = () =>
-  (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/u, "");
-
-const getSupabaseProjectRef = () => {
-  const supabaseUrl = getSupabaseBaseUrl();
-  const match = supabaseUrl.match(/^https:\/\/([^.]+)\.supabase\.co$/u);
-  return match?.[1] ?? null;
-};
-
 const buildProviderDisabledError = (provider: OAuthProvider) => {
   const providerName = provider === "google" ? "Google" : "Facebook";
-  const projectRef = getSupabaseProjectRef();
-  const callback = getSupabaseBaseUrl()
-    ? `${getSupabaseBaseUrl()}/auth/v1/callback`
-    : "https://<project-ref>.supabase.co/auth/v1/callback";
-
-  return `ยังไม่ได้เปิด ${providerName} ใน Supabase โปรเจกต์ที่เว็บเชื่อมต่ออยู่${
-    projectRef ? ` (${projectRef})` : ""
-  } กรุณาไปที่ Supabase > Authentication > Providers แล้วเปิด ${providerName} พร้อมใส่ Client ID/Secret และตั้ง Redirect URI เป็น ${callback}`;
+  return `ยังไม่ได้เปิดเข้าสู่ระบบด้วย ${providerName} ในระบบ กรุณาติดต่อผู้ดูแลเพื่อเปิด Provider นี้ใน Supabase`;
 };
 
 const mapProviderErrorMessage = (provider: OAuthProvider | null, rawMessage: string) => {
@@ -70,36 +48,15 @@ const mapProviderErrorMessage = (provider: OAuthProvider | null, rawMessage: str
   return rawMessage;
 };
 
-const parseProviderAvailability = (payload: unknown): ProviderAvailability => {
-  if (!payload || typeof payload !== "object") {
-    return DEFAULT_PROVIDER_AVAILABILITY;
-  }
-
-  const external = (payload as { external?: Record<string, unknown> }).external;
-  if (!external || typeof external !== "object") {
-    return DEFAULT_PROVIDER_AVAILABILITY;
-  }
-
-  return {
-    google: typeof external.google === "boolean" ? external.google : null,
-    facebook: typeof external.facebook === "boolean" ? external.facebook : null,
-  };
-};
-
 export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormProps) => {
   const [error, setError] = useState<string | null>(
     initialError ? mapProviderErrorMessage(null, initialError) : null,
   );
   const [isPending, setPending] = useState(false);
   const [isSendingReset, setSendingReset] = useState(false);
-  const [resetEmailInput, setResetEmailInput] = useState("");
   const [loginEmailInput, setLoginEmailInput] = useState("");
   const [resetInfo, setResetInfo] = useState<string | null>(null);
   const [oauthPending, setOauthPending] = useState<OAuthProvider | null>(null);
-  const [providerAvailability, setProviderAvailability] = useState<ProviderAvailability>(
-    DEFAULT_PROVIDER_AVAILABILITY,
-  );
-  const [isCheckingProviders, setCheckingProviders] = useState(false);
   const router = useRouter();
 
   const {
@@ -113,18 +70,6 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
 
   const googleDisabled = Boolean(oauthPending);
   const facebookDisabled = Boolean(oauthPending);
-
-  const providerStatusText = useMemo(() => {
-    const toText = (value: boolean | null) => {
-      if (value === true) return "พร้อมใช้งาน";
-      if (value === false) return "ยังไม่เปิดใน Supabase";
-      return "กำลังตรวจสอบ";
-    };
-    return {
-      google: toText(providerAvailability.google),
-      facebook: toText(providerAvailability.facebook),
-    };
-  }, [providerAvailability.facebook, providerAvailability.google]);
 
   const getSafeNextPath = () => {
     if (!nextPath.startsWith("/") || nextPath.startsWith("//")) return "/app";
@@ -140,44 +85,6 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     const params = new URLSearchParams({ next: "/reset-password" });
     return `${window.location.origin}/auth/callback?${params.toString()}`;
   };
-
-  const refreshProviderStatus = async () => {
-    const supabaseUrl = getSupabaseBaseUrl();
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-    if (!supabaseUrl || !anonKey) return null;
-
-    setCheckingProviders(true);
-    try {
-      const response = await fetch(`${supabaseUrl}/auth/v1/settings`, {
-        method: "GET",
-        cache: "no-store",
-        headers: {
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-        },
-      });
-
-      if (!response.ok) {
-        return null;
-      }
-
-      const payload = (await response.json()) as unknown;
-      const availability = parseProviderAvailability(payload);
-      setProviderAvailability(availability);
-      return availability;
-    } catch {
-      return null;
-    } finally {
-      setCheckingProviders(false);
-    }
-  };
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void refreshProviderStatus();
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   const onSubmit = handleSubmit(async (values) => {
     setPending(true);
@@ -202,10 +109,12 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     setError(null);
     setResetInfo(null);
 
-    const candidateEmail = resetEmailInput.trim() || loginEmailInput.trim();
+    const emailElement = document.getElementById("email") as HTMLInputElement | null;
+    const candidateEmail = loginEmailInput.trim() || emailElement?.value.trim() || "";
     const parsed = z.email().safeParse(candidateEmail);
     if (!parsed.success) {
-      setError("กรุณากรอกอีเมลที่ถูกต้องสำหรับส่งลิงก์ตั้งรหัสผ่านใหม่");
+      setError("กรุณากรอกอีเมลในช่องอีเมลด้านบนก่อนกดลืมรหัสผ่าน");
+      emailElement?.focus();
       return;
     }
 
@@ -230,11 +139,6 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     setError(null);
     setResetInfo(null);
 
-    if (providerAvailability[provider] === false) {
-      // แจ้งเตือนแบบไม่บล็อก เพื่อให้ผู้ใช้ยังลอง login ได้ในกรณี setting เพิ่งอัปเดต
-      setError(buildProviderDisabledError(provider));
-    }
-
     setOauthPending(provider);
     const supabase = createSupabaseBrowserClient();
     const oauthScopes =
@@ -254,14 +158,9 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     if (oauthError) {
       if (oauthError.message.toLowerCase().includes("provider is not enabled")) {
         setError(buildProviderDisabledError(provider));
-        void refreshProviderStatus();
         return;
       }
-
-      const callbackHint = getSupabaseBaseUrl()
-        ? `${getSupabaseBaseUrl()}/auth/v1/callback`
-        : "https://<project-ref>.supabase.co/auth/v1/callback";
-      setError(`${mapProviderErrorMessage(provider, oauthError.message)} (ตรวจ redirect URI ให้มี ${callbackHint})`);
+      setError(mapProviderErrorMessage(provider, oauthError.message));
     }
   };
 
@@ -336,22 +235,15 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
           <div className="rounded-lg border border-cyan-200/70 bg-cyan-50/50 p-3">
             <p className="text-xs font-semibold text-cyan-900">ลืมรหัสผ่าน</p>
             <p className="mt-1 text-xs text-cyan-900/80">
-              กรอกอีเมลแล้วกดส่งลิงก์ ระบบจะส่งอีเมลตั้งรหัสผ่านใหม่ให้ทันที
+              กรอกอีเมลในช่องด้านบน แล้วกดปุ่มนี้เพื่อรับลิงก์ตั้งรหัสผ่านใหม่ทางอีเมล
             </p>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-              <Input
-                type="email"
-                value={resetEmailInput}
-                onChange={(event) => setResetEmailInput(event.target.value)}
-                placeholder={loginEmailInput.trim() || "อีเมลสำหรับรับลิงก์รีเซ็ตรหัสผ่าน"}
-                aria-label="อีเมลสำหรับรีเซ็ตรหัสผ่าน"
-              />
+            <div className="mt-3">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => void requestPasswordReset()}
                 disabled={isSendingReset}
-                className="sm:min-w-[180px]"
+                className="w-full"
               >
                 {isSendingReset ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
                 <span>{isSendingReset ? "กำลังส่งลิงก์..." : "ส่งลิงก์ตั้งรหัสผ่านใหม่"}</span>
@@ -368,35 +260,6 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
         ) : null}
 
         <div className="space-y-2">
-          <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
-            <div className="flex items-center justify-between gap-2">
-              <p className="font-semibold text-foreground">สถานะ Social Login ของโปรเจกต์นี้</p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 px-2"
-                onClick={() => void refreshProviderStatus()}
-                disabled={isCheckingProviders}
-              >
-                {isCheckingProviders ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                <span>{isCheckingProviders ? "ตรวจสอบ..." : "เช็คใหม่"}</span>
-              </Button>
-            </div>
-            <p className="mt-1">Google: {providerStatusText.google}</p>
-            <p>Facebook: {providerStatusText.facebook}</p>
-            <p className="mt-2 break-all">
-              โปรเจกต์ที่เว็บเชื่อมอยู่:{" "}
-              <span className="font-medium text-foreground">{getSupabaseProjectRef() ?? "ไม่พบ project ref"}</span>
-            </p>
-            <p className="break-all">
-              Callback ที่ต้องใช้:{" "}
-              <span className="font-medium text-foreground">
-                {getSupabaseBaseUrl() ? `${getSupabaseBaseUrl()}/auth/v1/callback` : "https://<project-ref>.supabase.co/auth/v1/callback"}
-              </span>
-            </p>
-          </div>
-
           <p className="text-center text-xs text-muted-foreground">หรือเข้าสู่ระบบด้วยบัญชีอื่น</p>
           <div className="grid gap-2">
             <Button
