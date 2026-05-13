@@ -43,6 +43,8 @@ type StoredAccessibilityPrefs = Partial<AccessibilityPrefs> & {
 interface PendingConfirmation {
   intent: VoiceIntent;
   prompt: string;
+  onAffirmative?: () => void | Promise<void>;
+  onNegative?: () => void | Promise<void>;
 }
 
 interface VoiceStartEventDetail {
@@ -58,6 +60,8 @@ const STORAGE_KEY = "careguide-a11y-prefs-v2";
 const VOICE_AUTOSTART_KEY = "careguide-voice-autostart-v1";
 const VOICE_START_EVENT = "careguide:voice-mode-start";
 const VOICE_AUTOSTART_MAX_AGE_MS = 20_000;
+const VOICE_MEDICINE_SCAN_FLOW_KEY = "careguide-voice-medicine-scan-flow-v1";
+const VOICE_MEDICINE_SCAN_FLOW_MAX_AGE_MS = 90_000;
 
 const DEFAULT_PREFS: AccessibilityPrefs = {
   voiceEnabled: true,
@@ -206,6 +210,8 @@ export const AccessibilityAssistant = () => {
   const pathname = usePathname();
   const isHomeRoute = pathname === "/";
   const isPatientRoute = pathname?.startsWith("/app/patient") ?? false;
+  const isMedicineScanRoute = pathname === "/app/scan/medicine";
+  const isBloodPressureScanRoute = pathname === "/app/scan/blood-pressure";
   const isLoginRoute = pathname === "/login";
   const isRegisterRoute = pathname === "/register";
   const isAuthRoute = isLoginRoute || isRegisterRoute;
@@ -234,10 +240,15 @@ export const AccessibilityAssistant = () => {
     isRegisterRoute,
     isPreAuthRoute,
     isPatientRoute,
+    isMedicineScanRoute,
+    isBloodPressureScanRoute,
   });
   const recognitionAbortRef = useRef<AbortController | null>(null);
   const lastSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
   const lastErrorSpokenRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
+  const medicineScanResultWatcherRef = useRef<number | null>(null);
+  const medicinePlanSaveWatcherRef = useRef<number | null>(null);
+  const medicineVoiceFlowActiveRef = useRef(false);
 
   const speakFeedback = useCallback(
     (text: string, force = false) => {
@@ -294,6 +305,8 @@ export const AccessibilityAssistant = () => {
   const clickBySelector = useCallback((selector: string) => {
     const target = document.querySelector<HTMLElement>(selector);
     if (!target) return false;
+    if (target instanceof HTMLButtonElement && target.disabled) return false;
+    if (target.getAttribute("aria-disabled") === "true") return false;
 
     target.scrollIntoView({ behavior: "smooth", block: "center" });
     if (
@@ -389,8 +402,20 @@ export const AccessibilityAssistant = () => {
   );
 
   const queueConfirmation = useCallback(
-    (intent: VoiceIntent, prompt: string) => {
-      const nextConfirmation = { intent, prompt };
+    (
+      intent: VoiceIntent,
+      prompt: string,
+      options?: {
+        onAffirmative?: () => void | Promise<void>;
+        onNegative?: () => void | Promise<void>;
+      },
+    ) => {
+      const nextConfirmation: PendingConfirmation = {
+        intent,
+        prompt,
+        onAffirmative: options?.onAffirmative,
+        onNegative: options?.onNegative,
+      };
       pendingConfirmationRef.current = nextConfirmation;
       setVoiceStatusText(prompt);
       speakFeedback(`${prompt} ตอบว่า ใช่ ไม่ หรือ ทบทวน`, true);
@@ -586,36 +611,27 @@ export const AccessibilityAssistant = () => {
           return;
         }
 
-        const sectionId = sectionIdByIntent[intent.sectionId];
-        const ok = moveToSection(sectionId);
-        if (ok) {
-          setVoiceStatusText(`กำลังไปที่ ${intent.label}`);
-          speakFeedback(`กำลังไปที่ ${intent.label}`);
-        } else {
-          setVoiceStatusText(`กำลังเปิดหน้าเพื่อ ${intent.label}`);
-          speakFeedback(`กำลังเปิดหน้าเพื่อ ${intent.label}`);
-        }
-
         if (currentFlags.isPatientRoute) {
           if (intent.sectionId === "medicine") {
-            const followIntent: VoiceIntent = {
-              type: "action",
-              actionId: "start-med-camera-scan",
-              label: "เริ่มสแกนยาด้วยกล้อง",
-              requiresConfirmation: true,
-            };
-            queueConfirmation(followIntent, "ถึงส่วนสแกนยาแล้ว ต้องการเริ่มสแกนด้วยกล้องเลยไหม");
+            if (typeof window !== "undefined") {
+              window.localStorage.setItem(
+                VOICE_MEDICINE_SCAN_FLOW_KEY,
+                JSON.stringify({
+                  requestedAt: Date.now(),
+                  source: "patient-voice-command",
+                }),
+              );
+            }
+            setVoiceStatusText("กำลังเปิดหน้าสแกนยา");
+            speakFeedback("กำลังเปิดหน้าสแกนยา");
+            router.push("/app/scan/medicine");
             return;
           }
 
           if (intent.sectionId === "blood-pressure") {
-            const followIntent: VoiceIntent = {
-              type: "action",
-              actionId: "start-bp-camera-scan",
-              label: "เริ่มสแกนความดันด้วยกล้อง",
-              requiresConfirmation: true,
-            };
-            queueConfirmation(followIntent, "ถึงส่วนสแกนความดันแล้ว ต้องการเริ่มสแกนด้วยกล้องเลยไหม");
+            setVoiceStatusText("กำลังเปิดหน้าสแกนความดัน");
+            speakFeedback("กำลังเปิดหน้าสแกนความดัน");
+            router.push("/app/scan/blood-pressure");
             return;
           }
 
@@ -628,6 +644,16 @@ export const AccessibilityAssistant = () => {
             await runAppointmentRequestVoiceFlow();
             return;
           }
+        }
+
+        const sectionId = sectionIdByIntent[intent.sectionId];
+        const ok = moveToSection(sectionId);
+        if (ok) {
+          setVoiceStatusText(`กำลังไปที่ ${intent.label}`);
+          speakFeedback(`กำลังไปที่ ${intent.label}`);
+        } else {
+          setVoiceStatusText(`กำลังเปิดหน้าเพื่อ ${intent.label}`);
+          speakFeedback(`กำลังเปิดหน้าเพื่อ ${intent.label}`);
         }
         return;
       }
@@ -781,7 +807,7 @@ export const AccessibilityAssistant = () => {
       ensureActionFieldHasContent,
       buildLatestMedicationReminderSpeech,
       moveToSection,
-      queueConfirmation,
+      router,
       runAppointmentRequestVoiceFlow,
       runSupportRequestVoiceFlow,
       speakFeedback,
@@ -824,8 +850,12 @@ export const AccessibilityAssistant = () => {
         if (isNegativeSpeech(normalized)) {
           pendingConfirmationRef.current = null;
           noIntentStreakRef.current = 0;
-          setVoiceStatusText("ยกเลิกคำสั่งแล้ว");
-          speakFeedback("ยกเลิกคำสั่งแล้ว");
+          if (activePendingConfirmation.onNegative) {
+            await activePendingConfirmation.onNegative();
+          } else {
+            setVoiceStatusText("ยกเลิกคำสั่งแล้ว");
+            speakFeedback("ยกเลิกคำสั่งแล้ว");
+          }
           return;
         }
 
@@ -833,9 +863,13 @@ export const AccessibilityAssistant = () => {
           const confirmedIntent = activePendingConfirmation.intent;
           pendingConfirmationRef.current = null;
           noIntentStreakRef.current = 0;
-          setVoiceStatusText("ยืนยันคำสั่งแล้ว กำลังดำเนินการ");
-          speakFeedback("ยืนยันแล้ว กำลังดำเนินการ");
-          await executeIntent(confirmedIntent);
+          if (activePendingConfirmation.onAffirmative) {
+            await activePendingConfirmation.onAffirmative();
+          } else {
+            setVoiceStatusText("ยืนยันคำสั่งแล้ว กำลังดำเนินการ");
+            speakFeedback("ยืนยันแล้ว กำลังดำเนินการ");
+            await executeIntent(confirmedIntent);
+          }
           return;
         }
 
@@ -1003,8 +1037,204 @@ export const AccessibilityAssistant = () => {
       isRegisterRoute,
       isPreAuthRoute,
       isPatientRoute,
+      isMedicineScanRoute,
+      isBloodPressureScanRoute,
     };
-  }, [isHomeRoute, isLoginRoute, isRegisterRoute, isPreAuthRoute, isPatientRoute]);
+  }, [
+    isHomeRoute,
+    isLoginRoute,
+    isRegisterRoute,
+    isPreAuthRoute,
+    isPatientRoute,
+    isMedicineScanRoute,
+    isBloodPressureScanRoute,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!isMedicineScanRoute) return;
+    if (!voiceModeEnabled || !voiceEnabledRef.current || !shouldRunVoiceLoopRef.current) return;
+
+    const raw = window.localStorage.getItem(VOICE_MEDICINE_SCAN_FLOW_KEY);
+    if (!raw) return;
+    window.localStorage.removeItem(VOICE_MEDICINE_SCAN_FLOW_KEY);
+
+    let requestedAt = Date.now();
+    try {
+      const parsed = JSON.parse(raw) as { requestedAt?: number };
+      if (typeof parsed.requestedAt === "number") {
+        requestedAt = parsed.requestedAt;
+      }
+    } catch {
+      const numericValue = Number(raw);
+      if (Number.isFinite(numericValue)) {
+        requestedAt = numericValue;
+      }
+    }
+
+    if (Date.now() - requestedAt > VOICE_MEDICINE_SCAN_FLOW_MAX_AGE_MS) {
+      return;
+    }
+
+    medicineVoiceFlowActiveRef.current = true;
+
+    const startIntent: VoiceIntent = {
+      type: "action",
+      actionId: "start-med-camera-scan",
+      label: "เริ่มสแกนยาด้วยกล้อง",
+      requiresConfirmation: true,
+    };
+
+    const runRescanPrompt = () => {
+      const rescanIntent: VoiceIntent = {
+        type: "action",
+        actionId: "start-med-camera-scan",
+        label: "สแกนยาใหม่อีกครั้ง",
+        requiresConfirmation: true,
+      };
+      queueConfirmation(rescanIntent, "ต้องการสแกนยาใหม่อีกรอบหรือไม่", {
+        onAffirmative: async () => {
+          const clicked = clickBySelector("[data-voice-action='start-med-camera-scan']");
+          if (!clicked) {
+            const message = "ยังไม่พบปุ่มเริ่มสแกนด้วยกล้อง";
+            setVoiceStatusText(message);
+            speakFeedback(message, true);
+            return;
+          }
+          setVoiceStatusText("เริ่มสแกนยาใหม่แล้ว กรุณาค้างกล้องไว้");
+          speakFeedback("เริ่มสแกนยาใหม่แล้ว กรุณาค้างกล้องไว้");
+          watchScanReady();
+        },
+        onNegative: async () => {
+          medicineVoiceFlowActiveRef.current = false;
+          setVoiceStatusText("กลับไปหน้าหลักผู้ใช้งาน");
+          speakFeedback("รับทราบ กลับไปหน้าหลักผู้ใช้งาน");
+          router.push("/app/patient");
+        },
+      });
+    };
+
+    const watchSaveResult = () => {
+      if (medicinePlanSaveWatcherRef.current !== null) {
+        window.clearInterval(medicinePlanSaveWatcherRef.current);
+      }
+
+      medicinePlanSaveWatcherRef.current = window.setInterval(() => {
+        if (!medicineVoiceFlowActiveRef.current || pathname !== "/app/scan/medicine") {
+          if (medicinePlanSaveWatcherRef.current !== null) {
+            window.clearInterval(medicinePlanSaveWatcherRef.current);
+            medicinePlanSaveWatcherRef.current = null;
+          }
+          return;
+        }
+
+        const successAlert = Array.from(document.querySelectorAll<HTMLElement>("[role='alert']"))
+          .find((element) =>
+            normalizeText(element.textContent ?? "").includes("ยืนยันผลสแกนแล้ว"),
+          );
+        if (successAlert) {
+          if (medicinePlanSaveWatcherRef.current !== null) {
+            window.clearInterval(medicinePlanSaveWatcherRef.current);
+            medicinePlanSaveWatcherRef.current = null;
+          }
+          medicineVoiceFlowActiveRef.current = false;
+          setVoiceStatusText("บันทึกแผนยาเรียบร้อยแล้ว กำลังกลับหน้าหลัก");
+          speakFeedback("ยืนยันผลสำเร็จแล้ว กำลังกลับหน้าหลักผู้ใช้งาน");
+          router.push("/app/patient");
+        }
+      }, 700);
+    };
+
+    const watchScanReady = () => {
+      if (medicineScanResultWatcherRef.current !== null) {
+        window.clearInterval(medicineScanResultWatcherRef.current);
+      }
+
+      medicineScanResultWatcherRef.current = window.setInterval(() => {
+        if (!medicineVoiceFlowActiveRef.current || pathname !== "/app/scan/medicine") {
+          if (medicineScanResultWatcherRef.current !== null) {
+            window.clearInterval(medicineScanResultWatcherRef.current);
+            medicineScanResultWatcherRef.current = null;
+          }
+          return;
+        }
+
+        const confirmButton = document.querySelector<HTMLButtonElement>(
+          "[data-voice-action='confirm-med-plan']",
+        );
+        if (!confirmButton || confirmButton.disabled) return;
+
+        if (medicineScanResultWatcherRef.current !== null) {
+          window.clearInterval(medicineScanResultWatcherRef.current);
+          medicineScanResultWatcherRef.current = null;
+        }
+
+        const summaryText = normalizeText(
+          document.querySelector<HTMLElement>("[data-voice-medicine-summary]")?.textContent ??
+            "ระบบอ่านฉลากยาเสร็จแล้ว กรุณาตรวจสอบข้อมูล",
+        );
+
+        const confirmIntent: VoiceIntent = {
+          type: "action",
+          actionId: "confirm-med-plan",
+          label: "ยืนยันผลยาและบันทึกแผนยา",
+          requiresConfirmation: true,
+        };
+
+        queueConfirmation(confirmIntent, `${summaryText} ต้องการยืนยันผลหรือไม่`, {
+          onAffirmative: async () => {
+            const clicked = clickBySelector("[data-voice-action='confirm-med-plan']");
+            if (!clicked) {
+              const message = "ยังไม่พบปุ่มยืนยันผลยา";
+              setVoiceStatusText(message);
+              speakFeedback(message, true);
+              return;
+            }
+            setVoiceStatusText("กำลังบันทึกผลยา กรุณารอสักครู่");
+            speakFeedback("กำลังบันทึกผลยา กรุณารอสักครู่");
+            watchSaveResult();
+          },
+          onNegative: async () => {
+            setVoiceStatusText("ไม่ยืนยันผลยา");
+            speakFeedback("รับทราบ ยังไม่ยืนยันผลยา");
+            runRescanPrompt();
+          },
+        });
+      }, 700);
+    };
+
+    queueConfirmation(startIntent, "จะเริ่มสแกนยาเลยหรือไม่", {
+      onAffirmative: async () => {
+        const clicked = clickBySelector("[data-voice-action='start-med-camera-scan']");
+        if (!clicked) {
+          const message = "ยังไม่พบปุ่มเริ่มสแกนด้วยกล้อง";
+          setVoiceStatusText(message);
+          speakFeedback(message, true);
+          return;
+        }
+        setVoiceStatusText("เริ่มสแกนยาแล้ว กรุณาค้างกล้องไว้");
+        speakFeedback("เริ่มสแกนยาแล้ว กรุณาค้างกล้องไว้");
+        watchScanReady();
+      },
+      onNegative: async () => {
+        medicineVoiceFlowActiveRef.current = false;
+        setVoiceStatusText("รับทราบ กลับไปหน้าหลักผู้ใช้งาน");
+        speakFeedback("รับทราบ กลับไปหน้าหลักผู้ใช้งาน");
+        router.push("/app/patient");
+      },
+    });
+  }, [clickBySelector, isMedicineScanRoute, pathname, queueConfirmation, router, speakFeedback, voiceModeEnabled]);
+
+  useEffect(() => {
+    return () => {
+      if (medicineScanResultWatcherRef.current !== null) {
+        window.clearInterval(medicineScanResultWatcherRef.current);
+      }
+      if (medicinePlanSaveWatcherRef.current !== null) {
+        window.clearInterval(medicinePlanSaveWatcherRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof document === "undefined") return;

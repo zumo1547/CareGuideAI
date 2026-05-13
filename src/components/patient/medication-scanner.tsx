@@ -1643,6 +1643,25 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
     parsedDetails?.periods.length ? parsedDetails.periods.map(periodToThai).join(", ") : "-";
 
   const parsedMealLabel = parsedDetails ? mealTimingToThai(parsedDetails.mealTiming) : "-";
+  const resolvedPillsPerDoseForVoice =
+    parsePositiveNumber(pillsPerDoseInput) ?? parsedDetails?.quantityPerDoseValue ?? 1;
+  const resolvedTotalPillsForVoice =
+    parsePositiveInt(totalPillsInput) ?? parsedDetails?.totalPillsInPackage ?? null;
+  const medicationTypeLabelForVoice =
+    medicationType === "prescription" ? "ยาตามแพทย์สั่ง" : "ยาทั่วไป";
+  const voiceSummaryText = parsedDetails
+    ? [
+        `อ่านผลสแกนยาแล้ว`,
+        `ชื่อยา ${parsedDetails.medicineNameEn || parsedDetails.medicineNameTh || "-"}`,
+        `ช่วงเวลา ${parsedPeriodsLabel}`,
+        `ก่อนหรือหลังอาหาร ${parsedMealLabel}`,
+        `ชนิดยา ${medicationTypeLabelForVoice}`,
+        `กินครั้งละ ${resolvedPillsPerDoseForVoice} เม็ด`,
+        resolvedTotalPillsForVoice ? `จำนวนยาทั้งหมด ${resolvedTotalPillsForVoice} เม็ด` : null,
+      ]
+        .filter(Boolean)
+        .join(" , ")
+    : "";
   const canSubmitByMedicationType = useMemo(() => {
     const pillsPerDose = parsePositiveNumber(pillsPerDoseInput) ?? parsedDetails?.quantityPerDoseValue ?? 1;
     if (!pillsPerDose || pillsPerDose <= 0) return false;
@@ -1896,6 +1915,9 @@ export const MedicationScanner = ({ patientId }: MedicationScannerProps) => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
+                <p className="sr-only" data-voice-medicine-summary>
+                  {voiceSummaryText}
+                </p>
                 {ocrValidation ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={ocrValidation.canConfirm ? "default" : "destructive"}>
