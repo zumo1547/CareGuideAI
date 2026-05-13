@@ -2,6 +2,8 @@
 
 import {
   CalendarClock,
+  ChevronDown,
+  ChevronUp,
   CheckCircle2,
   ExternalLink,
   Loader2,
@@ -54,6 +56,7 @@ const DEFAULT_DRAFT: AppointmentDraft = {
   note: "",
   preferredAt: "",
 };
+const APPOINTMENT_PREVIEW_LIMIT = 3;
 
 const formatDateTime = (value: string | null) => {
   return formatDateTimeInTimeZone(value, DEFAULT_APP_TIMEZONE, "dd/MM/yy HH:mm");
@@ -119,6 +122,7 @@ export const AppointmentForm = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lastAlarmMessage, setLastAlarmMessage] = useState<string | null>(null);
+  const [isAppointmentListExpanded, setAppointmentListExpanded] = useState(false);
 
   const appendAppointmentRequestNote = useCallback((text: string) => {
     setRequestNote((previous) => `${previous} ${text}`.trim());
@@ -320,6 +324,17 @@ export const AppointmentForm = ({
       ),
     [appointments],
   );
+  const displayedAppointments = useMemo(
+    () =>
+      isAppointmentListExpanded
+        ? visibleAppointments
+        : visibleAppointments.slice(0, APPOINTMENT_PREVIEW_LIMIT),
+    [isAppointmentListExpanded, visibleAppointments],
+  );
+  const hiddenAppointmentCount = Math.max(
+    visibleAppointments.length - displayedAppointments.length,
+    0,
+  );
 
   return (
     <Card>
@@ -429,10 +444,34 @@ export const AppointmentForm = ({
         <section className="space-y-3 rounded-xl border p-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">นัดหมายของฉัน</h3>
-            <Button type="button" variant="outline" size="sm" onClick={() => void refreshAppointments()} disabled={loadingList}>
-              {loadingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              รีเฟรช
-            </Button>
+            <div className="flex items-center gap-2">
+              {visibleAppointments.length > APPOINTMENT_PREVIEW_LIMIT ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAppointmentListExpanded((previous) => !previous)}
+                  aria-expanded={isAppointmentListExpanded}
+                  aria-controls="patient-appointment-list"
+                >
+                  {isAppointmentListExpanded ? (
+                    <>
+                      <ChevronUp className="h-4 w-4" />
+                      ย่อรายการ
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-4 w-4" />
+                      ดูทั้งหมด
+                    </>
+                  )}
+                </Button>
+              ) : null}
+              <Button type="button" variant="outline" size="sm" onClick={() => void refreshAppointments()} disabled={loadingList}>
+                {loadingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                รีเฟรช
+              </Button>
+            </div>
           </div>
 
           {loadingList ? (
@@ -440,8 +479,8 @@ export const AppointmentForm = ({
           ) : visibleAppointments.length === 0 ? (
             <p className="text-sm text-muted-foreground">ยังไม่มีนัดหมายในระบบ</p>
           ) : (
-            <div className="space-y-3">
-              {visibleAppointments.map((appointment) => {
+            <div id="patient-appointment-list" className="space-y-3">
+              {displayedAppointments.map((appointment) => {
                 const draft = getDraft(appointment);
                 const canRespond =
                   appointment.status === "pending" &&
@@ -602,6 +641,11 @@ export const AppointmentForm = ({
                   </div>
                 );
               })}
+              {!isAppointmentListExpanded && hiddenAppointmentCount > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  ซ่อนอยู่อีก {hiddenAppointmentCount} นัดหมาย กด “ดูทั้งหมด” เพื่อแสดงเพิ่มเติม
+                </p>
+              ) : null}
             </div>
           )}
         </section>

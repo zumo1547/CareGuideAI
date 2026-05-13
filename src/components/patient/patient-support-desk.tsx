@@ -1,6 +1,14 @@
 ﻿"use client";
 
-import { Loader2, MessageCircleHeart, RefreshCcw, Send, ShieldAlert } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  MessageCircleHeart,
+  RefreshCcw,
+  Send,
+  ShieldAlert,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { SpeechToTextButton } from "@/components/accessibility/speech-to-text-button";
@@ -48,6 +56,8 @@ const statusLabel: Record<SupportCaseStatus, string> = {
   active: "กำลังคุย",
   closed: "ปิดเคสแล้ว",
 };
+const CASE_PREVIEW_LIMIT = 3;
+const CHAT_MESSAGE_PREVIEW_LIMIT = 12;
 
 const formatDateTime = (value: string | null) => {
   return formatDateTimeInTimeZone(value, DEFAULT_APP_TIMEZONE, "dd/MM/yy HH:mm");
@@ -97,6 +107,8 @@ export const PatientSupportDesk = ({
   const [success, setSuccess] = useState<string | null>(null);
   const [schemaReloadSql, setSchemaReloadSql] = useState<string | null>(null);
   const [schemaDebugMessage, setSchemaDebugMessage] = useState<string | null>(null);
+  const [isCaseListExpanded, setCaseListExpanded] = useState(false);
+  const [expandedMessageCaseId, setExpandedMessageCaseId] = useState<string | null>(null);
   const lastSpokenDoctorMessageAtRef = useRef<string>("");
 
   const selectedCase = useMemo(
@@ -110,6 +122,21 @@ export const PatientSupportDesk = ({
     }
     return doctorOptions[0].id;
   }, [doctorOptions, selectedDoctorId]);
+  const displayedCases = useMemo(
+    () => (isCaseListExpanded ? cases : cases.slice(0, CASE_PREVIEW_LIMIT)),
+    [cases, isCaseListExpanded],
+  );
+  const hiddenCaseCount = Math.max(cases.length - displayedCases.length, 0);
+  const isMessageHistoryExpanded =
+    Boolean(selectedCaseId) && expandedMessageCaseId === selectedCaseId;
+  const visibleMessages = useMemo(
+    () =>
+      isMessageHistoryExpanded
+        ? messages
+        : messages.slice(Math.max(0, messages.length - CHAT_MESSAGE_PREVIEW_LIMIT)),
+    [isMessageHistoryExpanded, messages],
+  );
+  const hiddenMessageCount = Math.max(messages.length - visibleMessages.length, 0);
 
   const appendRequestMessage = useCallback((text: string) => {
     setRequestMessage((previous) => `${previous} ${text}`.trim());
@@ -474,18 +501,42 @@ export const PatientSupportDesk = ({
             <h3 className="text-sm font-semibold">
               {actorRole === "caregiver" ? "เคสของผู้ป่วยคนนี้" : "เคสของฉัน"}
             </h3>
-            <Button type="button" variant="outline" size="sm" onClick={() => void refreshCases()} disabled={isLoadingCases}>
-              {isLoadingCases ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              รีเฟรช
-            </Button>
+            <div className="flex items-center gap-2">
+              {cases.length > CASE_PREVIEW_LIMIT ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCaseListExpanded((previous) => !previous)}
+                  aria-expanded={isCaseListExpanded}
+                  aria-controls="support-case-list"
+                >
+                  {isCaseListExpanded ? (
+                    <>
+                      <ChevronUp className="h-4 w-4" />
+                      ย่อรายการ
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-4 w-4" />
+                      ดูทั้งหมด
+                    </>
+                  )}
+                </Button>
+              ) : null}
+              <Button type="button" variant="outline" size="sm" onClick={() => void refreshCases()} disabled={isLoadingCases}>
+                {isLoadingCases ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                รีเฟรช
+              </Button>
+            </div>
           </div>
           {isLoadingCases ? (
             <p className="text-sm text-muted-foreground">กำลังโหลดรายการเคส...</p>
           ) : cases.length === 0 ? (
             <p className="text-sm text-muted-foreground">ยังไม่มีเคสที่ส่งถึงคุณหมอ</p>
           ) : (
-            <div className="space-y-2">
-              {cases.map((item) => (
+            <div id="support-case-list" className="space-y-2">
+              {displayedCases.map((item) => (
                 <button
                   key={item.id}
                   type="button"
@@ -504,6 +555,11 @@ export const PatientSupportDesk = ({
                   <p className="mt-2 text-xs text-muted-foreground">ส่งเมื่อ {formatDateTime(item.requestedAt)}</p>
                 </button>
               ))}
+              {!isCaseListExpanded && hiddenCaseCount > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  ซ่อนอยู่อีก {hiddenCaseCount} เคส กด “ดูทั้งหมด” เพื่อแสดงเพิ่มเติม
+                </p>
+              ) : null}
             </div>
           )}
         </section>
@@ -528,18 +584,52 @@ export const PatientSupportDesk = ({
                 <AlertDescription>เมื่อคุณหมอตอบรับแล้วจะส่งข้อความได้ทันทีแบบเรียลไทม์</AlertDescription>
               </Alert>
             ) : null}
+            {messages.length > CHAT_MESSAGE_PREVIEW_LIMIT ? (
+              <div className="flex items-center justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setExpandedMessageCaseId((previous) =>
+                      previous === selectedCaseId ? null : selectedCaseId,
+                    )
+                  }
+                  aria-expanded={isMessageHistoryExpanded}
+                  aria-controls="support-chat-history"
+                >
+                  {isMessageHistoryExpanded ? (
+                    <>
+                      <ChevronUp className="h-4 w-4" />
+                      ย่อประวัติแชท
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-4 w-4" />
+                      ดูประวัติแชททั้งหมด
+                    </>
+                  )}
+                </Button>
+              </div>
+            ) : null}
 
-            <div className="max-h-80 space-y-2 overflow-y-auto rounded-lg border bg-muted/20 p-3">
+            <div id="support-chat-history" className="max-h-80 space-y-2 overflow-y-auto rounded-lg border bg-muted/20 p-3">
               <div className="rounded-lg bg-white p-3 text-sm shadow-sm">
                 <p className="font-medium">คำร้องเริ่มต้น</p>
                 <p className="mt-1 whitespace-pre-wrap">{selectedCase.requestMessage}</p>
                 <p className="mt-1 text-xs text-muted-foreground">ส่งเมื่อ {formatDateTime(selectedCase.requestedAt)}</p>
               </div>
 
+              {!isMessageHistoryExpanded && hiddenMessageCount > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  ซ่อนข้อความเก่า {hiddenMessageCount} ข้อความ กด “ดูประวัติแชททั้งหมด” เพื่อแสดง
+                </p>
+              ) : null}
+
               {isLoadingMessages ? (
                 <p className="text-sm text-muted-foreground">กำลังโหลดข้อความ...</p>
               ) : (
-                messages.map((message) => {
+                visibleMessages.map((message) => {
                   const isMine = message.senderId === actorId;
                   return (
                     <div
