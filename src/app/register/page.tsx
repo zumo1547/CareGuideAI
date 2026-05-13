@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { RegisterForm } from "@/components/auth/register-form";
@@ -31,7 +31,7 @@ export default async function RegisterPage({ searchParams }: RegisterPageProps) 
               เพื่อดูแลสุขภาพอย่างมั่นใจ
             </h1>
             <p className="text-slate-600">
-              ผู้พิการและผู้ดูแลสมัครได้ทันที ส่วนบัญชีคุณหมอสมัครได้ผ่านระบบเชิญจากแอดมิน
+              ผู้พิการและผู้ดูแลสมัครได้ทันที ส่วนบัญชีแพทย์สมัครได้ผ่านระบบเชิญจากแอดมิน
             </p>
             <p className="text-sm text-muted-foreground">
               มีบัญชีแล้ว?{" "}
@@ -49,3 +49,4 @@ export default async function RegisterPage({ searchParams }: RegisterPageProps) 
     </div>
   );
 }
+

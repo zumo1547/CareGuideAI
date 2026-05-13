@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     .single();
 
   if (doctorError || !doctor || doctor.role !== "doctor") {
-    return NextResponse.json({ error: "doctorId ไม่ใช่บัญชีหมอ" }, { status: 400 });
+    return NextResponse.json({ error: "doctorId ไม่ใช่บัญชีแพทย์" }, { status: 400 });
   }
 
   const { data: patient, error: patientError } = await supabase
@@ -127,7 +127,7 @@ export async function DELETE(request: Request) {
   }
 
   if (!targetLink) {
-    return NextResponse.json({ error: "ไม่พบคู่คนไข้-หมอที่ต้องการยกเลิก" }, { status: 404 });
+    return NextResponse.json({ error: "ไม่พบคู่คนไข้-แพทย์ที่ต้องการยกเลิก" }, { status: 404 });
   }
 
   const { error: deleteError } = await supabase

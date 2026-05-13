@@ -168,7 +168,7 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     <Card className="w-full shadow-lg">
       <CardHeader>
         <CardTitle>เข้าสู่ระบบ CareGuideAI</CardTitle>
-        <CardDescription>สำหรับผู้พิการ คุณหมอ และแอดมิน</CardDescription>
+        <CardDescription>สำหรับผู้พิการ แพทย์ และแอดมิน</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (

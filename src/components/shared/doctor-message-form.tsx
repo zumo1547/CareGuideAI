@@ -19,7 +19,7 @@ interface DoctorMessageFormProps {
 export const DoctorMessageForm = ({
   defaultDoctorId,
   defaultPatientId,
-  heading = "ส่งข้อความถึงคุณหมอ",
+  heading = "ส่งข้อความถึงแพทย์",
 }: DoctorMessageFormProps) => {
   const [doctorId, setDoctorId] = useState(defaultDoctorId ?? "");
   const [patientId, setPatientId] = useState(defaultPatientId ?? "");
@@ -64,7 +64,7 @@ export const DoctorMessageForm = ({
           <MessageSquare className="h-5 w-5" />
           {heading}
         </CardTitle>
-        <CardDescription>ใช้ส่งอาการหรือคำถามเพื่อให้หมอติดตามผล</CardDescription>
+        <CardDescription>ใช้ส่งอาการหรือคำถามเพื่อให้แพทย์ติดตามผล</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
@@ -85,7 +85,7 @@ export const DoctorMessageForm = ({
             <Input id="doctorId" value={doctorId} onChange={(e) => setDoctorId(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="patientId">Patient ID (สำหรับหมอตอบกลับ)</Label>
+            <Label htmlFor="patientId">Patient ID (สำหรับแพทย์ตอบกลับ)</Label>
             <Input id="patientId" value={patientId} onChange={(e) => setPatientId(e.target.value)} />
           </div>
         </div>

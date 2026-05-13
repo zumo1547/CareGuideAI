@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 export type VoiceIntent =
   | {
@@ -320,13 +320,13 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
   }
 
   if (
-    includesAny(text, ["ส่งข้อความหาหมอ", "ส่งข้อความถึงหมอ", "ส่งแชทหาหมอ", "ส่งข้อความ"]) &&
+    includesAny(text, ["ส่งข้อความหาแพทย์", "ส่งข้อความถึงแพทย์", "ส่งแชทหาแพทย์", "ส่งข้อความหาหมอ", "ส่งข้อความถึงหมอ", "ส่งแชทหาหมอ", "ส่งข้อความ"]) &&
     !includesAny(text, ["คำขอ", "ร้องขอ"])
   ) {
     return {
       type: "action",
       actionId: "send-chat-message",
-      label: "ส่งข้อความถึงคุณหมอ",
+      label: "ส่งข้อความถึงแพทย์",
       requiresConfirmation: true,
       repeatText: "ต้องการส่งข้อความนี้ใช่ไหม",
     };
@@ -336,7 +336,7 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     return {
       type: "action",
       actionId: "send-support-request",
-      label: "ส่งคำร้องขอความช่วยเหลือถึงคุณหมอ",
+      label: "ส่งคำร้องขอความช่วยเหลือถึงแพทย์",
       requiresConfirmation: true,
     };
   }
@@ -397,6 +397,7 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     includesAny(text, [
       "ส่งคำขอนัด",
       "ส่งนัดหมอ",
+      "ส่งนัดแพทย์",
       "ส่งคำนัด",
       "ขอส่งนัด",
       "ส่งคำขอนัดหมาย",
@@ -406,7 +407,7 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     return {
       type: "action",
       actionId: "send-appointment-request",
-      label: "ส่งคำขอนัดหมายถึงคุณหมอ",
+      label: "ส่งคำขอนัดหมายถึงแพทย์",
       requiresConfirmation: true,
     };
   }
@@ -438,7 +439,7 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     };
   }
 
-  if (includesAny(text, ["ร้องขอหมอด้วยเสียง", "ขอความช่วยเหลือด้วยเสียง", "ส่งคำร้องด้วยเสียง"])) {
+  if (includesAny(text, ["ร้องขอแพทย์ด้วยเสียง", "ร้องขอหมอด้วยเสียง", "ขอความช่วยเหลือด้วยเสียง", "ส่งคำร้องด้วยเสียง"])) {
     return {
       type: "action",
       actionId: "voice-compose-support-request",
@@ -447,7 +448,7 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
     };
   }
 
-  if (includesAny(text, ["นัดหมอด้วยเสียง", "ส่งนัดด้วยเสียง", "ส่งคำขอนัดด้วยเสียง"])) {
+  if (includesAny(text, ["นัดแพทย์ด้วยเสียง", "นัดหมอด้วยเสียง", "ส่งนัดด้วยเสียง", "ส่งคำขอนัดด้วยเสียง"])) {
     return {
       type: "action",
       actionId: "voice-compose-appointment-request",
@@ -459,18 +460,25 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
   if (
     includesAny(text, [
       "แชทหมอ",
+      "แชทแพทย์",
       "คุยหมอ",
+      "คุยแพทย์",
       "หน้าคุยหมอ",
+      "หน้าคุยแพทย์",
       "คุยกับหมอ",
+      "คุยกับแพทย์",
       "คุยกับคุณหมอ",
+      "คุยกับคุณแพทย์",
       "แชทกับหมอ",
+      "แชทกับแพทย์",
       "แชทคุณหมอ",
+      "แชทแพทย์",
     ])
   ) {
     return {
       type: "navigate",
       sectionId: "chat",
-      label: "ไปส่วนแชทกับคุณหมอ",
+      label: "ไปส่วนแชทกับแพทย์",
       requiresConfirmation: false,
     };
   }
@@ -478,9 +486,12 @@ export const parseVoiceIntent = (rawText: string): VoiceIntent | null => {
   if (
     includesAny(text, [
       "นัดหมอ",
+      "นัดแพทย์",
       "ไปหน้านัดหมอ",
+      "ไปหน้านัดแพทย์",
       "หน้าการนัดหมาย",
       "เปิดหน้านัดหมอ",
+      "เปิดหน้านัดแพทย์",
       "นัดหมายแพทย์",
       "ไปหน้านัดหมาย",
     ])

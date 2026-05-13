@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { LoginForm } from "@/components/auth/login-form";
@@ -32,7 +32,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               เพื่อเริ่มดูแลแผนยา
             </h1>
             <p className="text-slate-600">
-              รองรับผู้พิการ คุณหมอ และแอดมิน พร้อมระบบสแกนยา นัดหมาย และติดตามการรักษาในที่เดียว
+              รองรับผู้พิการ แพทย์ และแอดมิน พร้อมระบบสแกนยา นัดหมาย และติดตามการรักษาในที่เดียว
             </p>
             <p className="text-sm text-muted-foreground">
               ยังไม่มีบัญชี?{" "}
@@ -50,3 +50,4 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     </div>
   );
 }
+

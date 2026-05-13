@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 
 import { LogoutButton } from "@/components/auth/logout-button";
 import { BrandLogo } from "@/components/layout/brand-logo";
@@ -18,7 +18,7 @@ const navByRole: Record<Role, { href: string; label: string }[]> = {
     { href: "/app/profile", label: "แฟ้มข้อมูลของฉัน" },
   ],
   doctor: [
-    { href: "/app/doctor", label: "หน้าแดชบอร์ดคุณหมอ" },
+    { href: "/app/doctor", label: "หน้าแดชบอร์ดแพทย์" },
     { href: "/app/profile", label: "แฟ้มข้อมูลของฉัน" },
   ],
   admin: [{ href: "/app/admin", label: "หน้าแอดมิน" }],
@@ -74,7 +74,7 @@ export const AppShell = ({ role, fullName, children }: AppShellProps) => (
               href="/app/doctor"
               className="rounded-full border px-4 py-1.5 text-sm transition-colors hover:bg-accent"
             >
-              ดูมุมมองหมอ
+              ดูมุมมองแพทย์
             </Link>
             <Link
               href="/app/patient"
@@ -95,3 +95,4 @@ export const AppShell = ({ role, fullName, children }: AppShellProps) => (
     </main>
   </div>
 );
+

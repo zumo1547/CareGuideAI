@@ -57,7 +57,7 @@ export async function DELETE(request: Request) {
       .eq("requested_doctor_id", userId);
     if (supportCasesError) {
       return NextResponse.json(
-        { error: `ลบข้อมูลเคสช่วยเหลือของคุณหมอไม่สำเร็จ: ${supportCasesError.message}` },
+        { error: `ลบข้อมูลเคสช่วยเหลือของแพทย์ไม่สำเร็จ: ${supportCasesError.message}` },
         { status: 400 },
       );
     }
@@ -70,7 +70,7 @@ export async function DELETE(request: Request) {
     .neq("invited_by", auth.userId);
   if (invitesReassignError) {
     return NextResponse.json(
-      { error: `ย้ายเจ้าของรายการเชิญหมอไม่สำเร็จ: ${invitesReassignError.message}` },
+      { error: `ย้ายเจ้าของรายการเชิญแพทย์ไม่สำเร็จ: ${invitesReassignError.message}` },
       { status: 400 },
     );
   }
@@ -82,7 +82,7 @@ export async function DELETE(request: Request) {
     .neq("assigned_by", auth.userId);
   if (linksReassignError) {
     return NextResponse.json(
-      { error: `ย้ายเจ้าของรายการจับคู่ผู้ป่วย-หมอไม่สำเร็จ: ${linksReassignError.message}` },
+      { error: `ย้ายเจ้าของรายการจับคู่ผู้ป่วย-แพทย์ไม่สำเร็จ: ${linksReassignError.message}` },
       { status: 400 },
     );
   }

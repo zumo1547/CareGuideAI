@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CheckCircle2, Loader2 } from "lucide-react";
@@ -88,7 +88,7 @@ export const RegisterForm = ({ inviteTokenFromUrl = "" }: RegisterFormProps) => 
       <CardHeader>
         <CardTitle>สมัครใช้งาน CareGuideAI</CardTitle>
         <CardDescription>
-          เลือกได้เฉพาะผู้พิการหรือผู้ช่วยดูแล ส่วนคุณหมอสมัครได้ผ่าน Invite เท่านั้น
+          เลือกได้เฉพาะผู้พิการหรือผู้ช่วยดูแล ส่วนแพทย์สมัครได้ผ่าน Invite เท่านั้น
         </CardDescription>
       </CardHeader>
 
@@ -159,10 +159,10 @@ export const RegisterForm = ({ inviteTokenFromUrl = "" }: RegisterFormProps) => 
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="inviteToken">Invite Token (เฉพาะคุณหมอ)</Label>
+            <Label htmlFor="inviteToken">Invite Token (เฉพาะแพทย์)</Label>
             <Input id="inviteToken" aria-label="Invite Token" data-voice-field="register-invite-token" {...register("inviteToken")} />
             <p className="text-xs text-muted-foreground">
-              ถ้ามี token ระบบจะสมัครเป็นคุณหมออัตโนมัติและข้ามตัวเลือกบทบาทด้านบน
+              ถ้ามี token ระบบจะสมัครเป็นแพทย์อัตโนมัติและข้ามตัวเลือกบทบาทด้านบน
             </p>
           </div>
 
@@ -188,3 +188,4 @@ export const RegisterForm = ({ inviteTokenFromUrl = "" }: RegisterFormProps) => 
     </Card>
   );
 };
+

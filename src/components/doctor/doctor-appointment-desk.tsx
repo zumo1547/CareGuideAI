@@ -290,10 +290,10 @@ export const DoctorAppointmentDesk = ({ doctorId, patientOptions }: DoctorAppoin
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <ClipboardCheck className="h-5 w-5 text-cyan-700" />
-          คิวนัดหมายที่คุณหมอเป็นผู้ส่งลิงก์ยืนยัน
+          คิวนัดหมายที่แพทย์เป็นผู้ส่งลิงก์ยืนยัน
         </CardTitle>
         <CardDescription>
-          ผู้ป่วยส่งคำขอก่อน จากนั้นคุณหมอส่งลิงก์นัดหมายเอง ผู้ป่วยจึงกดยืนยัน ปฏิเสธ หรือขอเลื่อนนัดได้
+          ผู้ป่วยส่งคำขอก่อน จากนั้นแพทย์ส่งลิงก์นัดหมายเอง ผู้ป่วยจึงกดยืนยัน ปฏิเสธ หรือขอเลื่อนนัดได้
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -313,7 +313,7 @@ export const DoctorAppointmentDesk = ({ doctorId, patientOptions }: DoctorAppoin
         <section className="space-y-3 rounded-xl border p-3">
           <h3 className="text-sm font-semibold">ส่งนัดหมายให้ผู้ป่วย</h3>
           <p className="text-xs text-muted-foreground">
-            คุณหมอสามารถส่งวันเวลาและลิงก์นัดหมายให้ผู้ป่วยได้โดยตรง ไม่ต้องรอแอดมินจับคู่
+            แพทย์สามารถส่งวันเวลาและลิงก์นัดหมายให้ผู้ป่วยได้โดยตรง ไม่ต้องรอแอดมินจับคู่
           </p>
           <div className="space-y-2">
             <Label htmlFor="doctor-appointment-patient-id">ผู้ป่วย</Label>
@@ -545,7 +545,7 @@ export const DoctorAppointmentDesk = ({ doctorId, patientOptions }: DoctorAppoin
                     <Alert>
                       <AlertTitle>รอผู้ป่วยตอบรับ</AlertTitle>
                       <AlertDescription>
-                        คุณหมอส่งลิงก์แล้ว ตอนนี้รอผู้ป่วยยืนยัน ปฏิเสธ หรือขอเลื่อนนัด
+                        แพทย์ส่งลิงก์แล้ว ตอนนี้รอผู้ป่วยยืนยัน ปฏิเสธ หรือขอเลื่อนนัด
                       </AlertDescription>
                     </Alert>
                   ) : null}

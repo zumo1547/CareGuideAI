@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { CheckCircle2, Loader2, MessageCircle, RefreshCcw, Send, UserRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -323,7 +323,7 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
           คิวเคสช่วยเหลือและแชทผู้ป่วยแบบเรียลไทม์
         </CardTitle>
         <CardDescription>
-          คุณหมอสามารถดูข้อมูลผู้ป่วยก่อนรับเคส พูดคุยต่อเนื่อง และปิดเคสเมื่อเสร็จสิ้น
+          แพทย์สามารถดูข้อมูลผู้ป่วยก่อนรับเคส พูดคุยต่อเนื่อง และปิดเคสเมื่อเสร็จสิ้น
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -501,3 +501,4 @@ export const DoctorSupportDesk = ({ doctorId }: DoctorSupportDeskProps) => {
     </Card>
   );
 };
+

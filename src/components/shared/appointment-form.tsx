@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   CalendarClock,
@@ -207,7 +207,7 @@ export const AppointmentForm = ({
 
   const submitRequest = async () => {
     if (!canRequestAppointment || !selectedDoctorId) {
-      setError("กรุณาเลือกคุณหมอก่อนส่งคำขอนัดหมาย");
+      setError("กรุณาเลือกแพทย์ก่อนส่งคำขอนัดหมาย");
       return;
     }
     if (requestNote.trim().length < 3) {
@@ -237,7 +237,7 @@ export const AppointmentForm = ({
 
       setRequestNote("");
       setPreferredAt("");
-      setSuccess("ส่งคำขอนัดหมายแล้ว กรุณารอคุณหมอส่งลิงก์ยืนยันนัด");
+      setSuccess("ส่งคำขอนัดหมายแล้ว กรุณารอแพทย์ส่งลิงก์ยืนยันนัด");
       await refreshAppointments(true);
     } catch (submitError) {
       setError(
@@ -300,13 +300,13 @@ export const AppointmentForm = ({
       if (action === "patient_accept") {
         setSuccess("ยืนยันนัดหมายเรียบร้อย");
       } else if (action === "patient_decline") {
-        const alarmMessage = "ยกเลิกนัดสำเร็จ และส่งเหตุผลให้คุณหมอแล้ว";
+        const alarmMessage = "ยกเลิกนัดสำเร็จ และส่งเหตุผลให้แพทย์แล้ว";
         setSuccess("ยกเลิกนัดหมายเรียบร้อย");
         setLastAlarmMessage(alarmMessage);
         announceAlarm(alarmMessage);
         setAppointments((current) => current.filter((item) => item.id !== appointment.id));
       } else {
-        setSuccess("ส่งคำขอเลื่อนนัดให้คุณหมอแล้ว");
+        setSuccess("ส่งคำขอเลื่อนนัดให้แพทย์แล้ว");
       }
       await refreshAppointments(true);
     } catch (actionError) {
@@ -341,10 +341,10 @@ export const AppointmentForm = ({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <CalendarClock className="h-5 w-5" />
-          ระบบนัดหมายที่คุณหมอยืนยันก่อน
+          ระบบนัดหมายที่แพทย์ยืนยันก่อน
         </CardTitle>
         <CardDescription>
-          ผู้ป่วยส่งคำขอก่อน แล้วรอคุณหมอส่งลิงก์นัดหมายมาให้ จากนั้นจึงกดยืนยัน
+          ผู้ป่วยส่งคำขอก่อน แล้วรอแพทย์ส่งลิงก์นัดหมายมาให้ จากนั้นจึงกดยืนยัน
           ปฏิเสธ หรือขอเลื่อนนัดได้
         </CardDescription>
       </CardHeader>
@@ -370,9 +370,9 @@ export const AppointmentForm = ({
 
         {!hasLinkedDoctor ? (
           <Alert>
-            <AlertTitle>ยังไม่มีคุณหมอที่แอดมินจับคู่</AlertTitle>
+            <AlertTitle>ยังไม่มีแพทย์ที่แอดมินจับคู่</AlertTitle>
             <AlertDescription>
-              คุณยังส่งคำขอนัดตรงถึงคุณหมอได้ โดยไม่ต้องรอแอดมินจับคู่
+              คุณยังส่งคำขอนัดตรงถึงแพทย์ได้ โดยไม่ต้องรอแอดมินจับคู่
             </AlertDescription>
           </Alert>
         ) : null}
@@ -380,7 +380,7 @@ export const AppointmentForm = ({
         <section className="space-y-3 rounded-xl border p-3">
           <h3 className="text-sm font-semibold">ส่งคำขอนัดหมาย</h3>
           <div className="space-y-2">
-            <Label htmlFor="appointment-doctor-id">คุณหมอที่ต้องการนัด</Label>
+            <Label htmlFor="appointment-doctor-id">แพทย์ที่ต้องการนัด</Label>
             <select
               id="appointment-doctor-id"
               value={selectedDoctorId}
@@ -388,7 +388,7 @@ export const AppointmentForm = ({
               disabled={!canRequestAppointment || submitting}
               className="flex h-10 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {!sortedDoctorOptions.length ? <option value="">ยังไม่มีคุณหมอในระบบ</option> : null}
+              {!sortedDoctorOptions.length ? <option value="">ยังไม่มีแพทย์ในระบบ</option> : null}
               {sortedDoctorOptions.map((doctor) => (
                 <option key={doctor.id} value={doctor.id}>
                   {doctor.fullName}
@@ -414,7 +414,7 @@ export const AppointmentForm = ({
               <SpeechToTextButton
                 onTranscript={appendAppointmentRequestNote}
                 label="พูดข้อความนัดหมาย"
-                ariaLabel="กดเพื่อพูดข้อความคำขอนัดหมายถึงคุณหมอ"
+                ariaLabel="กดเพื่อพูดข้อความคำขอนัดหมายถึงแพทย์"
                 disabled={!canRequestAppointment || submitting}
               />
             </div>
@@ -425,7 +425,7 @@ export const AppointmentForm = ({
               onChange={(event) => setRequestNote(event.target.value)}
               placeholder="เช่น เวียนหัวหลังทานยา ต้องการปรึกษาแพทย์ด่วน"
               disabled={!canRequestAppointment || submitting}
-              aria-label="ข้อความคำขอนัดหมายถึงคุณหมอ"
+              aria-label="ข้อความคำขอนัดหมายถึงแพทย์"
               data-voice-field="appointment-request-note"
             />
           </div>
@@ -433,7 +433,7 @@ export const AppointmentForm = ({
             type="button"
             onClick={() => void submitRequest()}
             disabled={!canRequestAppointment || submitting || requestNote.trim().length < 3}
-            aria-label="ส่งคำขอนัดหมายถึงคุณหมอ"
+            aria-label="ส่งคำขอนัดหมายถึงแพทย์"
             data-voice-action="send-appointment-request"
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -492,7 +492,7 @@ export const AppointmentForm = ({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="text-sm font-semibold">
-                          คุณหมอ: {appointment.doctor?.fullName ?? appointment.doctorId}
+                          แพทย์: {appointment.doctor?.fullName ?? appointment.doctorId}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           สร้างเมื่อ: {formatDateTime(appointment.createdAt)}
@@ -514,14 +514,14 @@ export const AppointmentForm = ({
                         เวลาที่สะดวกเดิม: <span className="font-medium">{formatDateTime(appointment.patientPreferredAt)}</span>
                       </p>
                       <p>
-                        หมอนัดเวลา: <span className="font-medium">{formatDateTime(appointment.scheduledAt)}</span>
+                        แพทย์นัดเวลา: <span className="font-medium">{formatDateTime(appointment.scheduledAt)}</span>
                       </p>
                       <p>
                         ส่งลิงก์เมื่อ: <span className="font-medium">{formatDateTime(appointment.doctorProposedAt)}</span>
                       </p>
                       {appointment.doctorProposedNote ? (
                         <p>
-                          หมายเหตุจากคุณหมอ: <span className="font-medium">{appointment.doctorProposedNote}</span>
+                          หมายเหตุจากแพทย์: <span className="font-medium">{appointment.doctorProposedNote}</span>
                         </p>
                       ) : null}
                       {appointment.patientResponseNote ? (
@@ -533,7 +533,7 @@ export const AppointmentForm = ({
 
                     {appointment.doctorConfirmationLink ? (
                       <div className="rounded-lg border bg-cyan-50/60 p-3 text-sm">
-                        <p className="font-medium">ลิงก์ยืนยันนัดจากคุณหมอ</p>
+                        <p className="font-medium">ลิงก์ยืนยันนัดจากแพทย์</p>
                         <a
                           href={appointment.doctorConfirmationLink}
                           target="_blank"
@@ -546,31 +546,31 @@ export const AppointmentForm = ({
                       </div>
                     ) : (
                       <Alert>
-                        <AlertTitle>รอคุณหมอส่งลิงก์</AlertTitle>
+                        <AlertTitle>รอแพทย์ส่งลิงก์</AlertTitle>
                         <AlertDescription>
-                          นัดนี้ยังยืนยันไม่ได้จนกว่าคุณหมอจะส่งลิงก์ยืนยันนัดมาให้
+                          นัดนี้ยังยืนยันไม่ได้จนกว่าแพทย์จะส่งลิงก์ยืนยันนัดมาให้
                         </AlertDescription>
                       </Alert>
                     )}
 
                     {canRespond ? (
                       <div className="space-y-2 rounded-lg border p-3">
-                        <p className="text-sm font-semibold">ตอบรับนัดหมายจากคุณหมอ</p>
+                        <p className="text-sm font-semibold">ตอบรับนัดหมายจากแพทย์</p>
                         <div className="space-y-2">
                           <Label htmlFor={`appointment-response-note-${appointment.id}`}>
-                            ข้อความถึงคุณหมอ
+                            ข้อความถึงแพทย์
                           </Label>
                           <div className="flex flex-wrap items-center gap-2">
                             <SpeechToTextButton
                               onTranscript={(text) => appendAppointmentReplyNote(appointment.id, text)}
-                              label="พูดข้อความถึงหมอ"
-                              ariaLabel="กดเพื่อพูดข้อความตอบกลับถึงคุณหมอ"
+                              label="พูดข้อความถึงแพทย์"
+                              ariaLabel="กดเพื่อพูดข้อความตอบกลับถึงแพทย์"
                               disabled={actionLoadingId === appointment.id}
                             />
                           </div>
                           <Textarea
                             id={`appointment-response-note-${appointment.id}`}
-                            aria-label="ข้อความตอบกลับถึงคุณหมอ"
+                            aria-label="ข้อความตอบกลับถึงแพทย์"
                             data-voice-field="appointment-response-note"
                             rows={2}
                             value={draft.note}
@@ -653,3 +653,4 @@ export const AppointmentForm = ({
     </Card>
   );
 };
+

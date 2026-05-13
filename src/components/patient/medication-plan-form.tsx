@@ -250,7 +250,7 @@ export const MedicationPlanForm = ({ patientId }: MedicationPlanFormProps) => {
 
           <div className="space-y-2">
             <Label htmlFor="notes">หมายเหตุ</Label>
-            <Input id="notes" placeholder="เช่น ถ้าลืมกินให้แจ้งหมอ" {...register("notes")} />
+            <Input id="notes" placeholder="เช่น ถ้าลืมกินให้แจ้งแพทย์" {...register("notes")} />
           </div>
 
           <Button type="submit" disabled={isLoading}>

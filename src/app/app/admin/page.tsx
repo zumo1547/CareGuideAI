@@ -416,7 +416,7 @@ export default async function AdminDashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Stethoscope className="h-5 w-5 text-cyan-700" />
-              สถานะการจับคู่ผู้ป่วย-หมอ
+              สถานะการจับคู่ผู้ป่วย-แพทย์
             </CardTitle>
             <CardDescription>ช่วยติดตามความครอบคลุมการดูแลผู้ป่วย</CardDescription>
           </CardHeader>
@@ -431,7 +431,7 @@ export default async function AdminDashboardPage() {
                 <p className="text-2xl font-semibold">{unassignedPatients.length}</p>
               </div>
               <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">หมอยังไม่มีผู้ป่วย</p>
+                <p className="text-xs text-muted-foreground">แพทย์ยังไม่มีผู้ป่วย</p>
                 <p className="text-2xl font-semibold">{doctorsWithoutPatients.length}</p>
               </div>
             </div>
@@ -542,7 +542,7 @@ export default async function AdminDashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <CalendarClock className="h-5 w-5 text-cyan-700" />
-              นัดหมายและคำเชิญหมอ
+              นัดหมายและคำเชิญแพทย์
             </CardTitle>
             <CardDescription>ติดตามคอขวดด้านการประสานงาน</CardDescription>
           </CardHeader>
@@ -553,7 +553,7 @@ export default async function AdminDashboardPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>ผู้ป่วย</TableHead>
-                    <TableHead>หมอ</TableHead>
+                    <TableHead>แพทย์</TableHead>
                     <TableHead>ขอเมื่อ</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -699,7 +699,7 @@ export default async function AdminDashboardPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <UserCog className="h-5 w-5 text-cyan-700" />
-                หมอที่ยังไม่มีผู้ป่วยในความดูแล
+                แพทย์ที่ยังไม่มีผู้ป่วยในความดูแล
               </CardTitle>
               <CardDescription>ใช้สำหรับกระจายภาระงานให้สมดุล</CardDescription>
             </CardHeader>
@@ -707,7 +707,7 @@ export default async function AdminDashboardPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>ชื่อหมอ</TableHead>
+                    <TableHead>ชื่อแพทย์</TableHead>
                     <TableHead>โทรศัพท์</TableHead>
                     <TableHead>สร้างเมื่อ</TableHead>
                   </TableRow>

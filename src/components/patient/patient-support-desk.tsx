@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   ChevronDown,
@@ -52,7 +52,7 @@ interface SupportApiErrorPayload {
 }
 
 const statusLabel: Record<SupportCaseStatus, string> = {
-  pending: "รอหมอตอบรับ",
+  pending: "รอแพทย์ตอบรับ",
   active: "กำลังคุย",
   closed: "ปิดเคสแล้ว",
 };
@@ -252,7 +252,7 @@ export const PatientSupportDesk = ({
       }
 
       setRequestMessage("");
-      setSuccess("ส่งคำร้องถึงคุณหมอแล้ว รอคุณหมอตอบรับเพื่อเริ่มแชท");
+      setSuccess("ส่งคำร้องถึงแพทย์แล้ว รอแพทย์ตอบรับเพื่อเริ่มแชท");
       await refreshCases(true);
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "ส่งคำร้องไม่สำเร็จ");
@@ -380,7 +380,7 @@ export const PatientSupportDesk = ({
 
     lastSpokenDoctorMessageAtRef.current = marker;
     speakThai(
-      `คุณหมอส่งข้อความใหม่ ${latestDoctorMessage.message} หากต้องการตอบ สามารถพูดแล้วกดปุ่มส่งได้`,
+      `แพทย์ส่งข้อความใหม่ ${latestDoctorMessage.message} หากต้องการตอบ สามารถพูดแล้วกดปุ่มส่งได้`,
     );
   }, [actorId, messages, selectedCase]);
 
@@ -389,10 +389,10 @@ export const PatientSupportDesk = ({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <MessageCircleHeart className="h-5 w-5 text-cyan-700" />
-          ระบบคุยกับคุณหมอแบบเรียลไทม์
+          ระบบคุยกับแพทย์แบบเรียลไทม์
         </CardTitle>
         <CardDescription>
-          เริ่มจากส่งคำร้องขอความช่วยเหลือ แล้วรอคุณหมอรับเคสก่อนเปิดห้องแชท
+          เริ่มจากส่งคำร้องขอความช่วยเหลือ แล้วรอแพทย์รับเคสก่อนเปิดห้องแชท
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -425,9 +425,9 @@ export const PatientSupportDesk = ({
         {!doctorOptions.length ? (
           <Alert>
             <ShieldAlert className="h-4 w-4" />
-            <AlertTitle>ยังไม่มีบัญชีคุณหมอในระบบ</AlertTitle>
+            <AlertTitle>ยังไม่มีบัญชีแพทย์ในระบบ</AlertTitle>
             <AlertDescription>
-              กรุณาติดต่อแอดมินเพื่อเพิ่มบัญชีคุณหมอ จากนั้นจึงจะส่งคำร้องขอความช่วยเหลือได้
+              กรุณาติดต่อแอดมินเพื่อเพิ่มบัญชีแพทย์ จากนั้นจึงจะส่งคำร้องขอความช่วยเหลือได้
             </AlertDescription>
           </Alert>
         ) : (
@@ -435,9 +435,9 @@ export const PatientSupportDesk = ({
             {!hasLinkedDoctor ? (
               <Alert>
                 <ShieldAlert className="h-4 w-4" />
-                <AlertTitle>ยังไม่ถูกจับคู่กับหมอโดยแอดมิน</AlertTitle>
+                <AlertTitle>ยังไม่ถูกจับคู่กับแพทย์โดยแอดมิน</AlertTitle>
                 <AlertDescription>
-                  คุณยังส่งคำร้องถึงหมอได้ทันที และแอดมินสามารถจับคู่/ยกเลิกคู่ภายหลังเพื่อจัดการเคสระยะยาว
+                  คุณยังส่งคำร้องถึงแพทย์ได้ทันที และแอดมินสามารถจับคู่/ยกเลิกคู่ภายหลังเพื่อจัดการเคสระยะยาว
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -445,7 +445,7 @@ export const PatientSupportDesk = ({
             <div className="rounded-xl border p-3">
               <div className="grid gap-3 md:grid-cols-[1fr_2fr_auto]">
                 <div className="space-y-2">
-                  <Label htmlFor="doctor-select">เลือกคุณหมอ</Label>
+                  <Label htmlFor="doctor-select">เลือกแพทย์</Label>
                   <select
                     id="doctor-select"
                     value={selectedDoctorIdValue}
@@ -473,8 +473,8 @@ export const PatientSupportDesk = ({
                     rows={3}
                     value={requestMessage}
                     onChange={(event) => setRequestMessage(event.target.value)}
-                    placeholder="เช่น เวียนหัวหลังทานยา อยากปรึกษาคุณหมอ"
-                    aria-label="ข้อความร้องขอถึงคุณหมอ"
+                    placeholder="เช่น เวียนหัวหลังทานยา อยากปรึกษาแพทย์"
+                    aria-label="ข้อความร้องขอถึงแพทย์"
                     data-voice-field="support-request-message"
                   />
                 </div>
@@ -484,7 +484,7 @@ export const PatientSupportDesk = ({
                     onClick={() => void createCase()}
                     disabled={isCreatingCase || requestMessage.trim().length < 3}
                     className="w-full md:w-auto"
-                    aria-label="ส่งคำร้องขอความช่วยเหลือถึงคุณหมอ"
+                    aria-label="ส่งคำร้องขอความช่วยเหลือถึงแพทย์"
                     data-voice-action="send-support-request"
                   >
                     {isCreatingCase ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -533,7 +533,7 @@ export const PatientSupportDesk = ({
           {isLoadingCases ? (
             <p className="text-sm text-muted-foreground">กำลังโหลดรายการเคส...</p>
           ) : cases.length === 0 ? (
-            <p className="text-sm text-muted-foreground">ยังไม่มีเคสที่ส่งถึงคุณหมอ</p>
+            <p className="text-sm text-muted-foreground">ยังไม่มีเคสที่ส่งถึงแพทย์</p>
           ) : (
             <div id="support-case-list" className="space-y-2">
               {displayedCases.map((item) => (
@@ -546,7 +546,7 @@ export const PatientSupportDesk = ({
                   onClick={() => setSelectedCaseId(item.id)}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-semibold">{item.requestedDoctor?.fullName ?? "คุณหมอ"}</p>
+                    <p className="text-sm font-semibold">{item.requestedDoctor?.fullName ?? "แพทย์"}</p>
                     <Badge variant={item.status === "active" ? "default" : "secondary"}>
                       {statusLabel[item.status]}
                     </Badge>
@@ -569,7 +569,7 @@ export const PatientSupportDesk = ({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="text-sm font-semibold">
-                  ห้องแชทกับ {selectedCase.assignedDoctor?.fullName ?? selectedCase.requestedDoctor?.fullName ?? "คุณหมอ"}
+                  ห้องแชทกับ {selectedCase.assignedDoctor?.fullName ?? selectedCase.requestedDoctor?.fullName ?? "แพทย์"}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   สถานะ: {statusLabel[selectedCase.status]} | อัปเดตล่าสุด {formatDateTime(selectedCase.updatedAt)}
@@ -580,8 +580,8 @@ export const PatientSupportDesk = ({
 
             {selectedCase.status === "pending" ? (
               <Alert>
-                <AlertTitle>รอคุณหมอตอบรับเคส</AlertTitle>
-                <AlertDescription>เมื่อคุณหมอตอบรับแล้วจะส่งข้อความได้ทันทีแบบเรียลไทม์</AlertDescription>
+                <AlertTitle>รอแพทย์ตอบรับเคส</AlertTitle>
+                <AlertDescription>เมื่อแพทย์ตอบรับแล้วจะส่งข้อความได้ทันทีแบบเรียลไทม์</AlertDescription>
               </Alert>
             ) : null}
             {messages.length > CHAT_MESSAGE_PREVIEW_LIMIT ? (
@@ -651,7 +651,7 @@ export const PatientSupportDesk = ({
               <SpeechToTextButton
                 onTranscript={appendChatMessage}
                 label="พูดข้อความแชท"
-                ariaLabel="กดเพื่อพูดข้อความตอบคุณหมอ"
+                ariaLabel="กดเพื่อพูดข้อความตอบแพทย์"
                 disabled={selectedCase.status !== "active" || isSendingMessage}
               />
             </div>
@@ -660,16 +660,16 @@ export const PatientSupportDesk = ({
               <Input
                 value={chatInput}
                 onChange={(event) => setChatInput(event.target.value)}
-                placeholder={selectedCase.status === "active" ? "พิมพ์ข้อความถึงคุณหมอ" : "รอคุณหมอตอบรับเคสก่อน"}
+                placeholder={selectedCase.status === "active" ? "พิมพ์ข้อความถึงแพทย์" : "รอแพทย์ตอบรับเคสก่อน"}
                 disabled={selectedCase.status !== "active" || isSendingMessage}
-                aria-label="ข้อความแชทถึงคุณหมอ"
+                aria-label="ข้อความแชทถึงแพทย์"
                 data-voice-field="chat-message"
               />
               <Button
                 type="button"
                 onClick={() => void sendMessage()}
                 disabled={selectedCase.status !== "active" || !chatInput.trim() || isSendingMessage}
-                aria-label="ส่งข้อความถึงคุณหมอ"
+                aria-label="ส่งข้อความถึงแพทย์"
                 data-voice-action="send-chat-message"
               >
                 {isSendingMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -682,3 +682,4 @@ export const PatientSupportDesk = ({
     </Card>
   );
 };
+

@@ -96,7 +96,7 @@ export const AssignPatientForm = ({
       return [newLink, ...withoutSameId];
     });
 
-    setMessage("จับคู่คนไข้-หมอสำเร็จ");
+    setMessage("จับคู่คนไข้-แพทย์สำเร็จ");
     setPatientId("");
     setDoctorId("");
   };
@@ -130,7 +130,7 @@ export const AssignPatientForm = ({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Link2 className="h-5 w-5 text-cyan-700" />
-          จับคู่และยกเลิกคู่คนไข้-หมอ
+          จับคู่และยกเลิกคู่คนไข้-แพทย์
         </CardTitle>
         <CardDescription>
           แอดมินกำหนดคู่ดูแลผู้ป่วยได้ และสามารถยกเลิกคู่เมื่อมีการย้ายการดูแล
@@ -186,10 +186,10 @@ export const AssignPatientForm = ({
             />
           </div>
           <div className="space-y-2">
-            <Label>เลือกหมอ</Label>
+            <Label>เลือกแพทย์</Label>
             <Select value={doctorId || undefined} onValueChange={(value) => setDoctorId(value ?? "")}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="เลือกหมอเพื่อเติม Doctor ID" />
+                <SelectValue placeholder="เลือกแพทย์เพื่อเติม Doctor ID" />
               </SelectTrigger>
               <SelectContent>
                 {doctors.map((doctor) => (
@@ -202,7 +202,7 @@ export const AssignPatientForm = ({
           </div>
           <Button onClick={submit} disabled={loading || !patientId || !doctorId}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            <span>{loading ? "กำลังบันทึก..." : "จับคู่คนไข้-หมอ"}</span>
+            <span>{loading ? "กำลังบันทึก..." : "จับคู่คนไข้-แพทย์"}</span>
           </Button>
         </section>
 
@@ -215,7 +215,7 @@ export const AssignPatientForm = ({
             <TableHeader>
               <TableRow>
                 <TableHead>คนไข้</TableHead>
-                <TableHead>หมอ</TableHead>
+                <TableHead>แพทย์</TableHead>
                 <TableHead>จับคู่เมื่อ</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
@@ -224,7 +224,7 @@ export const AssignPatientForm = ({
               {links.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    ยังไม่มีคู่คนไข้-หมอ
+                    ยังไม่มีคู่คนไข้-แพทย์
                   </TableCell>
                 </TableRow>
               ) : (

@@ -1,4 +1,4 @@
-﻿import {
+import {
   ArrowRight,
   BellRing,
   Camera,
@@ -26,8 +26,8 @@ const featureCards = [
     icon: BellRing,
   },
   {
-    title: "คุยกับหมอแบบเรียลไทม์",
-    desc: "ส่งคำร้องหาแพทย์ แชทติดตามอาการ และนัดหมายในระบบเดียว โดยอ่านข้อความหมอให้ฟังอัตโนมัติ",
+    title: "คุยกับแพทย์แบบเรียลไทม์",
+    desc: "ส่งคำร้องหาแพทย์ แชทติดตามอาการ และนัดหมายในระบบเดียว โดยอ่านข้อความแพทย์ให้ฟังอัตโนมัติ",
     icon: Stethoscope,
   },
   {
@@ -58,14 +58,14 @@ export default async function Home() {
         <section className="reveal-up grid gap-8 rounded-3xl border bg-white/90 p-8 shadow-sm md:grid-cols-[1.15fr_0.85fr] md:p-12">
           <div className="space-y-5">
             <BrandLogo href={isAuthenticated ? "/app" : "/"} imageClassName="h-14" priority />
-            <h1 className="text-4xl font-bold leading-tight text-slate-900 md:text-5xl">
+            <h1 className="text-3xl font-bold leading-tight text-slate-900 md:text-5xl">
               CareGuideAI
               <br />
-              ผู้ช่วยกินยาสำหรับผู้พิการทางสายตา
+              โปรแกรมช่วยเหลือผู้ดูแลผู้พิการทางสายตาด้านการจัดการข้อมูลยาและการดูแลสุขภาพ
             </h1>
             <p className="max-w-xl text-lg leading-relaxed text-slate-600">
-              เว็บแอปช่วยผู้พิการใช้งานยาได้ง่ายและปลอดภัยขึ้น ด้วยระบบสแกนยาอัตโนมัติ
-              แจ้งเตือนการกินยา พูดตอบโต้ด้วยเสียง และเชื่อมต่อคุณหมอเพื่อดูแลต่อเนื่อง
+              ระบบนี้ช่วยให้ผู้ดูแลติดตามยา นัดหมาย และข้อมูลสุขภาพของผู้พิการทางสายตาได้สะดวกขึ้น
+              พร้อมสแกนยาอัตโนมัติ แจ้งเตือนตามเวลา และประสานงานกับทีมแพทย์ในที่เดียว
             </p>
 
             <div className="grid gap-2">
@@ -102,7 +102,7 @@ export default async function Home() {
           <div className="grid gap-4 rounded-2xl bg-slate-950 p-6 text-slate-100">
             <div className="rounded-xl border border-white/15 bg-white/5 p-4">
               <p className="text-xs uppercase tracking-wider text-slate-300">โหมดใช้งานหลัก</p>
-              <p className="mt-2 text-lg font-semibold">พูดสั่งงานได้: “สแกนยา”, “นัดหมอ”, “แชทหมอ”</p>
+              <p className="mt-2 text-lg font-semibold">พูดสั่งงานได้: “สแกนยา”, “นัดแพทย์”, “แชทแพทย์”</p>
               <p className="mt-1 text-sm text-slate-300">
                 ก่อนทำคำสั่งสำคัญ ระบบจะทวนและให้ตอบ “ใช่ / ไม่ / ทบทวน” ทุกครั้ง
               </p>
@@ -137,3 +137,4 @@ export default async function Home() {
     </div>
   );
 }
+

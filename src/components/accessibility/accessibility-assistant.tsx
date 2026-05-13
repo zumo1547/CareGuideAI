@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   Accessibility,
@@ -495,7 +495,7 @@ export const AccessibilityAssistant = () => {
   }, []);
 
   const runSupportRequestVoiceFlow = useCallback(async () => {
-    const intro = "ถึงส่วนแชทหมอแล้ว กรุณาพูดข้อความร้องขอความช่วยเหลือ";
+    const intro = "ถึงส่วนแชทแพทย์แล้ว กรุณาพูดข้อความร้องขอความช่วยเหลือ";
     const spokenText = await captureSpeechText(intro, 18_000);
     if (!spokenText) {
       return;
@@ -512,14 +512,14 @@ export const AccessibilityAssistant = () => {
     const confirmIntent: VoiceIntent = {
       type: "action",
       actionId: "send-support-request",
-      label: "ส่งคำร้องขอความช่วยเหลือถึงคุณหมอ",
+      label: "ส่งคำร้องขอความช่วยเหลือถึงแพทย์",
       requiresConfirmation: true,
     };
-    queueConfirmation(confirmIntent, `ต้องการส่งคำร้องถึงคุณหมอ ข้อความว่า ${spokenText} ใช่ไหม`);
+    queueConfirmation(confirmIntent, `ต้องการส่งคำร้องถึงแพทย์ ข้อความว่า ${spokenText} ใช่ไหม`);
   }, [captureSpeechText, queueConfirmation, setFieldValueBySelector, speakFeedback]);
 
   const runAppointmentRequestVoiceFlow = useCallback(async () => {
-    const intro = "ถึงส่วนนัดหมอแล้ว กรุณาพูดอาการหรือเหตุผลที่ต้องการนัดพบแพทย์";
+    const intro = "ถึงส่วนนัดแพทย์แล้ว กรุณาพูดอาการหรือเหตุผลที่ต้องการนัดพบแพทย์";
     const spokenText = await captureSpeechText(intro, 18_000);
     if (!spokenText) {
       return;
@@ -536,7 +536,7 @@ export const AccessibilityAssistant = () => {
     const confirmIntent: VoiceIntent = {
       type: "action",
       actionId: "send-appointment-request",
-      label: "ส่งคำขอนัดหมายถึงคุณหมอ",
+      label: "ส่งคำขอนัดหมายถึงแพทย์",
       requiresConfirmation: true,
     };
     queueConfirmation(confirmIntent, `ต้องการส่งคำขอนัดหมาย ข้อความว่า ${spokenText} ใช่ไหม`);
@@ -554,10 +554,10 @@ export const AccessibilityAssistant = () => {
       if (currentValue.length > 0) return true;
 
       const promptByAction: Partial<Record<typeof actionId, string>> = {
-        "send-chat-message": "กรุณาพูดข้อความที่ต้องการส่งหาคุณหมอ",
+        "send-chat-message": "กรุณาพูดข้อความที่ต้องการส่งหาแพทย์",
         "send-support-request": "กรุณาพูดข้อความคำร้องขอความช่วยเหลือ",
         "send-appointment-request": "กรุณาพูดอาการหรือเหตุผลที่ต้องการนัดหมาย",
-        "accept-appointment": "หากต้องการส่งข้อความถึงคุณหมอ กรุณาพูดได้เลย",
+        "accept-appointment": "หากต้องการส่งข้อความถึงแพทย์ กรุณาพูดได้เลย",
         "decline-appointment": "กรุณาพูดเหตุผลการปฏิเสธนัด",
         "reschedule-appointment": "กรุณาพูดเหตุผลการขอเลื่อนนัด",
       };
@@ -862,7 +862,7 @@ export const AccessibilityAssistant = () => {
           ? currentFlags.isRegisterRoute
             ? "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สมัครสมาชิก วิธีสมัครสมาชิก หรือ เข้าสู่ระบบ"
             : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก"
-          : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา สแกนความดัน นัดหมอ แชทหมอ หรือ ดูการแจ้งเตือนล่าสุด";
+          : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา สแกนความดัน นัดแพทย์ แชทแพทย์ หรือ ดูการแจ้งเตือนล่าสุด";
 
         if (noIntentStreakRef.current < 2) {
           setVoiceStatusText("กำลังฟังอยู่ ลองพูดช้าๆ อีกครั้ง");
@@ -942,7 +942,7 @@ export const AccessibilityAssistant = () => {
             ? dynamicFlags.isRegisterRoute
               ? "ยังฟังไม่ชัด ลองพูดช้าๆ ว่า สมัครสมาชิก หรือ เข้าสู่ระบบ"
               : "ยังฟังไม่ชัด ลองพูดช้าๆ ว่า เข้าสู่ระบบ หรือ สมัครสมาชิก"
-            : "ยังฟังไม่ชัด ลองพูดสั้นๆ เช่น สแกนยา สแกนความดัน นัดหมอ แชทหมอ หรือ ดูการแจ้งเตือนล่าสุด";
+            : "ยังฟังไม่ชัด ลองพูดสั้นๆ เช่น สแกนยา สแกนความดัน นัดแพทย์ แชทแพทย์ หรือ ดูการแจ้งเตือนล่าสุด";
           setVoiceStatusText(retryMessage);
           speakGuidanceWithCooldown(retryMessage, 4500);
           noMatchStreakRef.current = 0;
@@ -975,7 +975,7 @@ export const AccessibilityAssistant = () => {
       ? currentFlags.isRegisterRoute
         ? "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สมัครสมาชิก หรือ วิธีสมัครสมาชิก"
         : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น เข้าสู่ระบบ หรือ วิธีเข้าสู่ระบบ"
-      : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา สแกนความดัน นัดหมอ แชทหมอ หรือ ดูการแจ้งเตือนล่าสุด";
+      : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา สแกนความดัน นัดแพทย์ แชทแพทย์ หรือ ดูการแจ้งเตือนล่าสุด";
     setVoiceStatusText(startMessage);
     speakFeedback(startMessage, true);
     window.setTimeout(() => {
@@ -1270,3 +1270,4 @@ export const AccessibilityAssistant = () => {
     </div>
   );
 };
+

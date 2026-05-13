@@ -46,9 +46,9 @@ export const InviteDoctorForm = () => {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <MailPlus className="h-5 w-5 text-cyan-700" />
-          Invite คุณหมอ
+          Invite แพทย์
         </CardTitle>
-        <CardDescription>เฉพาะแอดมินที่สามารถออก token เชิญหมอได้</CardDescription>
+        <CardDescription>เฉพาะแอดมินที่สามารถออก token เชิญแพทย์ได้</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
@@ -66,7 +66,7 @@ export const InviteDoctorForm = () => {
           </Alert>
         ) : null}
         <div className="space-y-2">
-          <Label htmlFor="doctor-email">อีเมลหมอ</Label>
+          <Label htmlFor="doctor-email">อีเมลแพทย์</Label>
           <Input
             id="doctor-email"
             type="email"
@@ -84,7 +84,7 @@ export const InviteDoctorForm = () => {
         </div>
         <Button onClick={submit} disabled={loading || !email.trim()}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          <span>{loading ? "กำลังสร้าง..." : "สร้างคำเชิญหมอ"}</span>
+          <span>{loading ? "กำลังสร้าง..." : "สร้างคำเชิญแพทย์"}</span>
         </Button>
       </CardContent>
     </Card>
