@@ -38,6 +38,14 @@ const isEmailOtpType = (value: string | null): value is EmailOtpType =>
   value === "email" ||
   value === "phone_change";
 
+const mapResetFlowError = (rawMessage: string) => {
+  const normalized = rawMessage.toLowerCase();
+  if (normalized.includes("pkce code verifier not found")) {
+    return "ลิงก์รีเซ็ตรหัสผ่านไม่ถูกต้องสำหรับอุปกรณ์นี้ กรุณากดส่งลิงก์ใหม่จากหน้าเข้าสู่ระบบ แล้วเปิดลิงก์ในเบราว์เซอร์และอุปกรณ์เดียวกัน";
+  }
+  return rawMessage;
+};
+
 export default function ResetPasswordPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +72,11 @@ export default function ResetPasswordPage() {
         const query = url.searchParams;
         const hash = new URLSearchParams(window.location.hash.replace(/^#/u, ""));
 
+        const incomingError = query.get("error_description") ?? query.get("error");
+        if (incomingError && active) {
+          setError(mapResetFlowError(incomingError));
+        }
+
         const code = query.get("code");
         const tokenHash = query.get("token_hash") ?? hash.get("token_hash");
         const type = query.get("type") ?? hash.get("type");
@@ -71,17 +84,22 @@ export default function ResetPasswordPage() {
         const refreshToken = query.get("refresh_token") ?? hash.get("refresh_token");
 
         if (code) {
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-          if (exchangeError && active) {
-            setError(`ลิงก์รีเซ็ตรหัสผ่านไม่ถูกต้อง: ${exchangeError.message}`);
+          const callbackUrl = new URL("/auth/callback", window.location.origin);
+          callbackUrl.searchParams.set("code", code);
+          callbackUrl.searchParams.set("next", "/reset-password");
+          const state = query.get("state");
+          if (state) {
+            callbackUrl.searchParams.set("state", state);
           }
+          window.location.replace(callbackUrl.toString());
+          return;
         } else if (tokenHash && isEmailOtpType(type)) {
           const { error: verifyError } = await supabase.auth.verifyOtp({
             token_hash: tokenHash,
             type,
           });
           if (verifyError && active) {
-            setError(`ยืนยันลิงก์รีเซ็ตรหัสผ่านไม่สำเร็จ: ${verifyError.message}`);
+            setError(`ยืนยันลิงก์รีเซ็ตรหัสผ่านไม่สำเร็จ: ${mapResetFlowError(verifyError.message)}`);
           }
         } else if (accessToken && refreshToken) {
           const { error: setSessionError } = await supabase.auth.setSession({
@@ -89,7 +107,7 @@ export default function ResetPasswordPage() {
             refresh_token: refreshToken,
           });
           if (setSessionError && active) {
-            setError(`ไม่สามารถเริ่มเซสชันรีเซ็ตรหัสผ่าน: ${setSessionError.message}`);
+            setError(`ไม่สามารถเริ่มเซสชันรีเซ็ตรหัสผ่าน: ${mapResetFlowError(setSessionError.message)}`);
           }
         }
 

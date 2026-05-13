@@ -56,6 +56,20 @@ const buildProviderDisabledError = (provider: OAuthProvider) => {
   } กรุณาไปที่ Supabase > Authentication > Providers แล้วเปิด ${providerName} พร้อมใส่ Client ID/Secret และตั้ง Redirect URI เป็น ${callback}`;
 };
 
+const mapProviderErrorMessage = (provider: OAuthProvider | null, rawMessage: string) => {
+  const normalizedMessage = rawMessage.toLowerCase();
+  if (normalizedMessage.includes("error getting user email from external provider")) {
+    if (provider === "facebook") {
+      return "Facebook ไม่ส่งอีเมลกลับมาให้ระบบ กรุณาตรวจใน Supabase > Authentication > Providers > Facebook ให้เปิด \"Allow users without an email\" หรือยืนยันว่าแอป Facebook มี permission email และบัญชี Facebook นี้มีอีเมลใช้งานได้";
+    }
+    if (provider === "google") {
+      return "Google ไม่ส่งอีเมลกลับมาให้ระบบ กรุณาลองเข้าสู่ระบบใหม่ และตรวจว่าบัญชี Google อนุญาตสิทธิ์อีเมลแล้ว";
+    }
+    return "ผู้ให้บริการ Social Login ไม่ส่งอีเมลกลับมาให้ระบบ กรุณาตรวจสิทธิ์อีเมลของบัญชี และถ้าใช้ Facebook ให้เปิด \"Allow users without an email\" ใน Supabase";
+  }
+  return rawMessage;
+};
+
 const parseProviderAvailability = (payload: unknown): ProviderAvailability => {
   if (!payload || typeof payload !== "object") {
     return DEFAULT_PROVIDER_AVAILABILITY;
@@ -73,7 +87,9 @@ const parseProviderAvailability = (payload: unknown): ProviderAvailability => {
 };
 
 export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormProps) => {
-  const [error, setError] = useState<string | null>(initialError);
+  const [error, setError] = useState<string | null>(
+    initialError ? mapProviderErrorMessage(null, initialError) : null,
+  );
   const [isPending, setPending] = useState(false);
   const [isSendingReset, setSendingReset] = useState(false);
   const [resetEmailInput, setResetEmailInput] = useState("");
@@ -120,7 +136,10 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     return `${window.location.origin}/auth/callback?${params.toString()}`;
   };
 
-  const buildResetPasswordUrl = () => `${window.location.origin}/reset-password`;
+  const buildResetPasswordUrl = () => {
+    const params = new URLSearchParams({ next: "/reset-password" });
+    return `${window.location.origin}/auth/callback?${params.toString()}`;
+  };
 
   const refreshProviderStatus = async () => {
     const supabaseUrl = getSupabaseBaseUrl();
@@ -131,6 +150,7 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     try {
       const response = await fetch(`${supabaseUrl}/auth/v1/settings`, {
         method: "GET",
+        cache: "no-store",
         headers: {
           apikey: anonKey,
           Authorization: `Bearer ${anonKey}`,
@@ -217,10 +237,16 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
 
     setOauthPending(provider);
     const supabase = createSupabaseBrowserClient();
+    const oauthScopes =
+      provider === "google"
+        ? "openid email profile https://www.googleapis.com/auth/userinfo.email"
+        : "email,public_profile";
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo: buildCallbackUrl(getSafeNextPath()),
+        scopes: oauthScopes,
+        queryParams: provider === "facebook" ? { auth_type: "rerequest" } : undefined,
       },
     });
     setOauthPending(null);
@@ -235,7 +261,7 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
       const callbackHint = getSupabaseBaseUrl()
         ? `${getSupabaseBaseUrl()}/auth/v1/callback`
         : "https://<project-ref>.supabase.co/auth/v1/callback";
-      setError(`${oauthError.message} (ตรวจ redirect URI ให้มี ${callbackHint})`);
+      setError(`${mapProviderErrorMessage(provider, oauthError.message)} (ตรวจ redirect URI ให้มี ${callbackHint})`);
     }
   };
 
