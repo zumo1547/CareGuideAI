@@ -95,8 +95,8 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
   });
   const emailField = register("email");
 
-  const googleDisabled = Boolean(oauthPending) || providerAvailability.google === false;
-  const facebookDisabled = Boolean(oauthPending) || providerAvailability.facebook === false;
+  const googleDisabled = Boolean(oauthPending);
+  const facebookDisabled = Boolean(oauthPending);
 
   const providerStatusText = useMemo(() => {
     const toText = (value: boolean | null) => {
@@ -157,24 +157,6 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     return () => window.clearTimeout(timer);
   }, []);
 
-  const ensureProviderEnabled = async (provider: OAuthProvider) => {
-    let availability = providerAvailability;
-
-    if (availability[provider] === null) {
-      const latest = await refreshProviderStatus();
-      if (latest) {
-        availability = latest;
-      }
-    }
-
-    if (availability[provider] === false) {
-      setError(buildProviderDisabledError(provider));
-      return false;
-    }
-
-    return true;
-  };
-
   const onSubmit = handleSubmit(async (values) => {
     setPending(true);
     setError(null);
@@ -226,9 +208,9 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     setError(null);
     setResetInfo(null);
 
-    const isEnabled = await ensureProviderEnabled(provider);
-    if (!isEnabled) {
-      return;
+    if (providerAvailability[provider] === false) {
+      // แจ้งเตือนแบบไม่บล็อก เพื่อให้ผู้ใช้ยังลอง login ได้ในกรณี setting เพิ่งอัปเดต
+      setError(buildProviderDisabledError(provider));
     }
 
     setOauthPending(provider);
@@ -375,6 +357,16 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
             </div>
             <p className="mt-1">Google: {providerStatusText.google}</p>
             <p>Facebook: {providerStatusText.facebook}</p>
+            <p className="mt-2 break-all">
+              โปรเจกต์ที่เว็บเชื่อมอยู่:{" "}
+              <span className="font-medium text-foreground">{getSupabaseProjectRef() ?? "ไม่พบ project ref"}</span>
+            </p>
+            <p className="break-all">
+              Callback ที่ต้องใช้:{" "}
+              <span className="font-medium text-foreground">
+                {getSupabaseBaseUrl() ? `${getSupabaseBaseUrl()}/auth/v1/callback` : "https://<project-ref>.supabase.co/auth/v1/callback"}
+              </span>
+            </p>
           </div>
 
           <p className="text-center text-xs text-muted-foreground">หรือเข้าสู่ระบบด้วยบัญชีอื่น</p>
