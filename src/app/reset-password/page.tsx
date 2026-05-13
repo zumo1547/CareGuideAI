@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { AlertCircle, CheckCircle2, Loader2, Lock } from "lucide-react";
+import type { EmailOtpType } from "@supabase/supabase-js";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -28,6 +29,15 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>;
 
+const isEmailOtpType = (value: string | null): value is EmailOtpType =>
+  value === "recovery" ||
+  value === "signup" ||
+  value === "invite" ||
+  value === "magiclink" ||
+  value === "email_change" ||
+  value === "email" ||
+  value === "phone_change";
+
 export default function ResetPasswordPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -45,14 +55,70 @@ export default function ResetPasswordPage() {
   });
 
   useEffect(() => {
-    const checkSession = async () => {
-      const supabase = createSupabaseBrowserClient();
-      const { data } = await supabase.auth.getSession();
-      setHasRecoverySession(Boolean(data.session));
-      setCheckingSession(false);
+    let active = true;
+    const supabase = createSupabaseBrowserClient();
+
+    const bootstrapRecoverySession = async () => {
+      try {
+        const url = new URL(window.location.href);
+        const query = url.searchParams;
+        const hash = new URLSearchParams(window.location.hash.replace(/^#/u, ""));
+
+        const code = query.get("code");
+        const tokenHash = query.get("token_hash") ?? hash.get("token_hash");
+        const type = query.get("type") ?? hash.get("type");
+        const accessToken = query.get("access_token") ?? hash.get("access_token");
+        const refreshToken = query.get("refresh_token") ?? hash.get("refresh_token");
+
+        if (code) {
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError && active) {
+            setError(`ลิงก์รีเซ็ตรหัสผ่านไม่ถูกต้อง: ${exchangeError.message}`);
+          }
+        } else if (tokenHash && isEmailOtpType(type)) {
+          const { error: verifyError } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type,
+          });
+          if (verifyError && active) {
+            setError(`ยืนยันลิงก์รีเซ็ตรหัสผ่านไม่สำเร็จ: ${verifyError.message}`);
+          }
+        } else if (accessToken && refreshToken) {
+          const { error: setSessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (setSessionError && active) {
+            setError(`ไม่สามารถเริ่มเซสชันรีเซ็ตรหัสผ่าน: ${setSessionError.message}`);
+          }
+        }
+
+        const { data } = await supabase.auth.getSession();
+        if (!active) return;
+
+        setHasRecoverySession(Boolean(data.session));
+        setCheckingSession(false);
+      } catch {
+        if (!active) return;
+        setError("ไม่สามารถตรวจสอบลิงก์รีเซ็ตรหัสผ่านได้ กรุณาลองกดลิงก์จากอีเมลอีกครั้ง");
+        setCheckingSession(false);
+      }
     };
 
-    void checkSession();
+    void bootstrapRecoverySession();
+
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
+        setHasRecoverySession(Boolean(session));
+        setCheckingSession(false);
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.subscription.unsubscribe();
+    };
   }, []);
 
   const onSubmit = handleSubmit(async (values) => {
@@ -71,7 +137,7 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    setSuccess("ตั้งรหัสผ่านใหม่สำเร็จ กำลังพาไปหน้าเข้าสู่ระบบ");
+    setSuccess("ตั้งรหัสผ่านใหม่สำเร็จ กำลังพากลับไปหน้าเข้าสู่ระบบ");
     window.setTimeout(() => {
       router.replace("/login");
       router.refresh();

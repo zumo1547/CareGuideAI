@@ -120,6 +120,8 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     return `${window.location.origin}/auth/callback?${params.toString()}`;
   };
 
+  const buildResetPasswordUrl = () => `${window.location.origin}/reset-password`;
+
   const refreshProviderStatus = async () => {
     const supabaseUrl = getSupabaseBaseUrl();
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -190,7 +192,7 @@ export const LoginForm = ({ nextPath = "/app", initialError = null }: LoginFormP
     setSendingReset(true);
     const supabase = createSupabaseBrowserClient();
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(parsed.data, {
-      redirectTo: buildCallbackUrl("/reset-password"),
+      redirectTo: buildResetPasswordUrl(),
     });
     setSendingReset(false);
 
