@@ -55,7 +55,7 @@ export default async function Home() {
   return (
     <div className="min-h-screen bg-[linear-gradient(140deg,#e0f2fe_0%,#ecfeff_38%,#f8fafc_70%,#ffffff_100%)]">
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-4 py-12 md:px-8 md:py-20">
-        <section className="reveal-up grid gap-8 rounded-3xl border bg-white/90 p-8 shadow-sm md:grid-cols-[1.15fr_0.85fr] md:p-12">
+        <section className="reveal-up grid gap-8 rounded-3xl border bg-white/90 p-8 shadow-sm transition-all duration-500 md:grid-cols-[1.15fr_0.85fr] md:p-12">
           <div className="space-y-5">
             <BrandLogo href={isAuthenticated ? "/app" : "/"} imageClassName="h-14" priority />
             <h1 className="text-3xl font-bold leading-tight text-slate-900 md:text-5xl">
@@ -77,11 +77,14 @@ export default async function Home() {
               ))}
             </div>
 
-            <div className="flex flex-wrap gap-3 pt-1">
-              <VoiceModeStartButton href={primaryHref} />
+            <div className="grid w-full gap-3 pt-1 sm:grid-cols-3">
+              <VoiceModeStartButton
+                href={primaryHref}
+                className="h-12 w-full justify-center rounded-full bg-cyan-700 text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-cyan-800 hover:shadow-cyan-200 active:translate-y-0"
+              />
               <Link
                 href={primaryHref}
-                className="inline-flex items-center gap-2 rounded-full bg-cyan-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-800"
+                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-cyan-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-cyan-800 hover:shadow-cyan-200 active:translate-y-0"
                 aria-label={primaryLabel}
                 data-voice-action={!isAuthenticated ? "go-register-page" : undefined}
               >
@@ -90,7 +93,7 @@ export default async function Home() {
               </Link>
               <Link
                 href={secondaryHref}
-                className="inline-flex items-center gap-2 rounded-full border border-cyan-700 px-5 py-2.5 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-50"
+                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border border-cyan-700 px-5 py-2.5 text-sm font-semibold text-cyan-800 transition-all duration-300 hover:-translate-y-0.5 hover:bg-cyan-50 hover:shadow-sm active:translate-y-0"
                 aria-label={secondaryLabel}
                 data-voice-action={!isAuthenticated ? "go-login-page" : undefined}
               >
@@ -125,8 +128,11 @@ export default async function Home() {
         </section>
 
         <section className="reveal-up reveal-delay-1 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {featureCards.map((item) => (
-            <article key={item.title} className="rounded-2xl border bg-white p-5 shadow-sm">
+          {featureCards.map((item, index) => (
+            <article
+              key={item.title}
+              className={`reveal-up rounded-2xl border bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-md ${index % 4 === 0 ? "reveal-delay-1" : index % 4 === 1 ? "reveal-delay-2" : index % 4 === 2 ? "reveal-delay-3" : ""}`}
+            >
               <item.icon className="h-5 w-5 text-cyan-700" />
               <h2 className="mt-3 text-lg font-semibold text-slate-900">{item.title}</h2>
               <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.desc}</p>
