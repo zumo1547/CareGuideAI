@@ -1587,7 +1587,7 @@ export const AccessibilityAssistant = () => {
       <div className="pointer-events-auto flex flex-col items-end gap-2">
         {panelOpen ? (
           <section
-            className="w-[22rem] rounded-2xl border bg-background/95 p-3 shadow-xl backdrop-blur"
+            className="w-[calc(100vw-1rem)] max-w-[22rem] break-words rounded-2xl border bg-background/95 p-3 shadow-xl backdrop-blur md:w-[22rem]"
             aria-label="ผู้ช่วยการเข้าถึงและคำสั่งเสียง"
           >
             <p className="text-sm font-semibold">ผู้ช่วยการเข้าถึง</p>
@@ -1702,7 +1702,7 @@ export const AccessibilityAssistant = () => {
         {!panelOpen && shouldHighlightLauncher ? (
           <div
             id="voice-launcher-hint"
-            className="max-w-[17rem] rounded-2xl border border-cyan-300/80 bg-cyan-50 px-3 py-2 text-xs leading-relaxed text-cyan-900 shadow-lg soft-pulse"
+            className="max-w-[calc(100vw-1rem)] md:max-w-[17rem] rounded-2xl border border-cyan-300/80 bg-cyan-50 px-3 py-2 text-xs leading-relaxed text-cyan-900 shadow-lg soft-pulse"
             role="note"
             aria-live="polite"
           >
