@@ -235,41 +235,17 @@ export const ReminderEventsTable = ({ initialEvents, patientId }: ReminderEvents
 
     setError(null);
     setSuccess(null);
-    setCancellingAllPending(true);
 
-    try {
-      const response = await fetch("/api/reminders/cancel-many", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cancelAllPending: true,
-          patientId: patientId ?? undefined,
-        }),
-      });
-      const payload = (await response.json()) as {
-        error?: string;
-        cancelledCount?: number;
-      };
+    const pendingEventIds = events
+      .filter((event) => toDisplayStatus(event) === "pending")
+      .map((event) => event.id);
 
-      if (!response.ok) {
-        setError(payload.error ?? "ยกเลิกรายการแจ้งเตือนทั้งหมดไม่สำเร็จ");
-        return;
-      }
-
-      const cancelledCount = payload.cancelledCount ?? 0;
-      setSuccess(
-        cancelledCount > 0
-          ? `ยกเลิกรายการแจ้งเตือนที่รอดำเนินการทั้งหมดแล้ว ${cancelledCount} รายการ`
-          : "ไม่พบรายการที่รอดำเนินการให้ยกเลิก",
-      );
-
-      await refreshEvents(true);
-      router.refresh();
-    } catch {
-      setError("ยกเลิกรายการแจ้งเตือนทั้งหมดไม่สำเร็จ");
-    } finally {
-      setCancellingAllPending(false);
+    if (!pendingEventIds.length) {
+      setSuccess("ไม่พบรายการที่รอดำเนินการให้ยกเลิก");
+      return;
     }
+
+    await cancelReminders(pendingEventIds, true);
   };
 
   return (

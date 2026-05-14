@@ -80,10 +80,13 @@ export async function POST(request: Request) {
   }
 
   if (!events?.length) {
-    if (cancelAllPending) {
-      return badRequest("No pending reminders to cancel");
-    }
-    return NextResponse.json({ error: "Reminder events not found" }, { status: 404 });
+    return NextResponse.json({
+      success: true,
+      cancelledAt: new Date().toISOString(),
+      cancelledCount: 0,
+      cancelledIds: [] as string[],
+      skippedCount: 0,
+    });
   }
 
   if (events.some((event) => event.patient_id !== patientId)) {
@@ -95,7 +98,13 @@ export async function POST(request: Request) {
     .map((event) => event.id);
 
   if (!pendingEventIds.length) {
-    return badRequest("No pending reminders to cancel");
+    return NextResponse.json({
+      success: true,
+      cancelledAt: new Date().toISOString(),
+      cancelledCount: 0,
+      cancelledIds: [] as string[],
+      skippedCount: events.length,
+    });
   }
 
   const cancelledAt = new Date().toISOString();
