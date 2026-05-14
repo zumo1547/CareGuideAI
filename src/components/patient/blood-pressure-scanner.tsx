@@ -1298,6 +1298,10 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
                   BMI ล่าสุด {bmiTrend.bmi.toFixed(2)} ({bmiTrend.sexLabel}) | {bmiTrend.bloodPressureTrendLabel}
                 </p>
               ) : null}
+              <p className="sr-only" data-voice-bp-summary>
+                สรุปผลความดัน Systolic {systolicInput || "-"} Diastolic {diastolicInput || "-"} ชีพจร{" "}
+                {pulseInput || "-"} ระดับ {currentAssessment.categoryLabelTh} {combinedSummary}
+              </p>
             </div>
           ) : null}
 
@@ -1317,7 +1321,12 @@ export const BloodPressureScanner = ({ patientId, biologicalSex, bmi }: BloodPre
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={() => void confirmReading()} disabled={confirmLoading || !currentReading}>
+            <Button
+              type="button"
+              onClick={() => void confirmReading()}
+              disabled={confirmLoading || !currentReading}
+              data-voice-action="confirm-bp-reading"
+            >
               {confirmLoading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (

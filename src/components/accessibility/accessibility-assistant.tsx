@@ -62,6 +62,8 @@ const VOICE_START_EVENT = "careguide:voice-mode-start";
 const VOICE_AUTOSTART_MAX_AGE_MS = 20_000;
 const VOICE_MEDICINE_SCAN_FLOW_KEY = "careguide-voice-medicine-scan-flow-v1";
 const VOICE_MEDICINE_SCAN_FLOW_MAX_AGE_MS = 90_000;
+const VOICE_BLOOD_PRESSURE_SCAN_FLOW_KEY = "careguide-voice-bp-scan-flow-v1";
+const VOICE_BLOOD_PRESSURE_SCAN_FLOW_MAX_AGE_MS = 90_000;
 const VOICE_MED_CONFIRM_SKIP_DIALOG_KEY = "careguide:voice-confirm-med-plan-skip-dialog";
 
 const DEFAULT_PREFS: AccessibilityPrefs = {
@@ -250,6 +252,9 @@ export const AccessibilityAssistant = () => {
   const medicineScanResultWatcherRef = useRef<number | null>(null);
   const medicinePlanSaveWatcherRef = useRef<number | null>(null);
   const medicineVoiceFlowActiveRef = useRef(false);
+  const bloodPressureScanResultWatcherRef = useRef<number | null>(null);
+  const bloodPressureSaveWatcherRef = useRef<number | null>(null);
+  const bloodPressureVoiceFlowActiveRef = useRef(false);
 
   const speakFeedback = useCallback(
     (text: string, force = false) => {
@@ -291,9 +296,29 @@ export const AccessibilityAssistant = () => {
       setVoiceModeEnabled(false);
       setVoiceListening(false);
       pendingConfirmationRef.current = null;
+      medicineVoiceFlowActiveRef.current = false;
+      bloodPressureVoiceFlowActiveRef.current = false;
+      if (medicineScanResultWatcherRef.current !== null) {
+        window.clearInterval(medicineScanResultWatcherRef.current);
+        medicineScanResultWatcherRef.current = null;
+      }
+      if (medicinePlanSaveWatcherRef.current !== null) {
+        window.clearInterval(medicinePlanSaveWatcherRef.current);
+        medicinePlanSaveWatcherRef.current = null;
+      }
+      if (bloodPressureScanResultWatcherRef.current !== null) {
+        window.clearInterval(bloodPressureScanResultWatcherRef.current);
+        bloodPressureScanResultWatcherRef.current = null;
+      }
+      if (bloodPressureSaveWatcherRef.current !== null) {
+        window.clearInterval(bloodPressureSaveWatcherRef.current);
+        bloodPressureSaveWatcherRef.current = null;
+      }
       stopThaiSpeech();
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(VOICE_AUTOSTART_KEY);
+        window.localStorage.removeItem(VOICE_MEDICINE_SCAN_FLOW_KEY);
+        window.localStorage.removeItem(VOICE_BLOOD_PRESSURE_SCAN_FLOW_KEY);
       }
       setVoiceStatusText("ปิดโหมดใช้งานด้วยเสียงแล้ว");
       if (speakAfterStop) {
@@ -632,6 +657,15 @@ export const AccessibilityAssistant = () => {
           }
 
           if (intent.sectionId === "blood-pressure") {
+            if (typeof window !== "undefined") {
+              window.localStorage.setItem(
+                VOICE_BLOOD_PRESSURE_SCAN_FLOW_KEY,
+                JSON.stringify({
+                  requestedAt: Date.now(),
+                  source: "patient-voice-command",
+                }),
+              );
+            }
             setVoiceStatusText("กำลังเปิดหน้าสแกนความดัน");
             speakFeedback("กำลังเปิดหน้าสแกนความดัน");
             router.push("/app/scan/blood-pressure");
@@ -1235,12 +1269,201 @@ export const AccessibilityAssistant = () => {
   }, [clickBySelector, isMedicineScanRoute, pathname, queueConfirmation, router, speakFeedback, voiceModeEnabled]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!isBloodPressureScanRoute) return;
+    if (!voiceModeEnabled || !voiceEnabledRef.current || !shouldRunVoiceLoopRef.current) return;
+
+    const raw = window.localStorage.getItem(VOICE_BLOOD_PRESSURE_SCAN_FLOW_KEY);
+    if (!raw) return;
+    window.localStorage.removeItem(VOICE_BLOOD_PRESSURE_SCAN_FLOW_KEY);
+
+    let requestedAt = Date.now();
+    try {
+      const parsed = JSON.parse(raw) as { requestedAt?: number };
+      if (typeof parsed.requestedAt === "number") {
+        requestedAt = parsed.requestedAt;
+      }
+    } catch {
+      const numericValue = Number(raw);
+      if (Number.isFinite(numericValue)) {
+        requestedAt = numericValue;
+      }
+    }
+
+    if (Date.now() - requestedAt > VOICE_BLOOD_PRESSURE_SCAN_FLOW_MAX_AGE_MS) {
+      return;
+    }
+
+    bloodPressureVoiceFlowActiveRef.current = true;
+
+    const startIntent: VoiceIntent = {
+      type: "action",
+      actionId: "start-bp-camera-scan",
+      label: "เริ่มสแกนความดันด้วยกล้อง",
+      requiresConfirmation: true,
+    };
+
+    const runRescanPrompt = () => {
+      const rescanIntent: VoiceIntent = {
+        type: "action",
+        actionId: "start-bp-camera-scan",
+        label: "สแกนความดันใหม่อีกรอบ",
+        requiresConfirmation: true,
+      };
+      queueConfirmation(rescanIntent, "ต้องการเริ่มสแกนด้วยกล้องอีกครั้งหรือไม่", {
+        onAffirmative: async () => {
+          const clicked = clickBySelector("[data-voice-action='start-bp-camera-scan']");
+          if (!clicked) {
+            const message = "ยังไม่พบปุ่มเริ่มสแกนด้วยกล้อง";
+            setVoiceStatusText(message);
+            speakFeedback(message, true);
+            return;
+          }
+          setVoiceStatusText("เริ่มสแกนความดันใหม่แล้ว กรุณาค้างกล้องไว้");
+          speakFeedback("เริ่มสแกนความดันใหม่แล้ว กรุณาค้างกล้องไว้");
+          watchScanReady();
+        },
+        onNegative: async () => {
+          bloodPressureVoiceFlowActiveRef.current = false;
+          setVoiceStatusText("กลับไปหน้าหลักผู้ใช้งาน");
+          speakFeedback("รับทราบ กลับไปหน้าหลักผู้ใช้งาน");
+          router.push("/app/patient");
+        },
+      });
+    };
+
+    const watchSaveResult = () => {
+      if (bloodPressureSaveWatcherRef.current !== null) {
+        window.clearInterval(bloodPressureSaveWatcherRef.current);
+      }
+
+      bloodPressureSaveWatcherRef.current = window.setInterval(() => {
+        if (!bloodPressureVoiceFlowActiveRef.current || pathname !== "/app/scan/blood-pressure") {
+          if (bloodPressureSaveWatcherRef.current !== null) {
+            window.clearInterval(bloodPressureSaveWatcherRef.current);
+            bloodPressureSaveWatcherRef.current = null;
+          }
+          return;
+        }
+
+        const successAlert = Array.from(document.querySelectorAll<HTMLElement>("[role='alert']")).find((element) => {
+          const text = normalizeText(element.textContent ?? "");
+          return text.includes("บันทึกค่าความดันเรียบร้อยแล้ว") || text.includes("บันทึกสำเร็จ");
+        });
+
+        if (!successAlert) return;
+        if (bloodPressureSaveWatcherRef.current !== null) {
+          window.clearInterval(bloodPressureSaveWatcherRef.current);
+          bloodPressureSaveWatcherRef.current = null;
+        }
+        bloodPressureVoiceFlowActiveRef.current = false;
+        setVoiceStatusText("บันทึกผลความดันสำเร็จ กำลังกลับหน้าหลัก");
+        speakFeedback("ยืนยันผลความดันสำเร็จแล้ว กำลังกลับหน้าหลักผู้ใช้งาน");
+        router.push("/app/patient");
+      }, 700);
+    };
+
+    const watchScanReady = () => {
+      if (bloodPressureScanResultWatcherRef.current !== null) {
+        window.clearInterval(bloodPressureScanResultWatcherRef.current);
+      }
+
+      bloodPressureScanResultWatcherRef.current = window.setInterval(() => {
+        if (!bloodPressureVoiceFlowActiveRef.current || pathname !== "/app/scan/blood-pressure") {
+          if (bloodPressureScanResultWatcherRef.current !== null) {
+            window.clearInterval(bloodPressureScanResultWatcherRef.current);
+            bloodPressureScanResultWatcherRef.current = null;
+          }
+          return;
+        }
+
+        const confirmButton = document.querySelector<HTMLButtonElement>(
+          "[data-voice-action='confirm-bp-reading']",
+        );
+        if (!confirmButton || confirmButton.disabled) return;
+
+        if (bloodPressureScanResultWatcherRef.current !== null) {
+          window.clearInterval(bloodPressureScanResultWatcherRef.current);
+          bloodPressureScanResultWatcherRef.current = null;
+        }
+
+        const summaryText = normalizeText(
+          document.querySelector<HTMLElement>("[data-voice-bp-summary]")?.textContent ??
+            "อ่านค่าความดันเสร็จแล้ว กรุณาตรวจสอบข้อมูลก่อนยืนยัน",
+        );
+
+        const confirmIntent: VoiceIntent = {
+          type: "action",
+          actionId: "start-bp-camera-scan",
+          label: "ยืนยันผลความดัน",
+          requiresConfirmation: true,
+        };
+
+        queueConfirmation(confirmIntent, `${summaryText} ต้องการยืนยันผลหรือไม่`, {
+          onAffirmative: async () => {
+            const clicked = clickBySelector("[data-voice-action='confirm-bp-reading']");
+            if (!clicked) {
+              const message = "ยังไม่พบปุ่มยืนยันผลความดัน";
+              setVoiceStatusText(message);
+              speakFeedback(message, true);
+              return;
+            }
+            setVoiceStatusText("กำลังบันทึกผลความดัน กรุณารอสักครู่");
+            speakFeedback("กำลังบันทึกผลความดัน กรุณารอสักครู่");
+            watchSaveResult();
+          },
+          onNegative: async () => {
+            setVoiceStatusText("ยังไม่ยืนยันผลความดัน");
+            speakFeedback("รับทราบ ยังไม่ยืนยันผลความดัน");
+            runRescanPrompt();
+          },
+        });
+      }, 700);
+    };
+
+    queueConfirmation(startIntent, "จะเริ่มสแกนความดันด้วยกล้องเลยหรือไม่", {
+      onAffirmative: async () => {
+        const clicked = clickBySelector("[data-voice-action='start-bp-camera-scan']");
+        if (!clicked) {
+          const message = "ยังไม่พบปุ่มเริ่มสแกนด้วยกล้อง";
+          setVoiceStatusText(message);
+          speakFeedback(message, true);
+          return;
+        }
+        setVoiceStatusText("เริ่มสแกนความดันแล้ว กรุณาค้างกล้องไว้");
+        speakFeedback("เริ่มสแกนความดันแล้ว กรุณาค้างกล้องไว้");
+        watchScanReady();
+      },
+      onNegative: async () => {
+        bloodPressureVoiceFlowActiveRef.current = false;
+        setVoiceStatusText("รับทราบ กลับไปหน้าหลักผู้ใช้งาน");
+        speakFeedback("รับทราบ กลับไปหน้าหลักผู้ใช้งาน");
+        router.push("/app/patient");
+      },
+    });
+  }, [
+    clickBySelector,
+    isBloodPressureScanRoute,
+    pathname,
+    queueConfirmation,
+    router,
+    speakFeedback,
+    voiceModeEnabled,
+  ]);
+
+  useEffect(() => {
     return () => {
       if (medicineScanResultWatcherRef.current !== null) {
         window.clearInterval(medicineScanResultWatcherRef.current);
       }
       if (medicinePlanSaveWatcherRef.current !== null) {
         window.clearInterval(medicinePlanSaveWatcherRef.current);
+      }
+      if (bloodPressureScanResultWatcherRef.current !== null) {
+        window.clearInterval(bloodPressureScanResultWatcherRef.current);
+      }
+      if (bloodPressureSaveWatcherRef.current !== null) {
+        window.clearInterval(bloodPressureSaveWatcherRef.current);
       }
     };
   }, []);
