@@ -48,7 +48,7 @@ export default async function Home() {
   const isAuthenticated = await hasAuthenticatedUser();
 
   const primaryHref = isAuthenticated ? "/app" : "/register";
-  const primaryLabel = isAuthenticated ? "ไปที่แดชบอร์ด" : "เริ่มใช้งาน";
+  const primaryLabel = isAuthenticated ? "ไปหน้าต่างหลัก" : "เริ่มใช้งาน";
   const secondaryHref = isAuthenticated ? "/app/scan/medicine" : "/login";
   const secondaryLabel = isAuthenticated ? "สแกนยาทันที" : "เข้าสู่ระบบ";
 
