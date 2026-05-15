@@ -66,6 +66,11 @@ const VOICE_BLOOD_PRESSURE_SCAN_FLOW_KEY = "careguide-voice-bp-scan-flow-v1";
 const VOICE_BLOOD_PRESSURE_SCAN_FLOW_MAX_AGE_MS = 90_000;
 const VOICE_MED_CONFIRM_SKIP_DIALOG_KEY = "careguide:voice-confirm-med-plan-skip-dialog";
 
+type AppointmentDayChoice = {
+  offsetDays: 0 | 1 | 3;
+  label: "วันนี้" | "1 วันถัดไป" | "3 วันถัดไป";
+};
+
 const DEFAULT_PREFS: AccessibilityPrefs = {
   voiceEnabled: true,
   announceButtonPress: true,
@@ -79,6 +84,57 @@ const estimatePromptLeadMs = (text: string) => {
   const base = 1600;
   const byLength = Math.min(5200, Math.max(700, text.length * 42));
   return base + byLength;
+};
+const toDateTimeLocalValue = (offsetDays: 0 | 1 | 3) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  date.setHours(date.getHours() + 1, 0, 0, 0);
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+};
+const parseAppointmentDayChoiceSpeech = (value: string): AppointmentDayChoice | null => {
+  const normalized = normalizeText(value).toLowerCase();
+  if (!normalized) return null;
+  const compact = normalized.replace(/\s+/g, "");
+
+  if (
+    compact.includes("วันนี้") ||
+    compact.includes("วันนี") ||
+    compact.includes("today") ||
+    compact === "0"
+  ) {
+    return { offsetDays: 0, label: "วันนี้" };
+  }
+
+  if (
+    compact.includes("พรุ่งนี้") ||
+    compact.includes("1วันถัดไป") ||
+    compact.includes("หนึ่งวันถัดไป") ||
+    compact.includes("1วัน") ||
+    compact.includes("หนึ่งวัน") ||
+    compact.includes("วันถัดไป") ||
+    compact.includes("อีกวัน")
+  ) {
+    return { offsetDays: 1, label: "1 วันถัดไป" };
+  }
+
+  if (
+    compact.includes("3วันถัดไป") ||
+    compact.includes("สามวันถัดไป") ||
+    compact.includes("3วัน") ||
+    compact.includes("สามวัน") ||
+    compact.includes("อีก3วัน") ||
+    compact.includes("อีกสามวัน")
+  ) {
+    return { offsetDays: 3, label: "3 วันถัดไป" };
+  }
+
+  return null;
 };
 
 const readInitialPrefs = (): AccessibilityPrefs => {
@@ -571,9 +627,36 @@ export const AccessibilityAssistant = () => {
     queueConfirmation(confirmIntent, `ต้องการส่งคำร้องถึงแพทย์ ข้อความว่า ${spokenText} ใช่ไหม`);
   }, [captureSpeechText, queueConfirmation, setFieldValueBySelector, speakFeedback]);
 
+  const captureAppointmentDayChoice = useCallback(async () => {
+    const firstPrompt =
+      "เลือกวันเวลาที่สะดวกสำหรับนัดแพทย์ พูดว่า วันนี้ หรือ 1 วันถัดไป หรือ 3 วันถัดไป";
+    const retryPrompt =
+      "ยังไม่เข้าใจช่วงวันนัด กรุณาพูดว่า วันนี้ หรือ 1 วันถัดไป หรือ 3 วันถัดไป";
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const spokenText = await captureSpeechText(attempt === 0 ? firstPrompt : retryPrompt, 26_000);
+      if (!spokenText) {
+        continue;
+      }
+
+      const choice = parseAppointmentDayChoiceSpeech(spokenText);
+      if (choice) {
+        setVoiceStatusText(`รับช่วงวันนัดแล้ว: ${choice.label}`);
+        speakFeedback(`รับคำตอบแล้ว เลือก ${choice.label}`);
+        return choice;
+      }
+    }
+
+    const failedMessage = "ยังไม่ได้ช่วงวันนัดที่ชัดเจน จึงยังไม่ส่งคำขอนัดในรอบนี้";
+    setVoiceStatusText(failedMessage);
+    speakFeedback(failedMessage, true);
+    return null;
+  }, [captureSpeechText, speakFeedback]);
+
   const runAppointmentRequestVoiceFlow = useCallback(async () => {
+    moveToSection(sectionIdByIntent.appointment);
     const intro = "ถึงส่วนนัดแพทย์แล้ว กรุณาพูดอาการหรือเหตุผลที่ต้องการนัดพบแพทย์";
-    const spokenText = await captureSpeechText(intro, 18_000);
+    const spokenText = await captureSpeechText(intro, 22_000);
     if (!spokenText) {
       return;
     }
@@ -586,14 +669,38 @@ export const AccessibilityAssistant = () => {
       return;
     }
 
+    const dayChoice = await captureAppointmentDayChoice();
+    if (!dayChoice) {
+      return;
+    }
+
+    const preferredAtValue = toDateTimeLocalValue(dayChoice.offsetDays);
+    const setPreferredAtOk = setFieldValueBySelector("#appointment-preferred-at", preferredAtValue);
+    if (!setPreferredAtOk) {
+      const message = "ยังไม่พบช่องเวลาที่สะดวกสำหรับนัดแพทย์";
+      setVoiceStatusText(message);
+      speakFeedback(message, true);
+      return;
+    }
+
     const confirmIntent: VoiceIntent = {
       type: "action",
       actionId: "send-appointment-request",
       label: "ส่งคำขอนัดหมายถึงแพทย์",
       requiresConfirmation: true,
     };
-    queueConfirmation(confirmIntent, `ต้องการส่งคำขอนัดหมาย ข้อความว่า ${spokenText} ใช่ไหม`);
-  }, [captureSpeechText, queueConfirmation, setFieldValueBySelector, speakFeedback]);
+    queueConfirmation(
+      confirmIntent,
+      `ต้องการส่งคำขอนัดหมาย ข้อความว่า ${spokenText} และเลือกเวลา ${dayChoice.label} ใช่ไหม`,
+    );
+  }, [
+    captureAppointmentDayChoice,
+    captureSpeechText,
+    moveToSection,
+    queueConfirmation,
+    setFieldValueBySelector,
+    speakFeedback,
+  ]);
 
   const ensureActionFieldHasContent = useCallback(
     async (actionId: Extract<VoiceIntent, { type: "action" }>["actionId"]) => {
@@ -678,6 +785,8 @@ export const AccessibilityAssistant = () => {
           }
 
           if (intent.sectionId === "appointment") {
+            moveToSection(sectionIdByIntent.appointment);
+            await sleep(500);
             await runAppointmentRequestVoiceFlow();
             return;
           }
@@ -993,8 +1102,8 @@ export const AccessibilityAssistant = () => {
       const currentFlags = routeFlagsRef.current;
       const hasPendingConfirmation = Boolean(pendingConfirmationRef.current);
       const heard = await listenForSpeechOnce({
-        timeoutMs: hasPendingConfirmation ? 24_000 : currentFlags.isPreAuthRoute ? 14_000 : 12_500,
-        maxAlternatives: hasPendingConfirmation ? 8 : 4,
+        timeoutMs: hasPendingConfirmation ? 34_000 : currentFlags.isPreAuthRoute ? 16_000 : 14_500,
+        maxAlternatives: hasPendingConfirmation ? 10 : 6,
         waitForTimeoutOnNoMatch: hasPendingConfirmation,
         signal: abortController.signal,
       });
