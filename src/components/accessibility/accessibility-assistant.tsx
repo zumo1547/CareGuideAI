@@ -289,6 +289,7 @@ export const AccessibilityAssistant = () => {
   const shouldRunVoiceLoopRef = useRef(false);
   const voiceEnabledRef = useRef(prefs.voiceEnabled);
   const pendingConfirmationRef = useRef<PendingConfirmation | null>(null);
+  const pendingConfirmationNoMatchStreakRef = useRef(0);
   const noMatchStreakRef = useRef(0);
   const noIntentStreakRef = useRef(0);
   const lastGuidanceSpokenAtRef = useRef(0);
@@ -349,6 +350,7 @@ export const AccessibilityAssistant = () => {
       recognitionAbortRef.current = null;
       noMatchStreakRef.current = 0;
       noIntentStreakRef.current = 0;
+      pendingConfirmationNoMatchStreakRef.current = 0;
       setVoiceModeEnabled(false);
       setVoiceListening(false);
       pendingConfirmationRef.current = null;
@@ -500,6 +502,7 @@ export const AccessibilityAssistant = () => {
         onNegative: options?.onNegative,
       };
       pendingConfirmationRef.current = nextConfirmation;
+      pendingConfirmationNoMatchStreakRef.current = 0;
       const confirmationPrompt = `${prompt} ตอบว่า ใช่ ไม่ หรือ ทบทวน`;
       setVoiceStatusText(prompt);
       speakFeedback(confirmationPrompt, true);
@@ -996,6 +999,7 @@ export const AccessibilityAssistant = () => {
         if (isNegativeSpeech(normalized)) {
           pendingConfirmationRef.current = null;
           noIntentStreakRef.current = 0;
+          pendingConfirmationNoMatchStreakRef.current = 0;
           if (activePendingConfirmation.onNegative) {
             await activePendingConfirmation.onNegative();
           } else {
@@ -1009,6 +1013,7 @@ export const AccessibilityAssistant = () => {
           const confirmedIntent = activePendingConfirmation.intent;
           pendingConfirmationRef.current = null;
           noIntentStreakRef.current = 0;
+          pendingConfirmationNoMatchStreakRef.current = 0;
           if (activePendingConfirmation.onAffirmative) {
             await activePendingConfirmation.onAffirmative();
           } else {
@@ -1021,6 +1026,7 @@ export const AccessibilityAssistant = () => {
 
         if (isRepeatSpeech(normalized)) {
           noIntentStreakRef.current = 0;
+          pendingConfirmationNoMatchStreakRef.current = 0;
           setVoiceStatusText("กำลังทวนคำสั่ง");
           speakFeedback(activePendingConfirmation.prompt, true);
           pauseListeningUntilRef.current =
@@ -1028,9 +1034,16 @@ export const AccessibilityAssistant = () => {
           return;
         }
 
-        setVoiceStatusText("กรุณาตอบ ใช่ ไม่ หรือ ทบทวน");
-        speakFeedback("กรุณาตอบ ใช่ ไม่ หรือ ทบทวน");
-        pauseListeningUntilRef.current = Date.now() + estimatePromptLeadMs("กรุณาตอบ ใช่ ไม่ หรือ ทบทวน");
+        pendingConfirmationNoMatchStreakRef.current += 1;
+        const confirmRetryMessage = "กรุณาตอบว่า ใช่ ไม่ หรือ ทบทวน";
+        if (pendingConfirmationNoMatchStreakRef.current < 2) {
+          setVoiceStatusText("กำลังรอฟังคำตอบอยู่ พูดว่า ใช่ ไม่ หรือ ทบทวน");
+          return;
+        }
+
+        setVoiceStatusText(confirmRetryMessage);
+        speakGuidanceWithCooldown(confirmRetryMessage, 5000);
+        pendingConfirmationNoMatchStreakRef.current = 0;
         return;
       }
 
@@ -1038,14 +1051,23 @@ export const AccessibilityAssistant = () => {
       if (!intent) {
         noIntentStreakRef.current += 1;
         const currentFlags = routeFlagsRef.current;
+        const isPatientVoiceRoute =
+          currentFlags.isPatientRoute ||
+          currentFlags.isMedicineScanRoute ||
+          currentFlags.isBloodPressureScanRoute;
+        const noIntentThreshold = currentFlags.isPreAuthRoute ? 2 : isPatientVoiceRoute ? 4 : 3;
         const message = currentFlags.isPreAuthRoute
           ? currentFlags.isRegisterRoute
             ? "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สมัครสมาชิก วิธีสมัครสมาชิก หรือ เข้าสู่ระบบ"
             : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า เข้าสู่ระบบ วิธีเข้าสู่ระบบ หรือ สมัครสมาชิก"
           : "ยังไม่เข้าใจคำสั่ง ลองพูดว่า สแกนยา สแกนความดัน นัดแพทย์ แชทแพทย์ หรือ ดูการแจ้งเตือนล่าสุด";
 
-        if (noIntentStreakRef.current < 2) {
-          setVoiceStatusText("กำลังฟังอยู่ ลองพูดช้าๆ อีกครั้ง");
+        if (noIntentStreakRef.current < noIntentThreshold) {
+          setVoiceStatusText(
+            isPatientVoiceRoute
+              ? "กำลังรอฟังคำสั่งอยู่ พูดช้าๆ ได้เลย เช่น สแกนยา นัดแพทย์ แชทแพทย์ หรือ ดูการแจ้งเตือนล่าสุด"
+              : "กำลังฟังอยู่ ลองพูดช้าๆ อีกครั้ง",
+          );
           return;
         }
 
@@ -1101,10 +1123,22 @@ export const AccessibilityAssistant = () => {
       recognitionAbortRef.current = abortController;
       const currentFlags = routeFlagsRef.current;
       const hasPendingConfirmation = Boolean(pendingConfirmationRef.current);
+      const isPatientVoiceRoute =
+        currentFlags.isPatientRoute ||
+        currentFlags.isMedicineScanRoute ||
+        currentFlags.isBloodPressureScanRoute;
       const heard = await listenForSpeechOnce({
-        timeoutMs: hasPendingConfirmation ? 34_000 : currentFlags.isPreAuthRoute ? 16_000 : 14_500,
+        timeoutMs: hasPendingConfirmation
+          ? isPatientVoiceRoute
+            ? 42_000
+            : 34_000
+          : currentFlags.isPreAuthRoute
+            ? 16_000
+            : isPatientVoiceRoute
+              ? 19_500
+              : 14_500,
         maxAlternatives: hasPendingConfirmation ? 10 : 6,
-        waitForTimeoutOnNoMatch: hasPendingConfirmation,
+        waitForTimeoutOnNoMatch: hasPendingConfirmation || isPatientVoiceRoute,
         signal: abortController.signal,
       });
       recognitionAbortRef.current = null;
@@ -1116,7 +1150,12 @@ export const AccessibilityAssistant = () => {
 
       if (!heard.text.trim() || normalizeText(heard.text).length < 2) {
         noMatchStreakRef.current += 1;
-        const noMatchThreshold = currentFlags.isPreAuthRoute ? 2 : 3;
+        const noMatchThreshold = currentFlags.isPreAuthRoute ? 2 : isPatientVoiceRoute ? 5 : 3;
+        if (isPatientVoiceRoute && noMatchStreakRef.current === 1) {
+          setVoiceStatusText(
+            "กำลังรอฟังคำสั่งอยู่ พูดได้เลย เช่น สแกนยา นัดแพทย์ แชทแพทย์ หรือ ดูการแจ้งเตือนล่าสุด",
+          );
+        }
         if (noMatchStreakRef.current >= noMatchThreshold) {
           const dynamicFlags = routeFlagsRef.current;
           const retryMessage = dynamicFlags.isPreAuthRoute
@@ -1159,6 +1198,7 @@ export const AccessibilityAssistant = () => {
       : "เริ่มโหมดใช้งานด้วยเสียงแล้ว พูดได้เลย เช่น สแกนยา สแกนความดัน นัดแพทย์ แชทแพทย์ หรือ ดูการแจ้งเตือนล่าสุด";
     setVoiceStatusText(startMessage);
     speakFeedback(startMessage, true);
+    pauseListeningUntilRef.current = Date.now() + estimatePromptLeadMs(startMessage);
     window.setTimeout(() => {
       void runVoiceLoop();
     }, 0);
